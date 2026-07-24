@@ -31,7 +31,8 @@ from forge.api.schemas.compat import ChatCompletionRequest
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
 from forge.orchestrators.inference import InferenceOrchestrator
-from forge.security.compat_auth import get_compat_user_id
+from forge.security.audit import audit_event, hash_audit_payload
+from forge.security.compat_auth import CompatIdentity, get_compat_identity, get_compat_user_id
 from forge.services.compat_chat import (
     estimate_token_count,
     prepare_compat_chat_payload,
@@ -78,20 +79,47 @@ async def list_models(
 @router.post("/v1/chat/completions")
 async def chat_completions(
     body: ChatCompletionRequest,
-    user_id: Annotated[str, Depends(get_compat_user_id)],
+    identity: Annotated[CompatIdentity, Depends(get_compat_identity)],
     db: Annotated[Database, Depends(get_db)],
     orchestrator: Annotated[InferenceOrchestrator, Depends(get_inference_orchestrator)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ):
     """Compat chat endpoint for Cursor, Continue, and other clients."""
-    if body.tools and not settings.allow_compat_tools:
-        raise HTTPException(403, "Tool calling is disabled on the Compat API")
+    user_id = identity.user_id
+    if body.tools:
+        if not settings.allow_compat_tools:
+            raise HTTPException(403, "Tool calling is disabled on the Compat API")
+        if not identity.tools_allowed:
+            raise HTTPException(
+                403,
+                "Inference API key is chat-only; use a session JWT for Compat tools",
+            )
 
     payload = await prepare_compat_chat_payload(body, user_id, db, settings)
     payload["user_id"] = user_id
     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
     created = int(time.time())
     use_provider = bool(payload.get("provider"))
+    audit_event(
+        "compat_chat",
+        user_id=user_id,
+        auth_method=identity.auth_method,
+        tools=bool(body.tools),
+        stream=bool(body.stream),
+        model=body.model,
+        message_count=len(body.messages),
+        messages_sha256=hash_audit_payload(
+            [
+                {
+                    "role": m.role,
+                    "content": m.content
+                    if isinstance(m.content, str)
+                    else str(m.content),
+                }
+                for m in body.messages
+            ]
+        ),
+    )
 
     # Local loads need free GPU; multi-GPU provider (local managed or cloud) does not
     # use the in-process model pool.

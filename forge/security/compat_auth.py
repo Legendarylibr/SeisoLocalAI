@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import secrets
-from typing import Annotated
+from dataclasses import dataclass
+from typing import Annotated, Literal
 
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials
@@ -15,14 +16,29 @@ from forge.security.auth import InvalidTokenError, bearer_scheme, decode_token
 
 _INFERENCE_KEY_PREFIX = "seiso_sk_"
 
+CompatAuthMethod = Literal["inference_key", "session"]
 
-async def get_compat_user_id(
+
+@dataclass(frozen=True, slots=True)
+class CompatIdentity:
+    """Authenticated Compat caller with capability scope."""
+
+    user_id: str
+    auth_method: CompatAuthMethod
+
+    @property
+    def tools_allowed(self) -> bool:
+        """Inference API key is chat-only; session JWT may use Compat tools when enabled."""
+        return self.auth_method == "session"
+
+
+async def get_compat_identity(
     request: Request,
     creds: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
     db: Annotated[Database, Depends(get_db)],
-) -> str:
-    """Accept session JWT or inference-scoped API key (never full admin via API key alone)."""
+) -> CompatIdentity:
+    """Accept session JWT/cookie or inference-scoped API key (never full admin via API key alone)."""
     try:
         if creds and creds.credentials:
             token = creds.credentials.strip()
@@ -38,13 +54,18 @@ async def get_compat_user_id(
                     raise HTTPException(
                         status.HTTP_401_UNAUTHORIZED, "No local user configured"
                     )
-                return str(user["id"])
+                identity = CompatIdentity(
+                    user_id=str(user["id"]), auth_method="inference_key"
+                )
+                request.state.compat_auth_method = identity.auth_method
+                return identity
             if token.startswith(_INFERENCE_KEY_PREFIX):
                 raise HTTPException(
                     status.HTTP_401_UNAUTHORIZED,
                     "Invalid inference API key",
                 )
             user_id = decode_token(token, settings)
+            auth_method: CompatAuthMethod = "session"
         else:
             cookie = request.cookies.get("seiso_token")
             if not cookie:
@@ -52,6 +73,7 @@ async def get_compat_user_id(
                     status.HTTP_401_UNAUTHORIZED, "Authentication required"
                 )
             user_id = decode_token(cookie, settings)
+            auth_method = "session"
     except InvalidTokenError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
 
@@ -59,4 +81,13 @@ async def get_compat_user_id(
     user = await db.get_user_by_id(user_id)
     if not user:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentication required")
-    return user_id
+    identity = CompatIdentity(user_id=user_id, auth_method=auth_method)
+    request.state.compat_auth_method = identity.auth_method
+    return identity
+
+
+async def get_compat_user_id(
+    identity: Annotated[CompatIdentity, Depends(get_compat_identity)],
+) -> str:
+    """Backward-compatible user-id dependency for Compat routes."""
+    return identity.user_id

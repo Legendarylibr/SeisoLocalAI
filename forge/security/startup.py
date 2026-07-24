@@ -11,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 _REMOTE_ACK_ENV = "SEISO_REMOTE_ACK"
 _REMOTE_DANGEROUS_ACK_ENV = "SEISO_REMOTE_DANGEROUS_ACK"
-_REMOTE_CODE_EXEC_ACK_ENV = "SEISO_REMOTE_CODE_EXEC_ACK"
 _NVIDIA_HOST_VENV_ACK_ENV = "SEISO_NVIDIA_HOST_VENV_ACK"
 _LEGACY_NVIDIA_HOST_VENV_ACK_ENV = "ADAPTIVE_RL_NVIDIA_HOST_VENV_ACK"
 
@@ -74,19 +73,12 @@ def validate_security_settings(settings: ForgeSettings) -> None:
             "Use a strong password, TLS reverse proxy, and keep tools/code-exec disabled."
         )
         # Code-exec is AST deny-list + best-effort limits, not a full OS sandbox.
-        # Fail closed under remote unless a dedicated override is set — the shared
-        # tools ack alone must not re-enable remote code execution.
-        if settings.allow_code_exec and not _env_enabled(_REMOTE_CODE_EXEC_ACK_ENV):
-            raise RuntimeError(
-                "Remote access with code execution requires a dedicated override: "
-                f"export {_REMOTE_CODE_EXEC_ACK_ENV}=1 "
-                "(code-exec is not a full OS sandbox; prefer keeping it disabled)"
-            )
+        # Refuse remote + code-exec entirely — no acknowledgement override.
         if settings.allow_code_exec:
-            logger.warning(
-                "Remote access with code-exec enabled via %s — high risk of RCE "
-                "if credentials leak (AST policy is not a full sandbox).",
-                _REMOTE_CODE_EXEC_ACK_ENV,
+            raise RuntimeError(
+                "Remote access cannot be combined with code execution "
+                "(AST policy is not a full OS sandbox). "
+                "Disable SEISO_ALLOW_CODE_EXEC or SEISO_ALLOW_REMOTE."
             )
 
         tools_dangerous = settings.allow_tools or settings.allow_compat_tools
