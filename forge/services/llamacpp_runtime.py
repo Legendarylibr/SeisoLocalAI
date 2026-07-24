@@ -38,6 +38,7 @@ def ensure_llamacpp_runtime(*, auto_install: bool | None = None) -> dict[str, An
                 "llamacpp": True,
                 "installed": False,
                 "error": None,
+                "gpu_offload": gpu_offload,
             }
 
     result = ensure_llamacpp_installed(auto_install=auto_install)
@@ -45,4 +46,5 @@ def ensure_llamacpp_runtime(*, auto_install: bool | None = None) -> dict[str, An
         "llamacpp": result["llamacpp"],
         "installed": result["installed"],
         "error": result["error"],
+        "gpu_offload": llamacpp_gpu_offload_supported() if result["llamacpp"] else False,
     }

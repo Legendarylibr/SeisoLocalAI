@@ -39,7 +39,9 @@ class DatasetAnalysisCacheEntry:
 
 _dataset_analysis_cache: dict[str, DatasetAnalysisCacheEntry] = {}
 # Content-addressed analysis results so validate/analyze don't rescans the same corpus.
-_dataset_analysis_results: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = {}
+_dataset_analysis_results: dict[
+    tuple[str, str, str, str], tuple[float, dict[str, Any]]
+] = {}
 _DATASET_RESULT_CACHE_MAX = 32
 
 
@@ -142,8 +144,9 @@ def run_dataset_analysis(
     *,
     dataset_format: DatasetFormat,
     sandbox_root: Path,
+    sandbox_user_id: str | None = None,
 ) -> dict[str, Any]:
-    key = (str(dataset), dataset_format.value, str(sandbox_root))
+    key = (str(dataset), dataset_format.value, str(sandbox_root), sandbox_user_id or "")
     now = time.monotonic()
     cached = _dataset_analysis_results.get(key)
     if cached is not None:
@@ -156,6 +159,7 @@ def run_dataset_analysis(
         dataset,
         dataset_format=dataset_format,
         sandbox_root=sandbox_root,
+        sandbox_user_id=sandbox_user_id,
     )
     if len(_dataset_analysis_results) >= _DATASET_RESULT_CACHE_MAX:
         oldest = min(_dataset_analysis_results.items(), key=lambda item: item[1][0])[0]

@@ -30,6 +30,9 @@ def test_codellama_compress_importable():
 def test_stage_order():
     assert "distill" in STAGE_ORDER
     assert "export" in STAGE_ORDER
+    # Quantize must precede evaluate/export so metrics reflect quantized weights.
+    assert STAGE_ORDER.index("quantize_gptq") < STAGE_ORDER.index("evaluate")
+    assert STAGE_ORDER.index("quantize_awq") < STAGE_ORDER.index("export")
 
 
 def test_build_pipeline_config_smoke(tmp_path: Path):

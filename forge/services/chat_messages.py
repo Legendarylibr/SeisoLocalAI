@@ -236,10 +236,12 @@ async def build_trusted_messages(
     track_model = model_id or (model_key if model_key != "default" else None)
 
     if thread_id:
-        thread, stored = await db.get_thread_with_messages(thread_id, user_id or "")
-        prior_model_key: str | None = None
-        if thread:
-            prior_model_key = thread.get("model_id") or None
+        if not user_id:
+            raise HTTPException(400, "user_id required with thread_id")
+        thread, stored = await db.get_thread_with_messages(thread_id, user_id)
+        if thread is None:
+            raise HTTPException(404, "Thread not found")
+        prior_model_key: str | None = thread.get("model_id") or None
 
         history: list[dict[str, str]] = [
             {
@@ -251,7 +253,7 @@ async def build_trusted_messages(
             if m.get("role") in ("user", "assistant")
         ]
         model_changed = bool(
-            track_model and thread and (thread.get("model_id") or None) != track_model
+            track_model and (thread.get("model_id") or None) != track_model
         )
         need_persist = (
             not history or history[-1]["role"] != "user" or history[-1]["content"] != content
@@ -263,10 +265,11 @@ async def build_trusted_messages(
                     "user",
                     content,
                     model_id=track_model if model_changed else None,
+                    user_id=user_id,
                 )
             history.append({"role": "user", "content": content, "created_at": ""})
         elif model_changed:
-            await db.update_thread_model(thread_id, track_model)
+            await db.update_thread_model(thread_id, track_model, user_id=user_id)
 
         return (
             prepare_chat_context(

@@ -15,7 +15,7 @@ CSRF_EXEMPT_PATHS: Final = frozenset(
     {
         "/api/auth/login",
         "/api/auth/register",
-        "/api/auth/reset-session",
+        # reset-session requires CSRF (cookie issued by GET /api/auth/status).
         "/api/auth/status",
         "/health",
         "/api/health",

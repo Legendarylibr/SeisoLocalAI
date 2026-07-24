@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import os
+import signal
 import subprocess
+import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -17,11 +21,16 @@ from seiso.nemo_rl.config_builder import build_command, write_launch_sidecar
 logger = logging.getLogger(__name__)
 
 
-def train_nemo_rl(config: NeMoRLConfig) -> Path:
+def train_nemo_rl(
+    config: NeMoRLConfig,
+    *,
+    should_stop: Callable[[], bool] | None = None,
+) -> Path:
     """Run (or dry-run) a NeMo RL recipe; return the Seiso output directory."""
     config.validate()
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    stop_fn = should_stop or (lambda: False)
 
     if config.sandbox_root is not None:
         from seiso.security import assert_within
@@ -47,6 +56,9 @@ def train_nemo_rl(config: NeMoRLConfig) -> Path:
         _write_manifest(config, output_dir, nemo_root=nemo_root, status="dry_run")
         return output_dir
 
+    if stop_fn():
+        raise InterruptedError("NeMo RL cancelled before launch")
+
     uv = resolve_uv_executable(config.uv_executable)
     cmd = build_command(config, nemo_root=nemo_root, uv=uv)
     env = os.environ.copy()
@@ -54,23 +66,59 @@ def train_nemo_rl(config: NeMoRLConfig) -> Path:
     logger.info("Launching NeMo RL: cwd=%s cmd=%s", nemo_root, " ".join(cmd))
 
     try:
-        completed = subprocess.run(
+        proc = subprocess.Popen(
             cmd,
             cwd=str(nemo_root),
             env=env,
-            check=False,
+            start_new_session=True,
         )
     except OSError as exc:
         raise RuntimeError(f"Failed to launch NeMo RL: {exc}") from exc
 
-    if completed.returncode != 0:
+    code: int | None = None
+    try:
+        while True:
+            if stop_fn():
+                _terminate_process_group(proc)
+                raise InterruptedError("NeMo RL cancelled")
+            code = proc.poll()
+            if code is not None:
+                break
+            time.sleep(0.5)
+    except InterruptedError:
+        raise
+    except Exception:
+        _terminate_process_group(proc)
+        raise
+
+    if code != 0:
         raise RuntimeError(
-            f"NeMo RL exited with code {completed.returncode}. "
+            f"NeMo RL exited with code {code}. "
             f"See {sidecar} for the exact launch command and overrides."
         )
 
     _write_manifest(config, output_dir, nemo_root=nemo_root, status="completed")
     return output_dir
+
+
+def _terminate_process_group(proc: subprocess.Popen[Any]) -> None:
+    """Best-effort terminate of the NeMo RL process group on cancel."""
+    if proc.poll() is not None:
+        return
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except (ProcessLookupError, PermissionError, OSError):
+        with contextlib.suppress(Exception):
+            proc.terminate()
+    deadline = time.monotonic() + 10.0
+    while proc.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.2)
+    if proc.poll() is None:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError, OSError):
+            with contextlib.suppress(Exception):
+                proc.kill()
 
 
 def _write_manifest(

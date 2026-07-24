@@ -128,11 +128,21 @@ def export_checkpoint(
             results[fmt.value] = dest
 
         elif fmt in (ExportFormat.BASE, ExportFormat.FULL):
-            if kind == "lora":
+            looks_like_adapter = (ckpt / "adapter_config.json").is_file() or (
+                (ckpt / "adapter_model.safetensors").is_file()
+                or (ckpt / "adapter_model.bin").is_file()
+            )
+            if kind == "lora" or (kind == "unknown" and looks_like_adapter):
                 raise ValueError(
                     f"Cannot export LoRA-only checkpoint as {fmt.value!r}; "
                     "use formats 'lora' and/or 'merged' instead "
-                    f"(checkpoint={ckpt})"
+                    f"(checkpoint={ckpt}, kind={kind})"
+                )
+            if kind == "unknown":
+                raise ValueError(
+                    f"Cannot export checkpoint as {fmt.value!r}: unable to detect "
+                    "full weights (missing config.json / adapter_config.json). "
+                    f"Refuse to copytree unknown trees as full/base (checkpoint={ckpt})"
                 )
             dest = out_root / ("full" if fmt == ExportFormat.FULL else "base")
             if ckpt.exists():
@@ -352,7 +362,9 @@ def _resolve_merge_base_model(checkpoint: Path) -> str:
     if not isinstance(adapter_cfg, dict):
         adapter_cfg = {}
 
-    for key in ("base_model_name_or_path", "seiso_original_base_model"):
+    # Prefer the Seiso-recorded original base (local or Hub) over a possibly stale
+    # PEFT base_model_name_or_path that points at a missing cache dir.
+    for key in ("seiso_original_base_model", "base_model_name_or_path"):
         value = adapter_cfg.get(key)
         if isinstance(value, str) and value.strip():
             candidate = Path(value).expanduser()
@@ -363,8 +375,8 @@ def _resolve_merge_base_model(checkpoint: Path) -> str:
     for key in (
         "resolved_model_path",
         "base_model_path",
-        "model_id",
         "original_model_id",
+        "model_id",
     ):
         value = manifest.get(key)
         if not isinstance(value, str) or not value.strip():
@@ -372,12 +384,16 @@ def _resolve_merge_base_model(checkpoint: Path) -> str:
         candidate = Path(value).expanduser()
         if candidate.is_dir() and (candidate / "config.json").is_file():
             return str(candidate.resolve())
-        if not candidate.is_dir():
+        if "/" in value and not candidate.is_absolute():
+            # Hub-style id (org/model) — fall through to load_from_hub.
+            return value
+        if not candidate.exists():
             return value
 
-    base_id = adapter_cfg.get("base_model_name_or_path", "")
-    if isinstance(base_id, str) and base_id.strip():
-        return base_id.strip()
+    for key in ("seiso_original_base_model", "base_model_name_or_path"):
+        base_id = adapter_cfg.get(key, "")
+        if isinstance(base_id, str) and base_id.strip():
+            return base_id.strip()
 
     raise ValueError(
         f"Cannot resolve base model for merge from {checkpoint}. "

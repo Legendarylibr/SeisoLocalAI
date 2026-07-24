@@ -17,10 +17,10 @@ STAGE_ORDER = (
     "distill",
     "prune",
     "finetune",
-    "evaluate",
-    "export",
     "quantize_gptq",
     "quantize_awq",
+    "evaluate",
+    "export",
 )
 
 _MODEL_DEFAULTS: dict[str, str] | None = None
@@ -170,24 +170,39 @@ def build_pipeline_config(
         DistillConfig(teacher_model="", alpha=0.0, temperature=1.0),
         finetune_overrides,
     )
-    gptq_file = dict(config_blob.get("gptq") or config_blob.get("awq") or {})
-    gptq_overrides: dict[str, Any] = {
-        "seed": seed,
-        "calibration_samples": int(
-            payload.get(
+    gptq_file = dict(config_blob.get("gptq") or {})
+    awq_file = dict(config_blob.get("awq") or {})
+    # Shared calibration default; each backend keeps its own bits/group knobs.
+    calib_default = int(
+        payload.get(
+            "calibration_samples",
+            gptq_file.get(
                 "calibration_samples",
-                gptq_file.get(
+                awq_file.get(
                     "calibration_samples", preset.get("calibration_samples", 32)
                 ),
-            )
-        ),
+            ),
+        )
+    )
+    gptq_overrides: dict[str, Any] = {
+        "seed": seed,
+        "calibration_samples": calib_default,
+    }
+    awq_overrides: dict[str, Any] = {
+        "seed": seed,
+        "calibration_samples": calib_default,
     }
     for key in ("bits", "group_size", "desc_act", "damp_percent", "calibration_seq_len"):
         if key in gptq_file:
             gptq_overrides[key] = gptq_file[key]
+        if key in awq_file:
+            awq_overrides[key] = awq_file[key]
         if key in payload:
+            # Payload overrides apply to whichever stages are enabled.
             gptq_overrides[key] = payload[key]
+            awq_overrides[key] = payload[key]
     gptq_cfg = merge_dataclass(GPTQConfig(), gptq_overrides)
+    awq_cfg = merge_dataclass(GPTQConfig(), awq_overrides)
 
     model_dir = payload.get("model_dir")
     if model_dir:
@@ -209,7 +224,7 @@ def build_pipeline_config(
         "distill": distill_cfg,
         "finetune": finetune_cfg,
         "gptq": gptq_cfg,
-        "awq": gptq_cfg,
+        "awq": awq_cfg,
         "prune": {
             "ratio": float(payload.get("prune_ratio", preset.get("prune_ratio", 0.25))),
             "method": str(payload.get("prune_method", "magnitude")),

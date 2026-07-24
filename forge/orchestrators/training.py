@@ -180,6 +180,20 @@ class TrainingOrchestrator(Orchestrator):
                     with contextlib.suppress(Exception):
                         await asyncio.shield(training_future)
                     raise
+                except Exception as exc:
+                    # Cooperative slime/NeMo cancel raises InterruptedError in-thread.
+                    if isinstance(exc, InterruptedError) or (
+                        isinstance(exc, RuntimeError)
+                        and "cancelled" in str(exc).lower()
+                    ):
+                        raise asyncio.CancelledError() from exc
+                    # Executor wraps some exceptions; unwrap common cancel signals.
+                    cause = getattr(exc, "__cause__", None) or getattr(
+                        exc, "__context__", None
+                    )
+                    if isinstance(cause, InterruptedError):
+                        raise asyncio.CancelledError() from exc
+                    raise
                 from seiso.training.cancel import is_requested
 
                 if is_requested(job_id):
@@ -309,6 +323,11 @@ class TrainingOrchestrator(Orchestrator):
         code = await proc.wait()
         cfg_path.unlink(missing_ok=True)
         if code != 0:
+            from seiso.training.cancel import is_requested
+
+            rec = self.get_job(job_id)
+            if is_requested(job_id) or (rec is not None and rec.cancel_requested):
+                raise asyncio.CancelledError()
             raise RuntimeError(f"Distributed training exited with code {code}")
 
         checkpoints = sorted(

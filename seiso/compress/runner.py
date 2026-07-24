@@ -52,10 +52,19 @@ def _resolve_model_dir(cfg: dict[str, Any], run_dir: Path, stage: str) -> Path:
         path = Path(cfg["model_dir"])
         _assert_full_model_dir(path, stage)
         return path
+    pruned = run_dir / "pruned"
+    distilled = run_dir / "distilled"
+    # Prefer pruned when present; otherwise finetune from distilled.
+    if pruned.is_dir():
+        finetune_in = pruned
+    elif distilled.is_dir():
+        finetune_in = distilled
+    else:
+        finetune_in = pruned
     stage_inputs = {
         "distill": None,
-        "prune": run_dir / "distilled",
-        "finetune": run_dir / "pruned",
+        "prune": distilled,
+        "finetune": finetune_in,
         "evaluate": _latest_model_dir(run_dir),
         "export": _latest_model_dir(run_dir),
         "quantize_gptq": _latest_model_dir(run_dir),

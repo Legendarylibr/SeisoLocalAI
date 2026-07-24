@@ -24,22 +24,23 @@ def build_hydra_overrides(config: NeMoRLConfig) -> list[str]:
         if isinstance(config.recipe, NeMoRLRecipe)
         else NeMoRLRecipe(str(config.recipe))
     )
+    grpo_rpp: int | None = None
     if recipe in {NeMoRLRecipe.GRPO, NeMoRLRecipe.SMOKE}:
         if config.max_steps is not None:
             overrides.append(f"grpo.max_num_steps={int(config.max_steps)}")
         # Always override generations/prompt so upstream recipe defaults of 1
         # cannot silently disable grouped GRPO advantages.
-        rpp = (
+        grpo_rpp = (
             int(config.rollouts_per_prompt)
             if config.rollouts_per_prompt is not None
             else 4
         )
-        if rpp < 2:
+        if grpo_rpp < 2:
             raise ValueError(
                 "rollouts_per_prompt must be >= 2 for NeMo RL GRPO/smoke "
-                f"(got {rpp})"
+                f"(got {grpo_rpp})"
             )
-        overrides.append(f"grpo.num_generations_per_prompt={rpp}")
+        overrides.append(f"grpo.num_generations_per_prompt={grpo_rpp}")
         if config.num_prompts_per_step is not None:
             overrides.append(
                 f"grpo.num_prompts_per_step={int(config.num_prompts_per_step)}"
@@ -57,7 +58,28 @@ def build_hydra_overrides(config: NeMoRLConfig) -> list[str]:
         overrides.append("policy.lora_cfg.enabled=true")
 
     for extra in config.extra_overrides:
-        overrides.append(str(extra).strip())
+        item = str(extra).strip()
+        if not item:
+            continue
+        # Refuse extras that would undo the G>=2 GRPO invariant (Hydra last-wins).
+        key, _, value = item.partition("=")
+        if key.strip() == "grpo.num_generations_per_prompt":
+            try:
+                generations = int(value.strip())
+            except ValueError as exc:
+                raise ValueError(
+                    f"invalid grpo.num_generations_per_prompt override: {item!r}"
+                ) from exc
+            if generations < 2:
+                raise ValueError(
+                    "extra_overrides cannot set grpo.num_generations_per_prompt < 2 "
+                    f"(got {value!r}); grouped GRPO requires G>=2"
+                )
+        overrides.append(item)
+
+    # Re-assert GRPO group size last so Hydra last-wins cannot undo it.
+    if grpo_rpp is not None:
+        overrides.append(f"grpo.num_generations_per_prompt={grpo_rpp}")
     return overrides
 
 

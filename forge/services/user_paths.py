@@ -230,6 +230,8 @@ def pick_user_download_file(
 
 def assert_llama_cpp_binary(target: str | Path) -> Path:
     """Ensure llama.cpp binary path is an existing regular file in allowed locations."""
+    import os
+
     source = Path(target).expanduser()
     if not source.is_absolute():
         raise SecurityError("llama_cpp_binary must be an absolute path")
@@ -244,10 +246,18 @@ def assert_llama_cpp_binary(target: str | Path) -> Path:
     banned_prefixes = ("/tmp/", "/var/tmp/", "/private/tmp/", "/dev/", "/proc/")
     if any(path_str.startswith(prefix) for prefix in banned_prefixes) and not in_venv:
         raise SecurityError("llama_cpp_binary cannot be under temporary or device paths")
-    system_prefixes = ("/usr/", "/opt/", "/bin/", "/sbin/", "/Users/", "/home/")
-    if not (
-        any(path_str.startswith(prefix) for prefix in system_prefixes)
-        or in_venv
-    ):
-        raise SecurityError("llama_cpp_binary is outside allowed system locations")
+    # Do not allow arbitrary home-tree binaries (~/.seiso payloads, etc.).
+    system_prefixes = ("/usr/", "/opt/", "/bin/", "/sbin/")
+    extra_raw = os.environ.get("ADAPTIVE_RL_LLAMA_CPP_BINARY_PREFIXES", "").strip()
+    extra_prefixes = tuple(
+        p if p.endswith("/") else f"{p}/"
+        for p in (part.strip() for part in extra_raw.split(os.pathsep))
+        if p
+    )
+    allowed = system_prefixes + extra_prefixes
+    if not (any(path_str.startswith(prefix) for prefix in allowed) or in_venv):
+        raise SecurityError(
+            "llama_cpp_binary is outside allowed system locations "
+            "(/usr|/opt|/bin|/sbin, a venv, or ADAPTIVE_RL_LLAMA_CPP_BINARY_PREFIXES)"
+        )
     return resolved

@@ -23,6 +23,7 @@ class RLQuantMixin:
         job_id: str,
         status: str,
         *,
+        user_id: str | None = None,
         output_dir: str | None = None,
         recommendation_path: str | None = None,
         recommendation_json: dict | None = None,
@@ -30,15 +31,16 @@ class RLQuantMixin:
         error_text: str | None = None,
     ) -> None:
         now = now_iso()
+        owner_clause = " AND user_id = ?" if user_id is not None else ""
         async with self._conn() as conn:
             await conn.execute(
-                """UPDATE rl_quant_jobs SET status = ?, updated_at = ?,
+                f"""UPDATE rl_quant_jobs SET status = ?, updated_at = ?,
                    output_dir = COALESCE(?, output_dir),
                    recommendation_path = COALESCE(?, recommendation_path),
                    recommendation_json = COALESCE(?, recommendation_json),
                    gguf_quants_json = COALESCE(?, gguf_quants_json),
                    error_text = COALESCE(?, error_text)
-                   WHERE id = ?""",
+                   WHERE id = ?{owner_clause}""",  # nosec B608
                 (
                     status,
                     now,
@@ -52,6 +54,7 @@ class RLQuantMixin:
                     json.dumps(gguf_quants) if gguf_quants is not None else None,
                     error_text,
                     job_id,
+                    *((user_id,) if user_id is not None else ()),
                 ),
             )
             await conn.commit()

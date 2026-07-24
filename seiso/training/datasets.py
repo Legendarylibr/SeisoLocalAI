@@ -317,16 +317,18 @@ def _ensure_eos(
         return ids, labels, attention
     if len(ids) < max_len:
         ids = ids + [eos_id]
-        # Supervise EOS when the prior token was supervised; else still teach stop.
-        labels = labels + [eos_id]
+        # Only supervise EOS when the prior token was supervised. Appending a
+        # supervised stop after a masked (prompt) position violates response-only.
+        labels = labels + ([eos_id] if labels[-1] != -100 else [-100])
         attention = attention + [1]
         return ids, labels, attention
-    # At budget: replace last token with EOS and supervise it.
+    # At budget: replace last token with EOS; supervise only if it was supervised.
     ids = list(ids)
     labels = list(labels)
     attention = list(attention)
     ids[-1] = eos_id
-    labels[-1] = eos_id
+    if labels[-1] != -100:
+        labels[-1] = eos_id
     attention[-1] = 1
     return ids, labels, attention
 
@@ -435,7 +437,13 @@ def _tokenize_chat_row(
         if full_ids is not None and labels is None:
             labels = _labels_from_assistant_spans(tokenizer, messages, full_ids)
         if full_ids is not None and labels is None:
-            labels = _labels_last_assistant_turn(tokenizer, messages, full_ids)
+            # Last-turn fallback is only safe for single-assistant samples.
+            # Multi-turn would silently drop earlier assistant turns.
+            n_asst = sum(
+                1 for m in messages if str(m.get("role", "")).lower() == "assistant"
+            )
+            if n_asst <= 1:
+                labels = _labels_last_assistant_turn(tokenizer, messages, full_ids)
     else:
         full_ids = _encode_chat_ids(tokenizer, messages, add_generation_prompt=False)
         if full_ids is not None:

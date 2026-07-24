@@ -208,6 +208,7 @@ async def start_export(
         await db.update_export_job_status(
             job_id,
             job.status.value,
+            user_id=user_id,
             output_paths=job.result.get("outputs"),
             error_text=job.error if job.status.value == "failed" else None,
         )
@@ -230,7 +231,9 @@ async def start_export(
                 )
 
     async def _failed(message: str) -> None:
-        await db.update_export_job_status(job_id, "failed", error_text=message)
+        await db.update_export_job_status(
+            job_id, "failed", user_id=user_id, error_text=message
+        )
 
     async def _run() -> None:
         await run_orchestrated_job(

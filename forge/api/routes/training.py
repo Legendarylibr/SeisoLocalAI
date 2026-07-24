@@ -27,6 +27,7 @@ from forge.api.schemas.training import (
 )
 from forge.config import ForgeSettings, get_settings
 from forge.db.store import Database
+from forge.orchestrators.base import JobStatus
 from forge.orchestrators.training import TrainingOrchestrator
 from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
@@ -117,7 +118,8 @@ async def training_recommendations(
         profile,
         model_id=model_id,
         dataset=str(resolved_dataset),
-        sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
+        sandbox_root=Path(settings.data_dir),
+        sandbox_user_id=user_id,
     )
 
 
@@ -139,7 +141,8 @@ async def _analyze_dataset_shared(
         run_dataset_analysis,
         ds,
         dataset_format=ds_fmt,
-        sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
+        sandbox_root=Path(settings.data_dir),
+        sandbox_user_id=user_id,
     )
     if require_valid and not analysis.get("valid"):
         raise ValueError("No valid training samples after preprocessing")
@@ -337,7 +340,8 @@ async def start_training(
                 run_dataset_analysis,
                 dataset_for_val,
                 dataset_format=ds_fmt,
-                sandbox_root=Path(settings.data_dir) / "uploads" / user_id,
+                sandbox_root=Path(settings.data_dir),
+                sandbox_user_id=user_id,
             )
             if not analysis.get("valid"):
                 raise ValueError("No valid training samples after preprocessing")
@@ -407,7 +411,9 @@ async def start_training(
     payload = {
         "config": {
             **training_config,
-            "sandbox_root": str(settings.data_dir / "uploads" / user_id),
+            # Match assert_user_training_config: full data dir + per-user scope.
+            "sandbox_root": str(settings.data_dir),
+            "sandbox_user_id": user_id,
             "extra": extra,
         },
         "output_dir": str(settings.checkpoints_dir / user_id / job_id),
@@ -433,6 +439,11 @@ async def start_training(
             await orchestrator.start(job_id, payload)
             job = await orchestrator.wait_for(job_id)
             if job:
+                # Never overwrite a sticky terminal cancel written by cancel_training.
+                existing = await db.get_training_job(job_id, user_id)
+                existing_status = str((existing or {}).get("status") or "").lower()
+                if existing_status == "cancelled" and job.status.value == "completed":
+                    job.status = JobStatus.CANCELLED
                 metrics_payload = serialize_metrics_payload(
                     orchestrator.get_metrics(job_id),
                     job.result.get("metrics_summary"),
@@ -451,6 +462,7 @@ async def start_training(
                 if job.status.value == "completed" and job.result.get(
                     "checkpoint_path"
                 ):
+                    export_error: str | None = None
                     try:
                         from forge.services.model_registry import (
                             register_export_outputs,
@@ -517,13 +529,26 @@ async def start_training(
                                 outputs={k: str(v) for k, v in outputs.items()},
                                 job_id=f"train-{job_id}",
                             )
-                    except Exception:
+                    except Exception as exc:
+                        export_error = str(exc) or type(exc).__name__
                         logger.exception(
-                            "Post-training registration/export failed for job %s "
-                            "(training remains completed)",
+                            "Post-training registration/export failed for job %s",
                             job_id,
                         )
+                    if export_error and body.export_on_complete:
+                        # Training succeeded but requested export failed — surface it.
+                        await db.update_job_status(
+                            job_id,
+                            "completed",
+                            checkpoint_path=job.result.get("checkpoint_path"),
+                            metrics=metrics_payload,
+                            error_text=f"export_on_complete failed: {export_error}",
+                            user_id=user_id,
+                        )
         except Exception as exc:
+            existing = await db.get_training_job(job_id, user_id)
+            if str((existing or {}).get("status") or "").lower() == "cancelled":
+                return
             await db.update_job_status(
                 job_id,
                 "failed",
@@ -550,7 +575,8 @@ async def get_training_metrics(
 ) -> dict:
     if not await db.get_training_job(job_id, user_id):
         raise HTTPException(404, "Job not found")
-    assert_job_owner(orchestrator, job_id, user_id)
+    if orchestrator.get_job(job_id):
+        assert_job_owner(orchestrator, job_id, user_id)
 
     live = orchestrator.get_metrics(job_id)
     if live:
@@ -583,7 +609,8 @@ async def stream_training(
 ):
     if not await db.get_training_job(job_id, user_id):
         raise HTTPException(404, "Job not found")
-    assert_job_owner(orchestrator, job_id, user_id)
+    if orchestrator.get_job(job_id):
+        assert_job_owner(orchestrator, job_id, user_id)
 
     async def event_gen():
         queue: asyncio.Queue[tuple[str, str] | None] = asyncio.Queue()

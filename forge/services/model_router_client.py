@@ -24,7 +24,8 @@ def _validate_router_url(url: str) -> str:
     if parsed.scheme not in ("http", "https") or not parsed.netloc:
         raise ValueError("model_router_url must be a valid http(s) URL")
     host = (parsed.hostname or "").lower()
-    if host not in {"127.0.0.1", "localhost", "::1"} and not host.endswith(".internal"):
+    # Local-first: loopback only. .internal hosts are not accepted (SSRF risk).
+    if host not in {"127.0.0.1", "localhost", "::1"}:
         raise ValueError(
             "model_router_url must point to localhost for local-first routing"
         )

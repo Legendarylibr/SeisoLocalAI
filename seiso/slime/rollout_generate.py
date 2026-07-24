@@ -70,8 +70,12 @@ def format_generation_prompt(
                     add_generation_prompt=True,
                 )
             )
-        except Exception:
-            pass
+        except Exception as exc:
+            raise ValueError(
+                "apply_chat_template failed for slime rollouts; fix the tokenizer "
+                "chat template or set apply_chat_template=false. "
+                f"({exc})"
+            ) from exc
     # Fallback: concatenate message contents (no template).
     return "\n".join(m["content"] for m in messages)
 

@@ -446,7 +446,11 @@ def _http_rollout_status(
     mapped = _normalize_rollout_finish_status(finish_reason)
     if mapped is not None:
         return mapped
-    # Fall back to token/EOS heuristic when the engine omitted finish_reason.
+    # Engines that omit finish_reason usually still returned a real completion.
+    # EOS-in-ids on retokenized text is unreliable (EOS usually stripped) and
+    # falsely marks samples as length, wiping GRPO rewards.
+    if n_tokens > 0 or str(completion_text or "").strip():
+        return "stop"
     return _rollout_status(response_tokens, eos_token_id)
 
 

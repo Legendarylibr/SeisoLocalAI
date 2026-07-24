@@ -39,9 +39,19 @@ def run_rl_quant_job(
             on_log(msg)
 
     requested_stages = payload.get("stages")
+    if not requested_stages:
+        from seiso.rl_quant.presets import lookup_preset
+
+        product = lookup_preset(payload.get("preset"))
+        if product is not None:
+            requested_stages = list(product.stages)
     if requested_stages:
         _log(f"Requested stages: {', '.join(str(s) for s in requested_stages)}")
-        if "auto_sweep" not in requested_stages:
+        # Preset/stage lists that omit auto_sweep default the sweep off, but an
+        # explicit auto_sweep/sweep flag in the payload still wins.
+        if "auto_sweep" not in requested_stages and (
+            "auto_sweep" not in payload and "sweep" not in payload
+        ):
             payload = {**payload, "auto_sweep": False}
 
     sweep_result: dict[str, Any] | None = None

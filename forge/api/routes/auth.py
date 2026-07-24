@@ -64,10 +64,15 @@ class OnboardingStatus(BaseModel):
 
 @router.get("/status", response_model=OnboardingStatus)
 async def onboarding_status(
+    request: Request,
+    response: Response,
     db: Annotated[Database, Depends(get_db)],
 ) -> OnboardingStatus:
     count = await db.user_count()
     settings = get_settings()
+    # Issue CSRF before reset-session / register so pre-auth forms can double-submit.
+    if not request.cookies.get(CSRF_COOKIE):
+        set_csrf_cookie(response, generate_csrf_token(), secure=settings.cookie_secure)
     return OnboardingStatus(
         needs_onboarding=count == 0,
         storage_mode=settings.storage_mode,

@@ -1030,6 +1030,14 @@ def test_backprop_uses_no_sync_until_final_microbatch(tmp_path):
     class _FakeDDP:
         def __init__(self) -> None:
             self.no_sync_calls = 0
+            self.training = True
+
+        def train(self, mode: bool = True):
+            self.training = mode
+            return self
+
+        def eval(self):
+            return self.train(False)
 
         def no_sync(self):
             self.no_sync_calls += 1

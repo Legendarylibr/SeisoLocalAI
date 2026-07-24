@@ -99,15 +99,27 @@ async def test_reset_session_returns_instance_to_onboarding(app):
         )
         assert thread.status_code == 200
 
+        csrf = client.cookies.get("seiso_csrf")
+        assert csrf, "register should issue CSRF cookie"
+        csrf_headers = {"X-CSRF-Token": csrf}
+
         bad = await client.post(
             "/api/auth/reset-session",
             json={"confirmation": "wrong"},
+            headers=csrf_headers,
         )
         assert bad.status_code == 400
+
+        blocked = await client.post(
+            "/api/auth/reset-session",
+            json={"confirmation": "RESET"},
+        )
+        assert blocked.status_code == 403
 
         reset = await client.post(
             "/api/auth/reset-session",
             json={"confirmation": "RESET"},
+            headers=csrf_headers,
         )
         assert reset.status_code == 200
         assert reset.json()["needs_onboarding"] is True

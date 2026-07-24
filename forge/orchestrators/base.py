@@ -64,6 +64,7 @@ class JobRecord:
     )
     result: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
+    cancel_requested: bool = False
 
 
 class Orchestrator(ABC):
@@ -215,11 +216,21 @@ class Orchestrator(ABC):
                 for line in list(self._log_buffers.get(job_id, ())):
                     yield line
             job = self.get_job(job_id)
-            if job and job.status in (
+            terminal = job and job.status in (
                 JobStatus.COMPLETED,
                 JobStatus.FAILED,
                 JobStatus.CANCELLED,
-            ):
+            )
+            # Drain anything queued during replay before bailing on terminal status.
+            while True:
+                try:
+                    msg = queue.get_nowait()
+                except asyncio.QueueEmpty:
+                    break
+                if msg is None:
+                    return
+                yield msg
+            if terminal:
                 return
             while True:
                 try:
@@ -231,6 +242,15 @@ class Orchestrator(ABC):
                         JobStatus.FAILED,
                         JobStatus.CANCELLED,
                     ):
+                        # Drain remaining subscriber lines (e.g. final ERROR).
+                        while True:
+                            try:
+                                msg = queue.get_nowait()
+                            except asyncio.QueueEmpty:
+                                break
+                            if msg is None:
+                                return
+                            yield msg
                         break
                     continue
                 if msg is None:
@@ -243,9 +263,22 @@ class Orchestrator(ABC):
         if job_id not in self._jobs:
             raise KeyError(f"Unknown job: {job_id}")
         rec = self._jobs[job_id]
-        if rec.status != JobStatus.PENDING:
+        if rec.status != JobStatus.PENDING or rec.cancel_requested:
             raise RuntimeError(f"Job {job_id} is already {rec.status}")
         await self._reserve_resource(job_id, rec)
+        # Re-check after await: cancel() may have won during resource reserve.
+        if rec.status != JobStatus.PENDING or rec.cancel_requested:
+            await self._release_resource(job_id)
+            if rec.status == JobStatus.CANCELLED or rec.cancel_requested:
+                if rec.status != JobStatus.CANCELLED:
+                    rec.status = JobStatus.CANCELLED
+                    self._emit_log(job_id, "Job cancelled before start")
+                    self._emit_event(
+                        job_id, "status", {"status": JobStatus.CANCELLED.value}
+                    )
+                    self._finish_logs(job_id)
+                return
+            raise RuntimeError(f"Job {job_id} is already {rec.status}")
         rec.status = JobStatus.RUNNING
         self._emit_event(job_id, "status", {"status": JobStatus.RUNNING.value})
 
@@ -302,6 +335,16 @@ class Orchestrator(ABC):
         rec = self._jobs[job_id]
         try:
             result = await self.execute(job_id, payload)
+            # Cancel may win the race after execute returns (no await between
+            # return and status write). Never overwrite a cancel with completed.
+            if rec.cancel_requested or rec.status == JobStatus.CANCELLED:
+                rec.result = result
+                rec.status = JobStatus.CANCELLED
+                self._emit_log(job_id, "Job cancelled")
+                self._emit_event(
+                    job_id, "status", {"status": JobStatus.CANCELLED.value}
+                )
+                return
             rec.result = result
             rec.status = JobStatus.COMPLETED
             self._emit_event(
@@ -309,6 +352,7 @@ class Orchestrator(ABC):
             )
             self._emit_event(job_id, "result", result)
         except asyncio.CancelledError:
+            rec.cancel_requested = True
             rec.status = JobStatus.CANCELLED
             self._emit_log(job_id, "Job cancelled")
             self._emit_event(
@@ -364,6 +408,7 @@ class Orchestrator(ABC):
         rec = self._jobs.get(job_id)
         if rec is None:
             return False
+        rec.cancel_requested = True
         # PENDING jobs usually have no task yet (spawn races create_job → start).
         # Mark cancelled so a late start() refuses to run.
         if (
@@ -378,6 +423,8 @@ class Orchestrator(ABC):
             )
             self._finish_logs(job_id)
             return True
+        if rec.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
+            return rec.status == JobStatus.CANCELLED
         proc = self._subprocesses.get(job_id)
         if proc and proc.returncode is None:
             self._terminate_subprocess(job_id, proc)
@@ -390,6 +437,15 @@ class Orchestrator(ABC):
         task = self._tasks.get(job_id)
         if task and not task.done():
             task.cancel()
+            return True
+        # Task already finished execute but _run may not have written status yet.
+        if rec.status in (JobStatus.PENDING, JobStatus.RUNNING):
+            rec.status = JobStatus.CANCELLED
+            self._emit_log(job_id, "Job cancelled")
+            self._emit_event(
+                job_id, "status", {"status": JobStatus.CANCELLED.value}
+            )
+            self._finish_logs(job_id)
             return True
         return proc is not None
 

@@ -101,6 +101,29 @@ def _verify_proposed(
     return int(match.cumprod(dim=1).sum(dim=1).item())
 
 
+def _target_ids_for_continuation(
+    target_tokenizer: Any, current_text: str, continuation: str
+) -> list[int]:
+    """Map draft continuation text into target token ids without BPE junction splits.
+
+    Encoding ``continuation`` alone can diverge at the boundary vs encoding the
+    full ``current_text + continuation`` string; take the suffix delta instead.
+    """
+    if not continuation:
+        return []
+    encode = getattr(target_tokenizer, "encode", None)
+    if encode is None:
+        ids = target_tokenizer(continuation, add_special_tokens=False)
+        raw = ids["input_ids"] if isinstance(ids, dict) else ids
+        return list(raw)[: len(continuation)]
+    full = list(encode(current_text + continuation, add_special_tokens=False))
+    prefix = list(encode(current_text, add_special_tokens=False))
+    if len(full) >= len(prefix) and full[: len(prefix)] == prefix:
+        return full[len(prefix) :]
+    # Fallback when prefix is not an exact token prefix (rare tokenizer quirks).
+    return list(encode(continuation, add_special_tokens=False))
+
+
 def _propose_with_dflash_draft(
     draft_llm: Any,
     target_tokenizer: Any,
@@ -120,7 +143,9 @@ def _propose_with_dflash_draft(
     if not proposed_text:
         return []
 
-    proposed_ids = target_tokenizer.encode(proposed_text, add_special_tokens=False)
+    proposed_ids = _target_ids_for_continuation(
+        target_tokenizer, current_text, proposed_text
+    )
     return proposed_ids[:k]
 
 
@@ -138,12 +163,18 @@ def _iter_speculative_tokens_naive(
     target = bundle.target_model
     draft = bundle.draft_model
     tok = bundle.target_tokenizer
+    draft_tok = bundle.draft_tokenizer or tok
+    shared_vocab = draft_tok is tok
 
     target_device = _model_device(target)
     draft_device = _model_device(draft)
 
     input_ids_t = tok(prompt, return_tensors="pt").input_ids.to(target_device)
-    input_ids_d = input_ids_t.to(draft_device)
+    input_ids_d = (
+        input_ids_t.to(draft_device)
+        if shared_vocab
+        else draft_tok(prompt, return_tensors="pt").input_ids.to(draft_device)
+    )
 
     tokens_generated = 0
     decoded_len = len(tok.decode(input_ids_t[0], skip_special_tokens=True))
@@ -167,18 +198,32 @@ def _iter_speculative_tokens_naive(
                 proposed.append(next_id)
                 draft_ids = torch.cat([draft_ids, next_id.to(draft_ids.device)], dim=1)
 
-            proposed_ids_t = (
-                torch.cat(proposed, dim=1).to(target_device)
-                if proposed
-                else input_ids_t[:, :0]
-            )
+            if shared_vocab:
+                proposed_ids_t = (
+                    torch.cat(proposed, dim=1).to(target_device)
+                    if proposed
+                    else input_ids_t[:, :0]
+                )
+            else:
+                # Bridge via text + prefix-delta encode into target vocab.
+                draft_piece = draft_tok.decode(
+                    torch.cat(proposed, dim=1)[0], skip_special_tokens=True
+                ) if proposed else ""
+                current_text = tok.decode(input_ids_t[0], skip_special_tokens=True)
+                mapped = _target_ids_for_continuation(tok, current_text, draft_piece)[:k]
+                proposed_ids_t = (
+                    torch.tensor([mapped], device=target_device, dtype=input_ids_t.dtype)
+                    if mapped
+                    else input_ids_t[:, :0]
+                )
+                k = int(proposed_ids_t.shape[1])
             candidate = torch.cat([input_ids_t, proposed_ids_t], dim=1)
 
             t_out = target(candidate)
             logits = t_out.logits
 
             prefix_len = input_ids_t.shape[1]
-            verify_slice = logits[:, prefix_len : prefix_len + k - 1, :]
+            verify_slice = logits[:, prefix_len : prefix_len + max(k, 1) - 1, :]
             accept = _verify_proposed(
                 logits[:, prefix_len - 1, :],
                 verify_slice,
@@ -189,7 +234,13 @@ def _iter_speculative_tokens_naive(
                 input_ids_t = torch.cat(
                     [input_ids_t, proposed_ids_t[:, :accept]], dim=1
                 )
-                input_ids_d = input_ids_t.to(draft_device)
+                if shared_vocab:
+                    input_ids_d = input_ids_t.to(draft_device)
+                else:
+                    input_ids_d = draft_tok(
+                        tok.decode(input_ids_t[0], skip_special_tokens=True),
+                        return_tensors="pt",
+                    ).input_ids.to(draft_device)
                 tokens_generated += accept
                 chunk, decoded_len = _decode_new_text(tok, input_ids_t, decoded_len)
                 if chunk:
@@ -203,7 +254,13 @@ def _iter_speculative_tokens_naive(
                 target_device
             )
             input_ids_t = torch.cat([input_ids_t, next_id], dim=1)
-            input_ids_d = input_ids_t.to(draft_device)
+            if shared_vocab:
+                input_ids_d = input_ids_t.to(draft_device)
+            else:
+                input_ids_d = draft_tok(
+                    tok.decode(input_ids_t[0], skip_special_tokens=True),
+                    return_tensors="pt",
+                ).input_ids.to(draft_device)
             tokens_generated += 1
             chunk, decoded_len = _decode_new_text(tok, input_ids_t, decoded_len)
             if chunk:
@@ -224,6 +281,18 @@ def _iter_speculative_tokens_cached(
     target = bundle.target_model
     draft = bundle.draft_model
     tok = bundle.target_tokenizer
+    draft_tok = bundle.draft_tokenizer or tok
+    # Cached path requires shared token ids; fall back when draft vocab differs.
+    if draft_tok is not tok:
+        yield from _iter_speculative_tokens_naive(
+            bundle=bundle,
+            prompt=prompt,
+            max_new_tokens=max_new_tokens,
+            num_speculative_tokens=num_speculative_tokens,
+            temperature=temperature,
+            should_stop=should_stop,
+        )
+        return
 
     target_device = _model_device(target)
     draft_device = _model_device(draft)

@@ -148,6 +148,7 @@ class SeisoTrainer:
                     cfg.dataset,
                     dataset_format=cfg.dataset_format,
                     sandbox_root=cfg.sandbox_root,
+                    sandbox_user_id=cfg.sandbox_user_id,
                     full_scan=False,
                 )
                 reused = False
@@ -355,7 +356,11 @@ class SeisoTrainer:
                     )
 
             if raw_ds is None:
-                raw_ds = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
+                raw_ds = load_training_dataset(
+                    cfg.dataset,
+                    sandbox_root=cfg.sandbox_root,
+                    sandbox_user_id=cfg.sandbox_user_id,
+                )
                 raw_ds, preprocess_stats, ds_fmt = preprocess_training_dataset(
                     raw_ds,
                     dataset_format=ds_fmt,
@@ -369,7 +374,11 @@ class SeisoTrainer:
                     f"samples kept (format={preprocess_stats['resolved_format']})"
                 )
         else:
-            raw_ds = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
+            raw_ds = load_training_dataset(
+                cfg.dataset,
+                sandbox_root=cfg.sandbox_root,
+                sandbox_user_id=cfg.sandbox_user_id,
+            )
 
         raw_ds = self._limit_training_samples(raw_ds)
         train_ds, eval_ds = self._split_train_eval(raw_ds)
@@ -648,21 +657,21 @@ class SeisoTrainer:
                     trainer.args.per_device_train_batch_size = cfg.batch_size
                     trainer.args.per_device_eval_batch_size = cfg.batch_size
                     trainer.args.gradient_accumulation_steps = cfg.gradient_accumulation_steps
-                # Keep resume pointing at the latest HF checkpoint under output_dir
-                # when possible so OOM rebuild does not restart from step 0.
-                if resume_from_checkpoint:
-                    latest = self._latest_checkpoint_dir(cfg.output_dir)
-                    if latest is not None:
-                        resume_from_checkpoint = str(latest)
-                        self._log(
-                            f"OOM recovery: resuming from latest checkpoint {latest}"
-                        )
-                    else:
-                        self._log(
-                            "OOM recovery: no checkpoint found under output_dir; "
-                            "continuing without resume"
-                        )
-                        resume_from_checkpoint = None
+                # Always prefer the latest HF checkpoint under output_dir so OOM
+                # rebuild does not restart from step 0 even when the initial call
+                # had no resume_from_checkpoint.
+                latest = self._latest_checkpoint_dir(cfg.output_dir)
+                if latest is not None:
+                    resume_from_checkpoint = str(latest)
+                    self._log(
+                        f"OOM recovery: resuming from latest checkpoint {latest}"
+                    )
+                else:
+                    self._log(
+                        "OOM recovery: no checkpoint found under output_dir; "
+                        "continuing without resume"
+                    )
+                    resume_from_checkpoint = None
 
     def _resolve_load_model_id(self) -> str:
         """Prefer cached local snapshot path for offline merge/export after training."""
@@ -974,7 +983,11 @@ class SeisoTrainer:
         cfg = self.config
         apply_determinism(cfg.seed, deterministic=cfg.deterministic)
         # Light schema check — skip full analyze_training_dataset for embedding pairs.
-        raw = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
+        raw = load_training_dataset(
+            cfg.dataset,
+            sandbox_root=cfg.sandbox_root,
+            sandbox_user_id=cfg.sandbox_user_id,
+        )
 
         class _PairDataset(TorchDataset):
             """Index into the HF dataset — avoids materializing all InputExamples."""
