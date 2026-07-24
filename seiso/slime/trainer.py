@@ -60,6 +60,7 @@ from seiso.slime.policy import (  # noqa: F401
     _pad_rollouts,
     _policy_loss,
     _response_mask_for_sequence,
+    _http_rollout_status,
     _rollout_status,
     _rollout_status_stats,
     _sequence_logprobs,
@@ -708,9 +709,18 @@ def _collect_rollouts(
                 input_ids = row["input_ids"]
                 attention_mask = row["attention_mask"]
                 response_mask = row["response_mask"]
-                status = _rollout_status(
-                    input_ids[int(row["prompt_len"]) :],
-                    tokenizer.eos_token_id,
+                # Prefer engine finish_reason: retokenized text usually lacks EOS,
+                # so EOS-only status falsely marks stopped samples as truncated.
+                status = _http_rollout_status(
+                    finish_reason=(
+                        gen.finish_reasons[idx]
+                        if getattr(gen, "finish_reasons", None) is not None
+                        and idx < len(gen.finish_reasons or [])
+                        else None
+                    ),
+                    response_tokens=input_ids[int(row["prompt_len"]) :],
+                    eos_token_id=tokenizer.eos_token_id,
+                    completion_text=completion,
                 )
             # Score the raw model completion only — never rewrite tags for reward.
             reward_sample = _reward_sample(sample, config)

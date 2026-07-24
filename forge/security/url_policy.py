@@ -20,10 +20,12 @@ _BLOCKED_HOSTS = frozenset(
 _LOCAL_HTTP_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 # Local chat servers (loopback HTTP allowed). Canonical + legacy alias.
 _LOCAL_CHAT_TYPES = frozenset({"local_chat", "vllm"})
+# Documented defaults; any loopback port is also accepted for managed vLLM.
 _LOCAL_DEFAULT_PORTS = {
     "local_chat": {8000, 8001},
     "vllm": {8000, 8001},
 }
+_ALLOW_ANY_LOOPBACK_PORT = True
 # Remote multi-GPU chat servers (HTTPS only, no loopback). Canonical + legacy alias.
 _REMOTE_CHAT_TYPES = frozenset({"remote_chat", "vllm_cloud"})
 
@@ -131,8 +133,10 @@ def validate_provider_base_url(url: str, *, provider_type: str = "local_chat") -
 
     if local_ok:
         port = parsed.port or 8000
+        if port < 1 or port > 65535:
+            raise SecurityError("Local chat server base_url port out of range")
         allowed = _LOCAL_DEFAULT_PORTS.get(ptype) or _LOCAL_DEFAULT_PORTS["local_chat"]
-        if port not in allowed:
+        if port not in allowed and not _ALLOW_ANY_LOOPBACK_PORT:
             raise SecurityError(
                 f"Local chat server base_url must use port {sorted(allowed)}"
             )

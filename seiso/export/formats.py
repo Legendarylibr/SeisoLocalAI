@@ -282,18 +282,46 @@ def _select_hub_folder(out_root: Path, formats: list[ExportFormat]) -> Path:
             if candidate.is_dir() and any(candidate.iterdir()):
                 return candidate
     if ExportFormat.GGUF in formats:
-        for child in sorted(out_root.iterdir()):
-            if child.is_dir() and (
-                child.name in {"q4_k_m", "q8_0", "f16"}
-                or child.name.startswith("gguf-")
-            ):
-                ggufs = [
-                    p
-                    for p in child.glob("*.gguf")
-                    if p.is_file() and p.stat().st_size > 0
-                ]
-                if ggufs:
-                    return child
+        gguf_dirs: list[Path] = []
+        for child in out_root.iterdir():
+            if not child.is_dir():
+                continue
+            name = child.name.lower()
+            looks_gguf = (
+                name.startswith("gguf-")
+                or name.startswith("q")
+                or name in {"f16", "f32", "bf16"}
+                or "gguf" in name
+            )
+            if not looks_gguf and not any(child.glob("*.gguf")):
+                continue
+            ggufs = [
+                p for p in child.glob("*.gguf") if p.is_file() and p.stat().st_size > 0
+            ]
+            if ggufs:
+                gguf_dirs.append(child)
+        if gguf_dirs:
+            # Prefer smaller/common quants over f16 when multiple exist.
+            def _gguf_rank(path: Path) -> tuple[int, str]:
+                key = path.name.lower()
+                preferred = (
+                    "q2_k",
+                    "q3_k_m",
+                    "q4_k_m",
+                    "q4_0",
+                    "q5_k_m",
+                    "q6_k",
+                    "q8_0",
+                    "f16",
+                    "bf16",
+                    "f32",
+                )
+                try:
+                    return (preferred.index(key), key)
+                except ValueError:
+                    return (len(preferred), key)
+
+            return sorted(gguf_dirs, key=_gguf_rank)[0]
     return out_root
 
 

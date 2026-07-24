@@ -179,8 +179,8 @@ class ManagedVllmState:
         alive = self.is_alive()
         return {
             "running": alive,
-            "managed": True,
-            "pid": self.pid if alive else None,
+            "managed": bool(self.managed),
+            "pid": self.pid if alive and self.pid > 0 else None,
             "host": self.host,
             "port": self.port,
             "model": self.model,
@@ -196,6 +196,9 @@ class ManagedVllmState:
     def is_alive(self) -> bool:
         if self.process is not None:
             return self.process.poll() is None
+        # Adopted endpoints use pid=0; os.kill(0, 0) is not a liveness check.
+        if int(self.pid or 0) <= 0:
+            return _health_ok(self.base_url)
         try:
             os.kill(self.pid, 0)
             return True
@@ -256,6 +259,31 @@ def _health_ok(base_url: str, timeout: float = 2.0) -> bool:
             return 200 <= int(getattr(resp, "status", 200)) < 300
     except (URLError, TimeoutError, OSError, ValueError):
         return False
+
+
+def _probe_served_model(base_url: str, timeout: float = 2.0) -> str | None:
+    """Read the first model id from a healthy OpenAI ``/v1/models`` endpoint."""
+    url = base_url.rstrip("/")
+    if not url.endswith("/v1"):
+        health = f"{url}/v1/models" if not url.endswith("/models") else url
+    else:
+        health = f"{url}/models"
+    try:
+        req = Request(health, method="GET")
+        with urlopen(req, timeout=timeout) as resp:  # noqa: S310 — localhost managed endpoint
+            import json
+
+            raw = resp.read().decode("utf-8", errors="replace")
+            data = json.loads(raw) if raw.strip() else {}
+    except (URLError, TimeoutError, OSError, ValueError):
+        return None
+    items = data.get("data") if isinstance(data, dict) else None
+    if not isinstance(items, list):
+        return None
+    for item in items:
+        if isinstance(item, dict) and item.get("id"):
+            return str(item["id"]).strip() or None
+    return None
 
 
 def _clear_state_unlocked() -> None:
@@ -331,12 +359,13 @@ def start_managed_vllm(
             )
         if _health_ok(launch["base_url"]):
             # External healthy server on the target port — adopt as unmanaged connect.
+            served = _probe_served_model(launch["base_url"]) or launch["model"]
             _STATE = ManagedVllmState(
                 pid=0,
                 command=[],
                 host=launch["host"],
                 port=launch["port"],
-                model=launch["model"],
+                model=served,
                 tensor_parallel_size=launch["tensor_parallel_size"],
                 base_url=launch["base_url"],
                 log_path="",

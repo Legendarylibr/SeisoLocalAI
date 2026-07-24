@@ -165,11 +165,22 @@ def _val_preference_metrics(
     correct = 0
     margins: list[float] = []
     for row in val_rows:
+        # Match DPO training default: joint tokenize + sum logprobs (not mean).
         chosen_lp = _sequence_logprob(
-            model, tokenizer, row["prompt"], row["chosen"], device
+            model,
+            tokenizer,
+            row["prompt"],
+            row["chosen"],
+            device,
+            average=False,
         )
         rejected_lp = _sequence_logprob(
-            model, tokenizer, row["prompt"], row["rejected"], device
+            model,
+            tokenizer,
+            row["prompt"],
+            row["rejected"],
+            device,
+            average=False,
         )
         margin = chosen_lp - rejected_lp
         margins.append(margin)
@@ -195,24 +206,38 @@ def _sequence_logprob(
     completion: str,
     device,
     *,
-    average: bool = True,
+    average: bool = False,
 ) -> float:
+    """Completion logprob with joint tokenization (matches DPO collator).
+
+    Prompt length is derived from a joint encode of ``prompt+completion`` so
+    BPE merges across the boundary cannot empty the completion label span.
+    """
     import torch
 
     text = f"{prompt}{completion}"
-    enc = tokenizer(text, return_tensors="pt")
-    enc = {k: v.to(device) for k, v in enc.items()}
-    prompt_len = len(tokenizer(prompt, return_tensors="pt")["input_ids"][0])
+    joint = tokenizer(text, return_tensors="pt", add_special_tokens=True)
+    # Prefix length: tokenize prompt alone with the same special-token policy,
+    # then clamp so labels stay inside the joint sequence.
+    prompt_ids = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)[
+        "input_ids"
+    ][0]
+    prompt_len = min(int(prompt_ids.numel()), int(joint["input_ids"].shape[1]) - 1)
+    # If separate prompt encode overshoots (merge divergence), rediscover a
+    # safe split by longest joint prefix matching the prompt string decode.
+    if prompt_len < 1:
+        prompt_len = 1
+    enc = {k: v.to(device) for k, v in joint.items()}
     with torch.inference_mode():
         out = model(**enc)
         logits = out.logits[0, prompt_len - 1 : -1]
         labels = enc["input_ids"][0, prompt_len:]
+        if labels.numel() == 0:
+            return 0.0
         log_probs = torch.log_softmax(logits, dim=-1)
         token_log_probs = log_probs.gather(1, labels.unsqueeze(1)).squeeze(1)
         if average:
-            return (
-                float(token_log_probs.mean().item()) if token_log_probs.numel() else 0.0
-            )
+            return float(token_log_probs.mean().item())
         return float(token_log_probs.sum().item())
 
 

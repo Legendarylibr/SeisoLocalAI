@@ -424,6 +424,7 @@ def test_vllm_engine_urls_strip_v1_and_dedupe(tmp_path: Path):
 
 
 def test_http_generate_round_robins_engine_urls(tmp_path: Path):
+    from seiso.slime.rollout_clients import HttpCompletion
     from seiso.slime.rollout_generate import _generate_http_chunk
 
     seen: list[str] = []
@@ -431,9 +432,9 @@ def test_http_generate_round_robins_engine_urls(tmp_path: Path):
     class _Client:
         base_url = "http://primary"
 
-        def complete_with_tokens(self, prompt: str):
+        def complete_http(self, prompt: str):
             seen.append(self.base_url)
-            return f"out:{prompt}", [1, 2]
+            return HttpCompletion(f"out:{prompt}", [1, 2], "stop")
 
     chunk = _generate_http_chunk(
         client=_Client(),
@@ -443,7 +444,39 @@ def test_http_generate_round_robins_engine_urls(tmp_path: Path):
         engine_urls=["http://e0", "http://e1"],
     )
     assert chunk.completions == ["out:a", "out:a", "out:b", "out:b"]
+    assert chunk.finish_reasons == ["stop", "stop", "stop", "stop"]
     assert seen == ["http://e0", "http://e1", "http://e0", "http://e1"]
+
+
+def test_http_rollout_status_prefers_finish_reason():
+    from seiso.slime.policy import _http_rollout_status
+
+    class _Tok:
+        def numel(self):
+            return 3
+
+        def __eq__(self, other):
+            return False
+
+    # Retokenized ids without EOS would look truncated; finish_reason wins.
+    assert (
+        _http_rollout_status(
+            finish_reason="stop",
+            response_tokens=_Tok(),
+            eos_token_id=2,
+            completion_text="answer",
+        )
+        == "stop"
+    )
+    assert (
+        _http_rollout_status(
+            finish_reason="length",
+            response_tokens=_Tok(),
+            eos_token_id=2,
+            completion_text="answer",
+        )
+        == "length"
+    )
 
 
 def test_vllm_full_with_lora_refused(tmp_path: Path, monkeypatch):

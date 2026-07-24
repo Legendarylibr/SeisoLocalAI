@@ -427,6 +427,35 @@ def _rollout_status(response_tokens, eos_token_id: int | None) -> str:
     return "length"
 
 
+def _http_rollout_status(
+    *,
+    finish_reason: str | None,
+    response_tokens,
+    eos_token_id: int | None,
+    completion_text: str = "",
+) -> str:
+    """Status for HTTP rollouts: prefer engine finish_reason over EOS-in-ids.
+
+    Stock OpenAI ``/v1/completions`` rarely returns token ids; retokenized text
+    usually omits EOS, so EOS-only detection falsely marks stopped samples as
+    truncated and wipes GRPO rewards.
+    """
+    n_tokens = (
+        int(response_tokens.numel())
+        if hasattr(response_tokens, "numel")
+        else len(response_tokens)
+    )
+    if n_tokens == 0 and not str(completion_text or "").strip():
+        return "empty"
+    from seiso.slime.rollout_clients import _normalize_rollout_finish_status
+
+    mapped = _normalize_rollout_finish_status(finish_reason)
+    if mapped is not None:
+        return mapped
+    # Fall back to token/EOS heuristic when the engine omitted finish_reason.
+    return _rollout_status(response_tokens, eos_token_id)
+
+
 def _response_mask_for_sequence(
     input_ids,
     *,

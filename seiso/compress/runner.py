@@ -283,9 +283,10 @@ def run_compress_job(
         "run_id": run_dir.name,
         "stages": cfg["stages"],
         "stage_results": stage_results,
-        "model_dir": stage_results.get("finetuned")
-        or stage_results.get("quantized_awq")
+        # Prefer the latest pipeline artifact (quant beats earlier finetune/distill).
+        "model_dir": stage_results.get("quantized_awq")
         or stage_results.get("quantized_gptq")
+        or stage_results.get("finetuned")
         or stage_results.get("pruned")
         or stage_results.get("distilled")
         or cfg.get("model_dir"),

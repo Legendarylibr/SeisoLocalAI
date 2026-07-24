@@ -156,13 +156,18 @@ def _eval_reward_sample(
     out = dict(sample)
     if "answer" not in out and config.answer_field in out:
         out["answer"] = out.get(config.answer_field)
-    if out.get("tests") is None and out.get("test") is None:
-        metadata = out.get("metadata")
-        if isinstance(metadata, dict):
+    metadata = out.get("metadata")
+    if isinstance(metadata, dict):
+        if out.get("tests") is None and out.get("test") is None:
             if metadata.get("tests") is not None:
                 out["tests"] = metadata.get("tests")
             elif metadata.get("test") is not None:
                 out["test"] = metadata.get("test")
+        # Match train-time `_reward_sample` flattening for code harness fields.
+        if "timeout_s" in metadata and "timeout_s" not in out:
+            out["timeout_s"] = metadata["timeout_s"]
+        if "setup" in metadata and "setup" not in out:
+            out["setup"] = metadata["setup"]
     return out
 
 

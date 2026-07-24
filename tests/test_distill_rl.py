@@ -594,7 +594,7 @@ def test_val_preference_metrics_include_margin_and_alignment(monkeypatch):
         ("q", "long"): -0.1,
     }
 
-    def fake_logprob(_model, _tokenizer, prompt, completion, _device):
+    def fake_logprob(_model, _tokenizer, prompt, completion, _device, **_kwargs):
         return scores[(prompt, completion)]
 
     monkeypatch.setattr(evaluate, "_sequence_logprob", fake_logprob)

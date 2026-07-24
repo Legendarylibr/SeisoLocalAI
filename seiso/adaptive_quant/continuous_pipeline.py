@@ -69,7 +69,8 @@ def run_continuous_pipeline(
             config,
             git_commit=git_commit,
             pipeline="continuous_learning",
-            phases=["continuous_stream", "evaluate", "analysis"],
+            # This pipeline evaluates the continuous stream; it does not run analysis.
+            phases=["continuous_stream", "evaluate"],
         ),
         "security_audit": build_security_audit_record(
             config,
