@@ -42,9 +42,10 @@ def test_tools_system_prompt_includes_security_boundaries():
     )
     prompt = tools_system_prompt(registry, model_key="meta-llama/Llama-3.1-8B")
     lower = prompt.lower()
-    assert "security" in lower
     assert "kb_reference" in lower
     assert "untrusted" in lower
+    assert "never claim unused tools" in lower
+    assert len(prompt) < 500
 
 
 def test_tools_system_prompt_uses_xml_format_for_qwen_family():
