@@ -1,6 +1,13 @@
-"""Curated :class:`FrameworkConfig` presets for CLI entrypoints and examples.
+"""Curated :class:`FrameworkConfig` presets for research CLI entrypoints and examples.
 
-Import named constants from this package (``from seiso.adaptive_quant.presets import CONFIG``).
+Import named constants from this package
+(``from seiso.adaptive_quant.presets import CONFIG``).
+
+**Research-only:** ``CONFIG_3090``, ``CONFIG_4090``, ``CONFIG_4090_UNIVERSAL``,
+``CONFIG_GPU``, ``CONFIG_MOE``, ``CONFIG_ONLINE`` (and related helpers) are for
+``python -m seiso.adaptive_quant`` / research CLIs. They are **not** Forge /
+``seiso rl-quant`` product preset IDs — those live in ``seiso.rl_quant.presets``
+(``reproducible`` / ``minimal`` / ``post_train``) (RP-09).
 """
 
 from seiso.adaptive_quant.presets.baseline import CONFIG

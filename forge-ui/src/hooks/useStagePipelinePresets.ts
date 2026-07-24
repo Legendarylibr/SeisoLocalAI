@@ -49,9 +49,14 @@ export function useStagePipelinePresets(
   }, [preset, presetList, allStages]);
 
   const toggleStage = (stage: string) => {
-    setSelectedStages((prev) =>
-      prev.includes(stage) ? prev.filter((s) => s !== stage) : [...prev, stage],
-    );
+    setSelectedStages((prev) => {
+      if (prev.includes(stage)) {
+        return prev.filter((s) => s !== stage);
+      }
+      // Keep selection ordered by the canonical stage list (CMP-ORD).
+      const next = new Set([...prev, stage]);
+      return allStages.filter((s) => next.has(s));
+    });
   };
 
   return {

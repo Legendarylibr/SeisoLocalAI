@@ -1,4 +1,7 @@
-"""Sandbox policy tables and limits for restricted Python code execution."""
+"""AST deny-list policy tables and resource limits for code execution.
+
+Not an OS sandbox — see ``code_exec.py`` module docstring.
+"""
 
 from __future__ import annotations
 

@@ -199,7 +199,13 @@ class TrainConfig(BaseModel):
     # slime --rollout-batch-size (prompts)
     rollout_batch_size: int = Field(default=1, ge=1)
     over_sampling_batch_size: int | None = Field(default=None, ge=1)
-    dynamic_sampling_filter: str = "reward_nonzero_std"
+    dynamic_sampling_filter: str = Field(
+        default="reward_nonzero_std",
+        description=(
+            "GRPO group filter: none | reward_nonzero_std (composite reward std) | "
+            "outcome_nonzero_std (verifiable outcome std only)."
+        ),
+    )
     dynamic_sampling_min_reward_std: float = Field(default=1e-6, ge=0)
     policy_micro_batch_size: int | None = Field(default=None, ge=1)
     # None → same as rollout_batch_size (slime)
@@ -410,6 +416,14 @@ class TrainConfig(BaseModel):
         default=False,
         description="Write launch sidecar + manifest without executing uv/NeMo RL.",
     )
+    nemo_rl_ack_recipe_corpus: bool = Field(
+        default=False,
+        description=(
+            "Acknowledge that NeMo RL recipes use their own corpora; "
+            "TrainConfig.dataset is not passed to Hydra (NEMO-02). "
+            "Required for non-dry-run launches unless SEISO_ALLOW_TINY_RL=1."
+        ),
+    )
     extra: dict[str, Any] = Field(
         default_factory=dict,
         description=(
@@ -514,33 +528,28 @@ class TrainConfig(BaseModel):
                 "packing cannot be combined with assistant_only_loss "
                 "(Seiso renders packed text without TRL assistant span masks)"
             )
-        if self.dataset_format == DatasetFormat.PREFERENCE:
-            if self.method == TrainMethod.SLIME:
-                raise ValueError(
-                    "Preference datasets are incompatible with method=slime "
-                    "(GRPO needs verifiable prompt/answer rows). "
-                    "Use Distill-RL/DPO for preference pairs, or LoRA/full with "
-                    "preference_as_sft=true for chosen-only SFT."
-                )
-            if self.method == TrainMethod.NEMO_RL and self.nemo_rl_recipe not in {
-                "dpo",
-            }:
-                raise ValueError(
-                    "Preference datasets with method=nemo_rl require "
-                    "nemo_rl_recipe=dpo (GRPO/smoke use verifiable prompts). "
-                    "Or use Distill-RL/DPO, or preference_as_sft=true for SFT."
-                )
-            nemo_rl_dpo = (
-                self.method == TrainMethod.NEMO_RL and self.nemo_rl_recipe == "dpo"
+        effective_fmt = self.dataset_format
+        if effective_fmt == DatasetFormat.AUTO:
+            probed = _probe_local_dataset_format(self.dataset)
+            if probed is not None:
+                effective_fmt = probed
+        if effective_fmt == DatasetFormat.PREFERENCE:
+            _refuse_preference_for_method(
+                method=self.method,
+                nemo_rl_recipe=self.nemo_rl_recipe,
+                preference_as_sft=self.preference_as_sft,
             )
-            if not nemo_rl_dpo and not self.preference_as_sft:
-                raise ValueError(
-                    "Preference datasets (chosen/rejected) are not SFT alignment. "
-                    "Use Distill-RL/DPO (`seiso distill-rl`) or method=nemo_rl with "
-                    "nemo_rl_recipe=dpo for real preference learning, "
-                    "or set preference_as_sft=true to train supervised on chosen responses "
-                    "only (rejected pairs are discarded)."
-                )
+        if (
+            self.dataset_format == DatasetFormat.TEXT
+            and self.train_on_responses_only
+            and not self.packing
+        ):
+            raise ValueError(
+                "train_on_responses_only has no effect on dataset_format=text "
+                "(there is no assistant span to mask). Disable train_on_responses_only, "
+                "or use a chat/alpaca/sharegpt format. Packing + text CPT may keep "
+                "train_on_responses_only only when packing=true."
+            )
         if self.method == TrainMethod.FULL and self.quant in (
             QuantMode.INT4,
             QuantMode.INT8,
@@ -632,6 +641,17 @@ class TrainConfig(BaseModel):
                 "(data/slime_*.jsonl). For NeMo RL examples use a Hub id "
                 "placeholder (recipes ship their own data) or a real JSONL. "
                 "Smoke/CI: SEISO_ALLOW_TINY_RL=1."
+            )
+        if (
+            not self.nemo_rl_dry_run
+            and not self.nemo_rl_ack_recipe_corpus
+            and not allow_tiny_rl()
+        ):
+            raise ValueError(
+                "method=nemo_rl requires nemo_rl_ack_recipe_corpus=true "
+                "(NeMo recipes ship their own datasets; TrainConfig.dataset is "
+                "not passed to Hydra). Or set nemo_rl_dry_run=true / "
+                "SEISO_ALLOW_TINY_RL=1 for smoke."
             )
         try:
             self.to_nemo_rl_config().validate()
@@ -816,6 +836,76 @@ class TrainConfig(BaseModel):
                 "extra": dict(self.extra or {}),
             }
         )
+
+
+def _refuse_preference_for_method(
+    *,
+    method: TrainMethod,
+    nemo_rl_recipe: str,
+    preference_as_sft: bool,
+) -> None:
+    """Raise when preference-shaped data is incompatible with the training method."""
+    if method == TrainMethod.SLIME:
+        raise ValueError(
+            "Preference datasets are incompatible with method=slime "
+            "(GRPO needs verifiable prompt/answer rows). "
+            "Use Distill-RL/DPO for preference pairs, or LoRA/full with "
+            "preference_as_sft=true for chosen-only SFT."
+        )
+    if method == TrainMethod.NEMO_RL and nemo_rl_recipe not in {"dpo"}:
+        raise ValueError(
+            "Preference datasets with method=nemo_rl require "
+            "nemo_rl_recipe=dpo (GRPO/smoke use verifiable prompts). "
+            "Or use Distill-RL/DPO, or preference_as_sft=true for SFT."
+        )
+    nemo_rl_dpo = method == TrainMethod.NEMO_RL and nemo_rl_recipe == "dpo"
+    if not nemo_rl_dpo and not preference_as_sft:
+        raise ValueError(
+            "Preference datasets (chosen/rejected) are not SFT alignment. "
+            "Use Distill-RL/DPO (`seiso distill-rl`) or method=nemo_rl with "
+            "nemo_rl_recipe=dpo for real preference learning, "
+            "or set preference_as_sft=true to train supervised on chosen responses "
+            "only (rejected pairs are discarded)."
+        )
+
+
+def _probe_local_dataset_format(dataset: Path | str | None) -> DatasetFormat | None:
+    """Best-effort format probe for local JSON/JSONL so AUTO cannot bypass gates."""
+    if dataset is None:
+        return None
+    path = Path(dataset).expanduser()
+    if not path.is_file():
+        return None
+    suffix = path.suffix.lower()
+    if suffix not in {".jsonl", ".json"}:
+        return None
+    try:
+        from seiso.training.datasets import detect_format
+
+        if suffix == ".jsonl":
+            with path.open(encoding="utf-8") as fh:
+                for line in fh:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    sample = json.loads(line)
+                    if isinstance(sample, dict):
+                        return detect_format(sample)
+                    break
+            return None
+        data = json.loads(path.read_text(encoding="utf-8"))
+        if isinstance(data, list) and data and isinstance(data[0], dict):
+            return detect_format(data[0])
+        if isinstance(data, dict):
+            # HF-style {"train": [...]} or a single row
+            for key in ("train", "data", "samples"):
+                rows = data.get(key)
+                if isinstance(rows, list) and rows and isinstance(rows[0], dict):
+                    return detect_format(rows[0])
+            return detect_format(data)
+    except Exception:
+        return None
+    return None
 
 
 def run_training(

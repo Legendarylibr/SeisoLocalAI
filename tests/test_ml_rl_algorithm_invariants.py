@@ -412,6 +412,52 @@ def test_train_config_allows_preference_as_sft(tmp_path):
     assert cfg.preference_as_sft is True
 
 
+def test_train_config_auto_probes_local_preference_jsonl(tmp_path):
+    prefs = tmp_path / "prefs.jsonl"
+    prefs.write_text(
+        '{"prompt": "q", "chosen": "a", "rejected": "b"}\n', encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="Preference datasets"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": prefs,
+                "dataset_format": "auto",
+                "preference_as_sft": False,
+            }
+        )
+
+
+def test_train_config_auto_refuses_preference_with_slime(tmp_path):
+    prefs = tmp_path / "prefs.jsonl"
+    prefs.write_text(
+        '{"prompt": "q", "chosen": "a", "rejected": "b"}\n', encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="incompatible with method=slime"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": prefs,
+                "dataset_format": "auto",
+                "preference_as_sft": True,
+                "method": "slime",
+            }
+        )
+
+
+def test_train_config_refuses_text_responses_only_without_packing(tmp_path):
+    with pytest.raises(ValueError, match="train_on_responses_only has no effect"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": tmp_path / "text.jsonl",
+                "dataset_format": "text",
+                "train_on_responses_only": True,
+                "packing": False,
+            }
+        )
+
+
 def test_train_config_rejects_packing_with_response_mask_chat(tmp_path):
     with pytest.raises(ValueError, match="packing cannot be combined"):
         TrainConfig.model_validate(
@@ -986,7 +1032,7 @@ def test_filter_ignores_truncated_zeros_for_outcome_spread(tmp_path):
         dataset=tmp_path / "d.jsonl",
         output_dir=tmp_path / "o",
         rollouts_per_prompt=4,
-        dynamic_sampling_filter="reward_nonzero_std",
+        dynamic_sampling_filter="outcome_nonzero_std",
         require_held_out_eval=False,
     )
     # Two identical valid passers + two truncated zeros → old bug kept the group.

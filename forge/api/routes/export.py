@@ -41,7 +41,7 @@ from forge.services.publishable import (
 from forge.services.user_paths import assert_user_path, pick_user_download_file
 from seiso.export.formats import publish_folder_to_hub
 from seiso.export.model_card import HubModelMetadata
-from seiso.security import SecurityError
+from seiso.security import SecurityError, safe_join
 
 router = APIRouter(prefix="/export", tags=["export"])
 
@@ -197,7 +197,7 @@ async def start_export(
         **body.model_dump(),
         "gguf_quantizations": gguf_quants,
         "user_id": user_id,
-        "output_dir": str(settings.data_dir / "exports" / user_id / job_id),
+        "output_dir": str(safe_join(settings.data_dir, "exports", user_id, job_id)),
         "hub_repo": hub_repo,
         "hub_token": hub_token,
         "hub_metadata": hub_metadata.__dict__ if hub_metadata else None,
@@ -295,6 +295,19 @@ async def start_publish_to_hub(
             raise HTTPException(400, str(exc)) from exc
 
     publish_job_id = str(uuid.uuid4())
+    # Persist redacted config only — never store the HF token (F4-06).
+    durable_config = {
+        "folder": str(folder),
+        "repo_id": repo_id,
+        "source_job_id": job_id,
+        "source": source,
+        "quantizations": meta.quantizations or None,
+        "hub": {
+            "repo_id": repo_id,
+            "private": bool(getattr(meta, "private", False)),
+        },
+    }
+    await db.create_hub_publish_job(user_id, durable_config, job_id=publish_job_id)
     orchestrator.create_job(job_id=publish_job_id, user_id=user_id)
     payload: dict[str, Any] = {
         "user_id": user_id,
@@ -305,14 +318,28 @@ async def start_publish_to_hub(
         "quantizations": meta.quantizations or None,
     }
 
+    async def _finished(job) -> None:
+        await db.update_hub_publish_job_status(
+            publish_job_id,
+            job.status.value,
+            user_id=user_id,
+            result=job.result if isinstance(job.result, dict) else None,
+            error_text=job.error if job.status.value == "failed" else None,
+        )
+
+    async def _failed(message: str) -> None:
+        await db.update_hub_publish_job_status(
+            publish_job_id, "failed", user_id=user_id, error_text=message
+        )
+
     async def _run() -> None:
-        try:
-            await orchestrator.start(publish_job_id, payload)
-            await orchestrator.wait_for(publish_job_id)
-        except Exception as exc:
-            job = orchestrator.get_job(publish_job_id)
-            if job and job.status.value != "failed":
-                orchestrator._emit_log(publish_job_id, f"ERROR: {exc}")
+        await run_orchestrated_job(
+            orchestrator=orchestrator,
+            job_id=publish_job_id,
+            payload=payload,
+            on_finished=_finished,
+            on_failed=_failed,
+        )
 
     spawn_background(_run())
     audit_event("hf_publish_start", user_id=user_id, repo_id=repo_id, path=str(folder))
@@ -323,20 +350,37 @@ async def start_publish_to_hub(
 async def stream_publish_to_hub(
     job_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
+    db: Annotated[Database, Depends(get_db)],
     orchestrator: Annotated[
         HubPublishOrchestrator, Depends(get_hub_publish_orchestrator)
     ],
 ):
-    assert_job_owner(orchestrator, job_id, user_id)
+    if not await db.get_hub_publish_job(job_id, user_id):
+        raise HTTPException(404, "Job not found")
+    if orchestrator.get_job(job_id):
+        assert_job_owner(orchestrator, job_id, user_id)
 
     async def event_gen():
-        async for line in orchestrator.stream_logs(job_id):
-            yield {"event": "log", "data": line}
-        j = orchestrator.get_job(job_id)
-        if j and j.error:
+        if orchestrator.get_job(job_id):
+            async for line in orchestrator.stream_logs(job_id):
+                yield {"event": "log", "data": line}
+            j = orchestrator.get_job(job_id)
+        else:
+            async for event in durable_job_events(db, job_id, user_id):
+                yield event
+            j = None
+        if not j:
+            row = await db.get_hub_publish_job(job_id, user_id)
+            if row and row.get("error_text"):
+                yield {"event": "error", "data": row["error_text"]}
+            result = loads_json_field(row.get("result_json") if row else None, {})
+            if result:
+                yield {"event": "result", "data": json.dumps(result, default=str)}
+            return
+        if j.error:
             yield {"event": "error", "data": j.error}
-        if j and j.result:
-            yield {"event": "result", "data": str(j.result)}
+        if j.result:
+            yield {"event": "result", "data": json.dumps(j.result, default=str)}
 
     return EventSourceResponse(event_gen())
 

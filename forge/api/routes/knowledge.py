@@ -132,6 +132,8 @@ async def ingest(
     except SecurityError as exc:
         raise HTTPException(400, str(exc)) from exc
 
+    # Ephemeral orchestrator job (F4-06b): ingest is awaited in-request;
+    # durable state is the KB files under the user sandbox, not a job table.
     job_id = orchestrator.create_job(user_id=user_id)
     payload = {"action": "ingest", "user_id": user_id, **body.model_dump()}
     await orchestrator.start(job_id, payload)

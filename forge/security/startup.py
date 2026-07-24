@@ -92,6 +92,12 @@ def validate_security_settings(settings: ForgeSettings) -> None:
                 "Remote access with tools enabled — high risk if credentials leak."
             )
 
+    if settings.debug and settings.allow_remote:
+        raise RuntimeError(
+            "SEISO_DEBUG=true cannot be combined with SEISO_ALLOW_REMOTE=true "
+            "(debug CSP allows 'unsafe-inline' and exposes /api/docs). "
+            "Disable SEISO_DEBUG or SEISO_ALLOW_REMOTE."
+        )
     if settings.debug:
         logger.warning("SEISO_DEBUG=true exposes /api/docs — disable in production.")
 

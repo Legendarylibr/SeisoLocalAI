@@ -10,10 +10,10 @@ const FALLBACK_STAGES = [
   "distill",
   "prune",
   "finetune",
-  "evaluate",
-  "export",
   "quantize_gptq",
   "quantize_awq",
+  "evaluate",
+  "export",
 ];
 
 const COMPRESS_PIPELINE = {

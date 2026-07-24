@@ -35,7 +35,10 @@ def canonical_json(obj: Any) -> str:
 
 
 def content_fingerprint(obj: Any) -> str:
-    return sha256_text(canonical_json(obj))
+    """Stable fingerprint; delegates to shared Seiso provenance (RP-10)."""
+    from seiso.research.provenance import content_fingerprint as shared_fp
+
+    return shared_fp(obj)
 
 
 def sha256_file(path: Path, *, chunk_size: int = 1 << 20) -> str:

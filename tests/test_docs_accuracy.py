@@ -212,6 +212,28 @@ def test_docs_do_not_reference_nonexistent_rl_quant_extra():
         ), f"{rel} may list rl-quant as pip extra"
 
 
+def test_smoke_configs_exist_and_are_referenced():
+    """F6-04: smoke presets must exist and be discoverable from AGENTS/docs."""
+    smokes = [
+        "configs/smoke_train_cpu.yaml",
+        "configs/smoke_train_gpu.yaml",
+        "configs/smoke_train_moe_cpu.yaml",
+        "configs/smoke_slime_cpu.yaml",
+        "configs/smoke_nemo_rl.yaml",
+        "configs/rl_quant_smoke.json",
+        "configs/distill_rl_smoke.json",
+    ]
+    agents = _read("AGENTS.md")
+    docs_ci = _read("docs/CI_LOCAL.md")
+    for rel in smokes:
+        path = REPO_ROOT / rel
+        assert path.is_file(), f"missing smoke config {rel}"
+        name = path.name
+        assert (
+            name in agents or name in docs_ci or rel in agents or rel in docs_ci
+        ), f"{rel} is unreferenced in AGENTS.md / docs/CI_LOCAL.md"
+
+
 def test_forge_doc_covers_settings_api():
     forge_doc = _read("docs/forge.md")
     for fragment in (

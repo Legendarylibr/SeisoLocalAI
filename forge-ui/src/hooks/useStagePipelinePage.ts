@@ -19,6 +19,7 @@ type StagePipelinePageOptions<TJob> = {
   listJobs: () => Promise<TJob[]>;
   startJob: (body: Record<string, unknown>) => Promise<{ job_id: string }>;
   streamPath: (jobId: string) => string;
+  initialPreset?: string;
 };
 
 export function useStagePipelinePage<TJob extends { id: string }>({
@@ -27,12 +28,13 @@ export function useStagePipelinePage<TJob extends { id: string }>({
   listJobs,
   startJob,
   streamPath,
+  initialPreset = "smoke",
 }: StagePipelinePageOptions<TJob>) {
   const [jobs, setJobs] = useState<TJob[]>([]);
   const [starting, setStarting] = useState(false);
   const { models: localModels, loading: modelsLoading } = useTrainingModels();
 
-  const presets = useStagePipelinePresets(fallbackStages, loadPresets);
+  const presets = useStagePipelinePresets(fallbackStages, loadPresets, initialPreset);
   const { logs, result, activeJob, resetStream, watchJob } = usePipelineJobStream();
 
   useEffect(() => {
@@ -44,12 +46,16 @@ export function useStagePipelinePage<TJob extends { id: string }>({
   }, [listJobs]);
 
   const runPipeline = useCallback(
-    async (body: Record<string, unknown>) => {
+    async (
+      body: Record<string, unknown>,
+      opts?: { onEvent?: (event: string, data: string) => void },
+    ) => {
       setStarting(true);
       resetStream();
       try {
         const res = await startJob(body);
         watchJob(streamPath(res.job_id), res.job_id, {
+          onEvent: opts?.onEvent,
           onResult: () => {
             invalidateApiCache("/inference/models");
             invalidateApiCache("/training/models");

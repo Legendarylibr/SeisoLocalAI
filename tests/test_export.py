@@ -276,6 +276,27 @@ def test_export_full_refuses_lora_only_checkpoint(tmp_path: Path):
         )
 
 
+def test_export_full_refuses_config_json_plus_adapter_weights(tmp_path: Path):
+    """EXP-02-R: config.json must not mask LoRA-only adapter weights as full."""
+    sandbox = tmp_path / "data"
+    ckpt = sandbox / "checkpoints" / "lora-with-config"
+    ckpt.mkdir(parents=True)
+    (ckpt / "config.json").write_text('{"model_type": "llama"}')
+    (ckpt / "adapter_model.safetensors").write_text("weights")
+    assert detect_checkpoint_kind(ckpt) == "lora"
+
+    out = sandbox / "exports" / "bad-full-masked"
+    with pytest.raises(ValueError, match="LoRA-only checkpoint"):
+        export_checkpoint(
+            ExportOptions(
+                checkpoint=ckpt,
+                output_dir=out,
+                formats=[ExportFormat.FULL],
+                sandbox_root=sandbox,
+            )
+        )
+
+
 def test_export_base_refuses_lora_only_checkpoint(tmp_path: Path):
     sandbox = tmp_path / "data"
     ckpt = sandbox / "checkpoints" / "lora-run"

@@ -94,6 +94,26 @@ async def test_empty_bearer_does_not_bypass_csrf(app):
 
 
 @pytest.mark.asyncio
+async def test_junk_bearer_does_not_bypass_csrf(app):
+    """S1-010: non-JWT Bearer text must not skip CSRF."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post(
+            "/api/auth/register",
+            json={"password": "securepass1"},
+        )
+        assert reg.status_code == 201
+
+        res = await client.post(
+            "/api/inference/threads",
+            json={"title": "junk-bearer"},
+            headers={"Authorization": "Bearer not-a-valid-jwt"},
+        )
+        assert res.status_code == 403
+        assert "CSRF" in res.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_csrf_blocks_v1_without_header(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:

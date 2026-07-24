@@ -128,6 +128,16 @@ def test_resolve_training_dataset_path_seeds_sample_jsonl(tmp_path: Path):
     assert expected.read_text(encoding="utf-8") == '{"messages":[]}\n'
 
 
+def test_resolve_training_dataset_path_finds_checkpoints_relative(tmp_path: Path):
+    """S1-004: relative paths resolve under any USER_SCOPED_DATA_ROOTS category."""
+    user_id = "user-1"
+    ds = tmp_path / "checkpoints" / user_id / "train.jsonl"
+    ds.parent.mkdir(parents=True)
+    ds.write_text('{"text":"x"}\n', encoding="utf-8")
+    resolved = resolve_training_dataset_path(tmp_path, user_id, "train.jsonl")
+    assert Path(resolved) == ds.resolve()
+
+
 def test_is_local_filesystem_path_matches_dataset_helper():
     from forge.services.user_paths import is_local_filesystem_path
     from seiso.training.datasets import looks_like_local_dataset_path

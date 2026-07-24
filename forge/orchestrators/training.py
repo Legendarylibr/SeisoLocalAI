@@ -29,7 +29,8 @@ _HF_TOKEN_LOCK = threading.Lock()
 
 class TrainingOrchestrator(Orchestrator):
     kind = "training"
-    resource_key = "gpu"
+    # GPU exclusivity: prepare_for_gpu_task + file lock + GPU_EXECUTOR (S1-009).
+    resource_key = None
 
     def __init__(self, sandbox_root: Path) -> None:
         super().__init__(sandbox_root)
@@ -81,9 +82,20 @@ class TrainingOrchestrator(Orchestrator):
         )
 
         config = TrainConfig.model_validate(payload["config"])
-        config.output_dir = Path(
-            payload.get("output_dir", self.sandbox_root / "checkpoints" / job_id)
-        )
+        user_id = str(payload.get("user_id") or "")
+        if "output_dir" in payload and payload["output_dir"]:
+            config.output_dir = Path(payload["output_dir"])
+        elif user_id:
+            from seiso.security import safe_join
+
+            config.output_dir = safe_join(
+                self.sandbox_root, "checkpoints", user_id, job_id
+            )
+        else:
+            raise ValueError(
+                "output_dir is required when user_id is missing "
+                "(refusing unscoped checkpoints/)"
+            )
 
         multi_gpu = bool(payload.get("multi_gpu", config.multi_gpu))
         config.multi_gpu = multi_gpu

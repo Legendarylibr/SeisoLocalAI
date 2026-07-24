@@ -598,6 +598,11 @@ def resolve_local_backend(
 ) -> BackendName:
     """Resolve auto/requested backend for a filesystem model."""
     choice = (requested or BACKEND_AUTO).lower()
+    if choice == BACKEND_ROUTER:
+        raise ValueError(
+            "router is not a local inference backend; use Forge chat routing "
+            "(__seiso_router__) instead of resolve_local_backend"
+        )
     is_gguf = _is_gguf_model(model_path, model_format)
     if choice == BACKEND_AUTO:
         if is_gguf and _native_linux_requires_isolated_gguf():

@@ -99,7 +99,7 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 2. [CI_LOCAL.md](CI_LOCAL.md) — quality gate (`make ci-fast`)
 3. [forge.md](forge.md) — UI dev with Vite hot reload
 4. [training/kernels.md](training/kernels.md) — CUDA/Triton kernel stack
-5. [ANALYSIS.md](ANALYSIS.md) · [reports/codebase-review-2026-07.md](reports/codebase-review-2026-07.md) — architecture + July 2026 review findings
+5. [ANALYSIS.md](ANALYSIS.md) · [reports/codebase-review-2026-07-23.md](reports/codebase-review-2026-07-23.md) (latest) · [reports/codebase-review-2026-07.md](reports/codebase-review-2026-07.md) — architecture + July 2026 review findings
 
 ### Path D — Production deployment
 

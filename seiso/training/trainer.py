@@ -454,19 +454,12 @@ class SeisoTrainer:
         if should_disable_packing_for_response_mask(
             use_packing, cfg.train_on_responses_only, resolved_fmt
         ):
-            logger.warning(
-                "Disabling sequence packing: train_on_responses_only requires "
-                "Seiso chat-template masking (format=%s). Packing remains for "
-                "large plain-text corpora.",
-                resolved_fmt.value,
+            # Unify with TrainConfig hard-fail (TRN-03): do not silently soft-disable.
+            raise ValueError(
+                "packing cannot be combined with train_on_responses_only for "
+                f"{resolved_fmt.value} datasets; use packing only for plain "
+                "text (dataset_format=text) or disable train_on_responses_only"
             )
-            use_packing = False
-            # Keep TrainConfig in sync so TRL/SFTConfig never packs masked rows.
-            if cfg.packing or cfg.padding_free:
-                self.config = cfg.model_copy(
-                    update={"packing": False, "padding_free": False}
-                )
-                cfg = self.config
 
         if use_packing:
             train_ds, detected_fmt = format_dataset_text(

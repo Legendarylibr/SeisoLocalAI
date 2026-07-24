@@ -63,7 +63,15 @@ def default_gguf_quants(profile: ExportProfile) -> list[str]:
 
 def detect_checkpoint_kind(checkpoint: Path) -> str:
     """Return 'lora', 'full', or 'unknown'."""
-    if (checkpoint / "adapter_config.json").exists():
+    has_adapter_config = (checkpoint / "adapter_config.json").exists()
+    has_adapter_weights = (checkpoint / "adapter_model.safetensors").is_file() or (
+        checkpoint / "adapter_model.bin"
+    ).is_file()
+    if has_adapter_config:
+        return "lora"
+    # Adapter weights without adapter_config still mean LoRA-only (EXP-02-R).
+    # Do not treat bare config.json as a merged full checkpoint in that case.
+    if has_adapter_weights:
         return "lora"
     if (checkpoint / "config.json").exists():
         return "full"

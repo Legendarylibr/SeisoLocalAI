@@ -96,6 +96,17 @@ CREATE TABLE IF NOT EXISTS distill_rl_jobs (
     updated_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS hub_publish_jobs (
+    id TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    status TEXT NOT NULL,
+    config_json TEXT NOT NULL,
+    result_json TEXT DEFAULT '{}',
+    error_text TEXT,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS chat_threads (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
@@ -153,6 +164,8 @@ CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user ON distill_rl_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user_created ON distill_rl_jobs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user ON rl_quant_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user_created ON rl_quant_jobs(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_hub_publish_jobs_user ON hub_publish_jobs(user_id);
+CREATE INDEX IF NOT EXISTS idx_hub_publish_jobs_user_created ON hub_publish_jobs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_providers_user ON providers(user_id);
 CREATE INDEX IF NOT EXISTS idx_providers_user_created ON providers(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_job_events_job_sequence ON job_events(job_id, sequence ASC);
@@ -172,6 +185,7 @@ _TRAINING_LIST_COLUMNS = (
     "updated_at",
 )
 _EXPORT_LIST_COLUMNS = ("id", "user_id", "status", "created_at", "updated_at")
+_HUB_PUBLISH_LIST_COLUMNS = ("id", "user_id", "status", "created_at", "updated_at")
 _STAGE_PIPELINE_LIST_COLUMNS = (
     "id",
     "user_id",
@@ -209,6 +223,7 @@ _JOB_ERROR_TABLES = (
     "rl_quant_jobs",
     "compress_jobs",
     "distill_rl_jobs",
+    "hub_publish_jobs",
 )
 _CONFIG_JOB_TABLES = frozenset({"rl_quant_jobs", "compress_jobs", "distill_rl_jobs"})
 

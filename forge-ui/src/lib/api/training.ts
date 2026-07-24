@@ -31,6 +31,10 @@ export const trainingApi = {
       }),
     }),
   listTrainingJobs: () => request<TrainingJob[]>("/training/jobs"),
+  cancelTraining: (jobId: string) =>
+    request<{ cancelled: boolean }>(`/training/jobs/${jobId}/cancel`, {
+      method: "POST",
+    }),
   listTrainingModels: () =>
     cachedGet<{ models: TrainableModel[]; total: number }>("/training/models", 120_000),
   searchDatasets: (q: string, limit = 12) => {

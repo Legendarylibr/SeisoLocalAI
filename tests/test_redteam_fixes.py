@@ -753,6 +753,26 @@ def test_remote_code_exec_always_refused(monkeypatch):
         validate_security_settings(settings)
 
 
+def test_debug_plus_remote_refused(monkeypatch):
+    """S1-016: debug CSP unsafe-inline must not combine with remote bind."""
+    from types import SimpleNamespace
+
+    from forge.security.startup import validate_security_settings
+
+    monkeypatch.setenv("SEISO_REMOTE_ACK", "1")
+    settings = SimpleNamespace(
+        allow_remote=True,
+        allow_code_exec=False,
+        allow_tools=False,
+        allow_compat_tools=False,
+        trust_proxy=False,
+        trusted_proxy_ips="",
+        debug=True,
+    )
+    with pytest.raises(RuntimeError, match="SEISO_DEBUG"):
+        validate_security_settings(settings)
+
+
 def test_remote_tools_still_use_dangerous_ack(monkeypatch):
     from types import SimpleNamespace
 

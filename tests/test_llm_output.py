@@ -42,6 +42,20 @@ def test_sanitize_llm_output_strips_think_tags():
     assert sanitize_llm_output(raw, strip_tool_calls=True) == "Hello there!"
 
 
+def test_sanitize_llm_output_strips_thinking_even_when_tools_allowed():
+    """CHAT-01: tools-on must not leak <think> blocks."""
+    open_tag = "<" + "think" + ">"
+    close_tag = "</" + "think" + ">"
+    raw = f"{open_tag}secret{close_tag}Visible"
+    assert sanitize_llm_output(raw, strip_tool_calls=False) == "Visible"
+    kept = sanitize_llm_output(
+        'Hi <tool_call>{"name":"x","arguments":{}}</tool_call>',
+        strip_tool_calls=False,
+    )
+    assert "tool_call" in kept
+    assert kept.startswith("Hi")
+
+
 def test_sanitize_llm_output_preserves_answer_label_text():
     raw = "The final answer is: The user has just asked a question."
     assert sanitize_llm_output(raw, strip_tool_calls=True) == raw

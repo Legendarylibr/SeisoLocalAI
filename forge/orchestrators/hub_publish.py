@@ -50,6 +50,7 @@ class HubPublishOrchestrator(Orchestrator):
         quantizations = payload.get("quantizations")
 
         on_log(f"Publishing {folder} to https://huggingface.co/{repo_id}")
+        # Re-validate token/repo at push time (HUB-TOCTOU); route already prechecked.
         publish_folder_to_hub(
             folder,
             repo_id=repo_id,
@@ -57,7 +58,7 @@ class HubPublishOrchestrator(Orchestrator):
             metadata=meta,
             quantizations=quantizations,
             on_log=on_log,
-            skip_precheck=True,
+            skip_precheck=False,
             data_dir=self.sandbox_root,
         )
         on_log(f"Published to https://huggingface.co/{repo_id}")

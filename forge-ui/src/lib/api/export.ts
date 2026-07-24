@@ -38,17 +38,6 @@ export const exportApi = {
         rl_quant_job_id: rlQuantJobId || null,
       }),
     }),
-  /** @deprecated Prefer startPublishToHub (async job). Sync publish remains for scripts. */
-  publishToHub: (body: {
-    model_id?: string;
-    export_job_id?: string;
-    output_path?: string;
-    hub: HubPublishFields;
-  }) =>
-    request<{ repo_id: string; path: string; log: string }>("/export/publish", {
-      method: "POST",
-      body: JSON.stringify(body),
-    }),
   startPublishToHub: (body: {
     model_id?: string;
     export_job_id?: string;

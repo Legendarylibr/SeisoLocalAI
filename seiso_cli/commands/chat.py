@@ -35,11 +35,20 @@ def chat(
     prompt: str = typer.Option("", help="Single-turn prompt"),
 ) -> None:
     """Terminal chat with a local model."""
+    from seiso.inference.backends import recommend_backend, resolve_local_backend
     from seiso.memory.protection import MemoryLoadBlockedError, ensure_load_fits
     from seiso.models.loader import detect_backend
 
-    backend = detect_backend()
-    console.print(f"Backend: {backend.value}")
+    device_class = detect_backend()
+    try:
+        inference_backend = resolve_local_backend(
+            model_path=model, model_format=None, requested=None
+        )
+    except Exception:
+        inference_backend = recommend_backend(model_path=model, model_format=None)
+    console.print(
+        f"Device: {device_class.value} · Inference backend: {inference_backend}"
+    )
     try:
         ensure_load_fits(model, mode="chat")
     except MemoryLoadBlockedError as exc:
