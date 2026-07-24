@@ -165,6 +165,7 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
                 db,
                 job_id,
                 job.status.value,
+                user_id=user_id,
                 output_dir=result.get("output_root"),
                 run_dir=result.get("run_dir"),
                 model_dir=result.get("model_dir"),
@@ -192,7 +193,9 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
                     )
 
         async def _failed(message: str) -> None:
-            await config.update_status(db, job_id, "failed", error_text=message)
+            await config.update_status(
+                db, job_id, "failed", user_id=user_id, error_text=message
+            )
 
         async def _run() -> None:
             await run_orchestrated_job(

@@ -200,6 +200,7 @@ class DatabaseCore:
         job_id: str,
         status: str,
         *,
+        user_id: str | None = None,
         output_dir: str | None = None,
         run_dir: str | None = None,
         model_dir: str | None = None,
@@ -209,6 +210,7 @@ class DatabaseCore:
     ) -> None:
         table = config_job_table(table)
         now = now_iso()
+        owner_clause = " AND user_id = ?" if user_id is not None else ""
         async with self._conn() as conn:
             query = f"""UPDATE {table} SET status = ?, updated_at = ?,
                    output_dir = COALESCE(?, output_dir),
@@ -217,19 +219,19 @@ class DatabaseCore:
                    stages_json = COALESCE(?, stages_json),
                    stage_results_json = COALESCE(?, stage_results_json),
                    error_text = COALESCE(?, error_text)
-                   WHERE id = ?"""  # nosec B608
-            await conn.execute(
-                query,
-                (
-                    status,
-                    now,
-                    output_dir,
-                    run_dir,
-                    model_dir,
-                    json.dumps(stages) if stages is not None else None,
-                    json.dumps(stage_results) if stage_results is not None else None,
-                    error_text,
-                    job_id,
-                ),
-            )
+                   WHERE id = ?{owner_clause}"""  # nosec B608
+            params: list[Any] = [
+                status,
+                now,
+                output_dir,
+                run_dir,
+                model_dir,
+                json.dumps(stages) if stages is not None else None,
+                json.dumps(stage_results) if stage_results is not None else None,
+                error_text,
+                job_id,
+            ]
+            if user_id is not None:
+                params.append(user_id)
+            await conn.execute(query, tuple(params))
             await conn.commit()

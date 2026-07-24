@@ -521,18 +521,30 @@ def _patch_fused_qkv_projections(
             if _proj_slot(self) == 0:
                 cache["key"] = None
                 cache["outs"] = None
+                cache["x_mod"] = None
 
             adapters = tuple(self.active_adapters)
             if len(adapters) != 1:
                 return _fallback_projection(self, x, *args, **kwargs)
 
             adapter = adapters[0]
-            x_mod = x
-            if hasattr(self, "_cast_input_dtype"):
-                x_mod = self._cast_input_dtype(x_mod, self.lora_A[adapter].weight.dtype)
-            dropout_p = _lora_dropout_p(self.lora_dropout[adapter])
-            if dropout_p > 0 and self.training:
-                x_mod = F.dropout(x_mod, p=dropout_p)
+            # Apply dropout once on q_proj (slot 0) and reuse for k/v so the
+            # shared QKV cache key is stable. Per-proj dropout allocates distinct
+            # tensors and breaks the data_ptr cache under default lora_dropout.
+            if _proj_slot(self) == 0:
+                x_mod = x
+                if hasattr(self, "_cast_input_dtype"):
+                    x_mod = self._cast_input_dtype(
+                        x_mod, self.lora_A[adapter].weight.dtype
+                    )
+                dropout_p = _lora_dropout_p(self.lora_dropout[adapter])
+                if dropout_p > 0 and self.training:
+                    x_mod = F.dropout(x_mod, p=dropout_p)
+                cache["x_mod"] = x_mod
+            else:
+                x_mod = cache.get("x_mod")
+                if x_mod is None:
+                    return _fallback_projection(self, x, *args, **kwargs)
 
             flat_x = x_mod.reshape(-1, x_mod.shape[-1])
             cache_key = (
@@ -638,6 +650,10 @@ def _patch_post_attention_residual_norm(model: Any, decoder: Any) -> bool:
                 )
                 _parent._seiso_residual = None
                 return out
+            # Decoder chose the fused branch; never drop residual on fallback.
+            if residual is not None and residual is not hidden_states:
+                _parent._seiso_residual = None
+                return _fallback(residual + hidden_states)
             return _fallback(hidden_states)
         if hasattr(self_norm, "_seiso_orig_forward"):
             return self_norm._seiso_orig_forward(hidden_states)

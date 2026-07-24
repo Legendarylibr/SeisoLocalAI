@@ -88,10 +88,16 @@ def build_framework_config(
     if reward := payload.get("reward_weights"):
         overrides["reward_weights"] = reward
 
-    if checkpoint := payload.get("checkpoint_path"):
-        # Model/policy checkpoint — not a quality sidecar JSON.
-        overrides["resume_from_checkpoint"] = str(checkpoint)
-    if quality := payload.get("external_quality_path") or payload.get("quality_sidecar"):
+    if resume := payload.get("resume_from_checkpoint") or payload.get("policy_checkpoint"):
+        overrides["resume_from_checkpoint"] = str(resume)
+    # Product/CLI "Fine-tune checkpoint" and Forge link_training_job_id feed
+    # checkpoint_path — that is a quality sidecar / HF train artifact, not an
+    # adaptive_quant policy JSON resume path.
+    if quality := (
+        payload.get("external_quality_path")
+        or payload.get("quality_sidecar")
+        or payload.get("checkpoint_path")
+    ):
         overrides["external_quality_path"] = str(quality)
 
     if gguf := payload.get("gguf_path"):

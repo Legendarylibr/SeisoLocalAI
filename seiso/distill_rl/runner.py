@@ -524,6 +524,7 @@ def _run_dpo(
 
     examples = load_preference_dataset(preferences_path)
     if config.dpo_max_steps is not None:
+        settings.max_steps = int(config.dpo_max_steps)
         micro_batches = max(
             1, math.ceil(len(examples) / settings.per_device_train_batch_size)
         )
@@ -531,6 +532,7 @@ def _run_dpo(
             1,
             math.ceil(micro_batches / settings.gradient_accumulation_steps),
         )
+        # Keep epochs as an upper bound; max_steps is the hard optimizer cap.
         settings.num_epochs = max(
             1, math.ceil(config.dpo_max_steps / optimizer_steps_per_epoch)
         )

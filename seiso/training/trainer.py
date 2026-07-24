@@ -148,6 +148,7 @@ class SeisoTrainer:
                     cfg.dataset,
                     dataset_format=cfg.dataset_format,
                     sandbox_root=cfg.sandbox_root,
+                    sandbox_user_id=cfg.sandbox_user_id,
                     full_scan=False,
                 )
                 reused = False
@@ -355,7 +356,11 @@ class SeisoTrainer:
                     )
 
             if raw_ds is None:
-                raw_ds = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
+                raw_ds = load_training_dataset(
+                    cfg.dataset,
+                    sandbox_root=cfg.sandbox_root,
+                    sandbox_user_id=cfg.sandbox_user_id,
+                )
                 raw_ds, preprocess_stats, ds_fmt = preprocess_training_dataset(
                     raw_ds,
                     dataset_format=ds_fmt,
@@ -369,7 +374,11 @@ class SeisoTrainer:
                     f"samples kept (format={preprocess_stats['resolved_format']})"
                 )
         else:
-            raw_ds = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
+            raw_ds = load_training_dataset(
+                cfg.dataset,
+                sandbox_root=cfg.sandbox_root,
+                sandbox_user_id=cfg.sandbox_user_id,
+            )
 
         raw_ds = self._limit_training_samples(raw_ds)
         train_ds, eval_ds = self._split_train_eval(raw_ds)
@@ -974,7 +983,11 @@ class SeisoTrainer:
         cfg = self.config
         apply_determinism(cfg.seed, deterministic=cfg.deterministic)
         # Light schema check — skip full analyze_training_dataset for embedding pairs.
-        raw = load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
+        raw = load_training_dataset(
+            cfg.dataset,
+            sandbox_root=cfg.sandbox_root,
+            sandbox_user_id=cfg.sandbox_user_id,
+        )
 
         class _PairDataset(TorchDataset):
             """Index into the HF dataset — avoids materializing all InputExamples."""

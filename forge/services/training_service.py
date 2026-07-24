@@ -142,8 +142,9 @@ def run_dataset_analysis(
     *,
     dataset_format: DatasetFormat,
     sandbox_root: Path,
+    sandbox_user_id: str | None = None,
 ) -> dict[str, Any]:
-    key = (str(dataset), dataset_format.value, str(sandbox_root))
+    key = (str(dataset), dataset_format.value, str(sandbox_root), sandbox_user_id or "")
     now = time.monotonic()
     cached = _dataset_analysis_results.get(key)
     if cached is not None:
@@ -156,6 +157,7 @@ def run_dataset_analysis(
         dataset,
         dataset_format=dataset_format,
         sandbox_root=sandbox_root,
+        sandbox_user_id=sandbox_user_id,
     )
     if len(_dataset_analysis_results) >= _DATASET_RESULT_CACHE_MAX:
         oldest = min(_dataset_analysis_results.items(), key=lambda item: item[1][0])[0]

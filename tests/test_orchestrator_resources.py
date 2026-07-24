@@ -112,6 +112,33 @@ async def test_cancel_pending_job_before_start(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_cancel_during_resource_reserve_does_not_run(tmp_path: Path, monkeypatch):
+    """Cancel during start()'s await must stick; job must not become RUNNING."""
+    orchestrator = _GpuOrchestratorB(tmp_path)
+    job_id = orchestrator.create_job(user_id="user-a")
+    started = asyncio.Event()
+    release = asyncio.Event()
+    orig_reserve = orchestrator._reserve_resource
+
+    async def slow_reserve(job_id_arg, rec):
+        started.set()
+        await release.wait()
+        return await orig_reserve(job_id_arg, rec)
+
+    monkeypatch.setattr(orchestrator, "_reserve_resource", slow_reserve)
+    task = asyncio.create_task(orchestrator.start(job_id, {}))
+    await started.wait()
+    assert await orchestrator.cancel(job_id) is True
+    release.set()
+    await task
+    rec = orchestrator.get_job(job_id)
+    assert rec is not None
+    assert rec.status == JobStatus.CANCELLED
+    assert rec.cancel_requested is True
+    assert job_id not in orchestrator._tasks
+
+
+@pytest.mark.asyncio
 async def test_cancel_terminates_registered_process_group(monkeypatch, tmp_path: Path):
     orchestrator = _GpuOrchestratorB(tmp_path)
     job_id = orchestrator.create_job(user_id="user-a")

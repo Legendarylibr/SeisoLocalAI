@@ -309,6 +309,11 @@ class TrainingOrchestrator(Orchestrator):
         code = await proc.wait()
         cfg_path.unlink(missing_ok=True)
         if code != 0:
+            from seiso.training.cancel import is_requested
+
+            rec = self.get_job(job_id)
+            if is_requested(job_id) or (rec is not None and rec.cancel_requested):
+                raise asyncio.CancelledError()
             raise RuntimeError(f"Distributed training exited with code {code}")
 
         checkpoints = sorted(

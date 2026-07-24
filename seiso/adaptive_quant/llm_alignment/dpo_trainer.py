@@ -287,7 +287,13 @@ class DPOTrainer:
         steps_per_epoch = math.ceil(
             len(dataloader) / self.settings.gradient_accumulation_steps
         )
-        total_steps = steps_per_epoch * self.settings.num_epochs
+        epoch_steps = steps_per_epoch * self.settings.num_epochs
+        max_steps = self.settings.max_steps
+        total_steps = (
+            min(epoch_steps, int(max_steps))
+            if max_steps is not None and int(max_steps) > 0
+            else epoch_steps
+        )
         warmup_steps = int(total_steps * self.settings.warmup_ratio)
         scheduler = torch.optim.lr_scheduler.LambdaLR(
             self.optimizer,
@@ -297,6 +303,7 @@ class DPOTrainer:
         self.optimizer.zero_grad(set_to_none=True)
         accum_metrics: list[DPOMetrics] = []
         micro_steps = 0
+        hit_max_steps = False
 
         try:
             for _epoch in range(self.settings.num_epochs):
@@ -315,6 +322,15 @@ class DPOTrainer:
 
                         if self.global_step % self.settings.save_steps == 0:
                             self._save_checkpoint()
+                        if (
+                            max_steps is not None
+                            and int(max_steps) > 0
+                            and self.global_step >= int(max_steps)
+                        ):
+                            hit_max_steps = True
+                            break
+                if hit_max_steps:
+                    break
 
             if accum_metrics:
                 # Leftover microbatches were each scaled by 1/accum; renormalize

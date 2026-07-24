@@ -40,29 +40,32 @@ class ExportMixin:
         job_id: str,
         status: str,
         *,
+        user_id: str | None = None,
         output_paths: dict | None = None,
         error_text: str | None = None,
     ) -> None:
         now = now_iso()
+        owner_clause = " AND user_id = ?" if user_id is not None else ""
         async with self._conn() as conn:
             if output_paths is not None or error_text is not None:
                 await conn.execute(
-                    """UPDATE export_jobs SET status = ?, updated_at = ?,
+                    f"""UPDATE export_jobs SET status = ?, updated_at = ?,
                        output_paths_json = COALESCE(?, output_paths_json),
                        error_text = COALESCE(?, error_text)
-                       WHERE id = ?""",
+                       WHERE id = ?{owner_clause}""",  # nosec B608
                     (
                         status,
                         now,
                         json.dumps(output_paths) if output_paths is not None else None,
                         error_text,
                         job_id,
+                        *((user_id,) if user_id is not None else ()),
                     ),
                 )
             else:
                 await conn.execute(
-                    "UPDATE export_jobs SET status = ?, updated_at = ? WHERE id = ?",
-                    (status, now, job_id),
+                    f"UPDATE export_jobs SET status = ?, updated_at = ? WHERE id = ?{owner_clause}",  # nosec B608
+                    (status, now, job_id, *((user_id,) if user_id is not None else ())),
                 )
             await conn.commit()
 

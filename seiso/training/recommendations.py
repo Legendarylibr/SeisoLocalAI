@@ -127,6 +127,7 @@ def _try_analyze_dataset(
     dataset: str,
     *,
     sandbox_root: Path | None = None,
+    sandbox_user_id: str | None = None,
 ) -> dict[str, Any] | None:
     if not dataset.strip():
         return None
@@ -135,6 +136,7 @@ def _try_analyze_dataset(
             dataset,
             dataset_format=DatasetFormat.AUTO,
             sandbox_root=sandbox_root,
+            sandbox_user_id=sandbox_user_id,
         )
     except Exception as exc:
         logger.info("Dataset analysis unavailable for %s: %s", dataset, exc)
@@ -147,6 +149,7 @@ def recommend_training_config(
     model_id: str = "",
     dataset: str = "",
     sandbox_root: Path | None = None,
+    sandbox_user_id: str | None = None,
 ) -> dict[str, Any]:
     """Return suggested training knobs for the current hardware, model, and dataset."""
     defaults = training_defaults(profile)
@@ -154,7 +157,9 @@ def recommend_training_config(
     moe_sizing = infer_moe_sizing(model_id) if model_id else None
     if moe_sizing and moe_sizing.total_params_b is not None:
         params_b = moe_sizing.total_params_b
-    analysis = _try_analyze_dataset(dataset, sandbox_root=sandbox_root)
+    analysis = _try_analyze_dataset(
+        dataset, sandbox_root=sandbox_root, sandbox_user_id=sandbox_user_id
+    )
     ds = (
         analysis.get("recommended_config", {})
         if analysis

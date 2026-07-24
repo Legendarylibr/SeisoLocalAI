@@ -549,7 +549,11 @@ def llama_load_kwargs(
     # installed llama-cpp-python wheel can't actually offload (e.g. CPU-only
     # wheel on an NVIDIA Linux box), force 0 to avoid a crash at Llama init.
     if n_gpu_layers != 0 and not _mp()._llama_gpu_offload_ok():
-        logger.debug("llama-cpp-python wheel lacks GPU offload support — forcing n_gpu_layers=0")
+        logger.warning(
+            "llama-cpp-python wheel lacks GPU offload support — forcing n_gpu_layers=0 "
+            "(CPU-only inference despite SEISO_LLAMA_GPU_LAYERS=%s)",
+            n_gpu_layers,
+        )
         n_gpu_layers = 0
 
     batch_default, ubatch_default = _llama_batch_defaults(model_path)

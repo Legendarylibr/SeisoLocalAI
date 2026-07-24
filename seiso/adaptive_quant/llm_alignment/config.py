@@ -35,6 +35,8 @@ class DPOSettings:
     # Optimization
     learning_rate: float = 5e-7
     num_epochs: int = 1
+    #: Hard cap on optimizer steps (None = run full num_epochs).
+    max_steps: int | None = None
     per_device_train_batch_size: int = 2
     gradient_accumulation_steps: int = 4
     max_grad_norm: float = 1.0

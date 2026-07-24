@@ -146,7 +146,12 @@ def validate_provider_base_url(url: str, *, provider_type: str = "local_chat") -
                 raise SecurityError("base_url resolves to a blocked network range")
 
     port = parsed.port
-    netloc = host if port is None else f"{host}:{port}"
+    literal = _literal_ip(host)
+    if literal is not None and literal.version == 6:
+        bracketed = f"[{host}]"
+        netloc = bracketed if port is None else f"{bracketed}:{port}"
+    else:
+        netloc = host if port is None else f"{host}:{port}"
     path = parsed.path.rstrip("/")
     return f"{scheme}://{netloc}{path}"
 
@@ -172,14 +177,31 @@ def resolve_pinned_endpoint(
     scheme = parsed.scheme.lower()
     port = parsed.port or (443 if scheme == "https" else 80)
     ptype = provider_type.lower()
-    local_ok = ptype in _LOCAL_CHAT_TYPES and _is_local_host(host)
-
-    if local_ok:
+    # Only trust literal loopback / known local names without DNS pin.
+    # DNS names that currently resolve to loopback must still be pinned so a
+    # later rebinding cannot reach link-local/metadata after registration.
+    literal = _literal_ip(host)
+    local_literal = host in _LOCAL_HTTP_HOSTS or (
+        literal is not None and literal.is_loopback
+    )
+    # Literal loopback / localhost need no DNS pin.
+    if ptype in _LOCAL_CHAT_TYPES and local_literal:
         return PinnedEndpoint(
             base_url=base, host=host, port=port, scheme=scheme, pinned_ip=None
         )
 
     addrs = _resolve_host(host)
+    all_loopback = bool(addrs) and all(
+        (parsed_ip := _literal_ip(addr)) is not None and parsed_ip.is_loopback
+        for addr in addrs
+    )
+    # DNS names that resolve only to loopback must still be pinned so a later
+    # rebinding cannot reach link-local/metadata after registration.
+    if ptype in _LOCAL_CHAT_TYPES and all_loopback:
+        return PinnedEndpoint(
+            base_url=base, host=host, port=port, scheme=scheme, pinned_ip=addrs[0]
+        )
+
     for addr in addrs:
         if _is_blocked_ip(addr):
             raise SecurityError("base_url resolves to a blocked network range")

@@ -55,6 +55,19 @@ def test_resolve_pinned_endpoint_pins_remote_host(monkeypatch):
     assert endpoint.base_url == "https://example.com/v1"
 
 
+def test_resolve_pinned_endpoint_pins_loopback_dns_names(monkeypatch):
+    """DNS names that currently resolve to loopback must still be pinned."""
+    monkeypatch.setattr(
+        "forge.security.url_policy._resolve_host",
+        lambda host: ["127.0.0.1"],
+    )
+    endpoint = resolve_pinned_endpoint(
+        "http://local-vllm.test:8000", provider_type="local_chat"
+    )
+    assert endpoint.pinned_ip == "127.0.0.1"
+    assert endpoint.host == "local-vllm.test"
+
+
 def test_pin_request_to_ip_preserves_host_and_sni_without_getaddrinfo_patch():
     import socket
 

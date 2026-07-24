@@ -137,9 +137,11 @@ async def run_bundled_job(
         try:
             result = await future
         except asyncio.CancelledError:
-            # Finish executor work before release_after_task frees the GPU.
-            with contextlib.suppress(Exception):
-                await asyncio.shield(future)
+            # Thread-pool work cannot be killed; wait briefly then proceed so
+            # cancel status is not stuck behind a long GPU job. Remaining work
+            # may still finish in the executor, but we release the job lifecycle.
+            with contextlib.suppress(Exception, asyncio.TimeoutError):
+                await asyncio.wait_for(asyncio.shield(future), timeout=2.0)
             raise
     finally:
         release_after_task(

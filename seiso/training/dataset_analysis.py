@@ -433,6 +433,7 @@ def analyze_training_dataset(
     *,
     dataset_format: DatasetFormat = DatasetFormat.AUTO,
     sandbox_root: Path | None = None,
+    sandbox_user_id: str | None = None,
     split: str = "train",
     sample_rows_for_schema: int = 48,
     full_scan: bool = True,
@@ -447,7 +448,12 @@ def analyze_training_dataset(
     analysis), only stratified samples are validated so the expensive full
     preprocess is not repeated before ``_prepare_datasets`` runs it once.
     """
-    raw = load_training_dataset(str(dataset), split=split, sandbox_root=sandbox_root)
+    raw = load_training_dataset(
+        str(dataset),
+        split=split,
+        sandbox_root=sandbox_root,
+        sandbox_user_id=sandbox_user_id,
+    )
     initial = len(raw)
     if initial == 0:
         raise ValueError("Dataset contains no rows")

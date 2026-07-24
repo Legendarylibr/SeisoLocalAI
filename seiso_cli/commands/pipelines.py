@@ -26,7 +26,8 @@ def rl_quant_run(
     training_backend: str = typer.Option("stdlib", help="stdlib | pytorch"),
     seed: int = typer.Option(13, help="RNG seed"),
     checkpoint_path: str | None = typer.Option(
-        None, help="Fine-tune checkpoint for quality sidecar"
+        None,
+        help="Fine-tune / quality sidecar path (sets external_quality_path)",
     ),
     gguf_path: str | None = typer.Option(None, help="GGUF path for llama.cpp backend"),
     gguf_export: bool = typer.Option(False, help="Export GGUF after recommendation"),

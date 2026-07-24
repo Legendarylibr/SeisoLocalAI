@@ -200,6 +200,10 @@ def run_auto_hyperparameter_sweep(
             val_preferences_path=config.preferences_val_path,
             prompt_library_path=config.prompt_library_path,
             eval_max_prompts=max(1, min(config.eval_max_prompts, 8)),
+            trust_remote_code=config.trust_remote_code,
+            benchmark_verifiable=bool(
+                getattr(config, "benchmark_verifiable", False)
+            ),
             on_log=on_log,
         )
         objective_value = extract_metric(evaluation, objective)

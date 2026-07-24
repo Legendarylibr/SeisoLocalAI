@@ -54,6 +54,26 @@ async def run_orchestrated_job(
             await on_started()
         await orchestrator.start(job_id, payload)
         job = await orchestrator.wait_for(job_id)
+    except asyncio.CancelledError:
+        # Persist cancel even when the outer task is cancelled during release.
+        job = orchestrator.get_job(job_id)
+        if job is not None:
+            job.cancel_requested = True
+            from forge.orchestrators.base import JobStatus
+
+            if job.status not in (
+                JobStatus.CANCELLED,
+                JobStatus.COMPLETED,
+                JobStatus.FAILED,
+            ):
+                job.status = JobStatus.CANCELLED
+            try:
+                await on_finished(job)
+            except Exception:
+                logger.exception(
+                    "Failed to persist cancelled state for job %s", job_id
+                )
+        raise
     except Exception as exc:
         await on_failed(job_failure_message(orchestrator, job_id, exc))
         return

@@ -136,6 +136,7 @@ async def start_rl_quant(
         await db.update_rl_quant_job_status(
             job_id,
             job.status.value,
+            user_id=user_id,
             output_dir=(job.result or {}).get("output_dir"),
             recommendation_path=(job.result or {}).get("recommendation_path"),
             recommendation_json=rec,
@@ -167,7 +168,9 @@ async def start_rl_quant(
                 )
 
     async def _failed(message: str) -> None:
-        await db.update_rl_quant_job_status(job_id, "failed", error_text=message)
+        await db.update_rl_quant_job_status(
+            job_id, "failed", user_id=user_id, error_text=message
+        )
 
     async def _run() -> None:
         await run_orchestrated_job(

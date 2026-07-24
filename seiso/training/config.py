@@ -99,6 +99,8 @@ class TrainConfig(BaseModel):
     lr_scheduler: str = "cosine"
     resume_from: Path | None = None
     sandbox_root: Path | None = None
+    #: When set with sandbox_root=data_dir, enforce per-user scoped roots.
+    sandbox_user_id: str | None = None
     seed: int = 42
     deterministic: bool = True
     multi_gpu: bool = False

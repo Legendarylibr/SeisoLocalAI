@@ -512,25 +512,53 @@ class ModelPool:
                             exc_info=True,
                         )
                     return self._active.handle
-                if self._active:
-                    # Force-clear any stale active handle before install.
+                # cancel_and_unload during load must win: discard the fresh handle
+                # and keep unload_pending so we do not leave a resident model.
+                if self._unload_pending:
                     stale = self._active
                     self._active = None
-                    self._unload_pending = False
+                    discard = handle
+                    handle = None
                 else:
-                    stale = None
+                    if self._active:
+                        stale = self._active
+                        self._active = None
+                    else:
+                        stale = None
+                    discard = None
+                    self._active = LoadedModel(
+                        key=key,
+                        backend=backend,
+                        handle=handle,
+                        meta={
+                            "path": load_path,
+                            "norm_path": norm,
+                            **(meta or {}),
+                            **layer_meta,
+                        },
+                    )
+            if discard is not None:
+                try:
+                    if hasattr(discard, "close"):
+                        discard.close()
+                except Exception:
+                    logger.debug(
+                        "Failed to close cancelled load handle",
+                        exc_info=True,
+                    )
+                self._release_resident_gpu_resource_lock()
+                if stale is not None:
+                    try:
+                        if hasattr(stale.handle, "close"):
+                            stale.handle.close()
+                    except Exception:
+                        logger.debug(
+                            "Failed to close stale pool handle", exc_info=True
+                        )
+                with self._lock:
                     self._unload_pending = False
-                self._active = LoadedModel(
-                    key=key,
-                    backend=backend,
-                    handle=handle,
-                    meta={
-                        "path": load_path,
-                        "norm_path": norm,
-                        **(meta or {}),
-                        **layer_meta,
-                    },
-                )
+                clear_dflash_draft_cache()
+                raise RuntimeError("Model load cancelled (unload requested)")
             if stale is not None:
                 try:
                     if hasattr(stale.handle, "close"):

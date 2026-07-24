@@ -128,11 +128,21 @@ def export_checkpoint(
             results[fmt.value] = dest
 
         elif fmt in (ExportFormat.BASE, ExportFormat.FULL):
-            if kind == "lora":
+            looks_like_adapter = (ckpt / "adapter_config.json").is_file() or (
+                (ckpt / "adapter_model.safetensors").is_file()
+                or (ckpt / "adapter_model.bin").is_file()
+            )
+            if kind == "lora" or (kind == "unknown" and looks_like_adapter):
                 raise ValueError(
                     f"Cannot export LoRA-only checkpoint as {fmt.value!r}; "
                     "use formats 'lora' and/or 'merged' instead "
-                    f"(checkpoint={ckpt})"
+                    f"(checkpoint={ckpt}, kind={kind})"
+                )
+            if kind == "unknown":
+                raise ValueError(
+                    f"Cannot export checkpoint as {fmt.value!r}: unable to detect "
+                    "full weights (missing config.json / adapter_config.json). "
+                    f"Refuse to copytree unknown trees as full/base (checkpoint={ckpt})"
                 )
             dest = out_root / ("full" if fmt == ExportFormat.FULL else "base")
             if ckpt.exists():
