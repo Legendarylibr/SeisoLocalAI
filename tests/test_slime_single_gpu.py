@@ -998,7 +998,8 @@ def test_dynamic_sampling_drops_format_only_spread(tmp_path: Path):
         dataset=tmp_path / "data.jsonl",
         output_dir=tmp_path / "out",
         rollouts_per_prompt=2,
-        dynamic_sampling_filter="reward_nonzero_std",
+        # outcome_nonzero_std ignores format/process shaping (SLM-02).
+        dynamic_sampling_filter="outcome_nonzero_std",
     )
     rollouts = [
         # All outcomes 0; format shaping makes composite rewards differ.

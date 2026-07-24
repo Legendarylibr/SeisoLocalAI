@@ -50,18 +50,28 @@ def validate_csrf(request: Request) -> bool:
     if path in CSRF_EXEMPT_PATHS:
         return True
     # Bearer-authenticated API clients are not vulnerable to browser CSRF.
-    # Only skip when the Bearer token is a valid session JWT (S1-010) — junk
-    # Bearer text must not bypass double-submit cookie checks.
+    # Only skip for a valid session JWT or the configured inference API key
+    # (S1-010) — junk Bearer text must not bypass double-submit cookie checks.
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer ") and auth[7:].strip():
         from forge.config import get_settings
         from forge.security.auth import InvalidTokenError, decode_token
 
+        token = auth[7:].strip()
+        settings = get_settings()
         try:
-            decode_token(auth[7:].strip(), get_settings())
+            decode_token(token, settings)
             return True
         except InvalidTokenError:
             pass
+        expected_key = settings.inference_api_key or ""
+        # compare_digest raises on length mismatch — only compare equal lengths.
+        if (
+            expected_key
+            and len(token) == len(expected_key)
+            and secrets.compare_digest(token, expected_key)
+        ):
+            return True
     if not (path.startswith("/api") or path.startswith("/v1")):
         return True
     cookie_token = request.cookies.get(CSRF_COOKIE)

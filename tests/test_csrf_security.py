@@ -114,6 +114,33 @@ async def test_junk_bearer_does_not_bypass_csrf(app):
 
 
 @pytest.mark.asyncio
+async def test_inference_api_key_bypasses_csrf_on_v1(app):
+    """Configured inference API key is a real Bearer credential (not junk)."""
+    from forge.config import get_settings
+
+    key = get_settings().inference_api_key
+    assert key
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post(
+            "/api/auth/register",
+            json={"password": "securepass1"},
+        )
+        res = await client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {key}"},
+            json={
+                "model": "default",
+                "messages": [{"role": "user", "content": "hi"}],
+                "stream": False,
+            },
+        )
+        # May fail on missing model, but must not fail CSRF.
+        assert res.status_code in {400, 404, 409, 500}
+        assert "CSRF" not in str(res.json().get("detail", ""))
+
+
+@pytest.mark.asyncio
 async def test_csrf_blocks_v1_without_header(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
