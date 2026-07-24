@@ -39,7 +39,9 @@ class DatasetAnalysisCacheEntry:
 
 _dataset_analysis_cache: dict[str, DatasetAnalysisCacheEntry] = {}
 # Content-addressed analysis results so validate/analyze don't rescans the same corpus.
-_dataset_analysis_results: dict[tuple[str, str, str], tuple[float, dict[str, Any]]] = {}
+_dataset_analysis_results: dict[
+    tuple[str, str, str, str], tuple[float, dict[str, Any]]
+] = {}
 _DATASET_RESULT_CACHE_MAX = 32
 
 

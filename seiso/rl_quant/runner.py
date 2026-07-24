@@ -47,7 +47,11 @@ def run_rl_quant_job(
             requested_stages = list(product.stages)
     if requested_stages:
         _log(f"Requested stages: {', '.join(str(s) for s in requested_stages)}")
-        if "auto_sweep" not in requested_stages:
+        # Preset/stage lists that omit auto_sweep default the sweep off, but an
+        # explicit auto_sweep/sweep flag in the payload still wins.
+        if "auto_sweep" not in requested_stages and (
+            "auto_sweep" not in payload and "sweep" not in payload
+        ):
             payload = {**payload, "auto_sweep": False}
 
     sweep_result: dict[str, Any] | None = None
