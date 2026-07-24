@@ -49,9 +49,9 @@ Full-tree correctness and engineering audit of SeisoLocalAI (~644 Python files, 
 
 | ID | Sev | Area | Evidence | Action | Status |
 |----|-----|------|----------|--------|--------|
-| S1-001 | P1 | SSRF | `forge/security/http_client.py` global `getaddrinfo` pin | Fix: custom transport (larger change) | Open |
+| S1-001 | P1 | SSRF | `forge/security/http_client.py` global `getaddrinfo` pin | Fix: custom transport (larger change) | Fixed (`_PinnedIPTransport`, #384) |
 | S1-002 | P1 | Jobs | `forge/orchestrators/base.py` cancel ignores PENDING | Fix | Fixed |
-| S1-003 | P1 | Paths | Divergent `user_paths` vs `seiso.security` | Consolidate | Partial (recipes root) |
+| S1-003 | P1 | Paths | Divergent `user_paths` vs `seiso.security` | Consolidate | Fixed (shared `USER_SCOPED_DATA_ROOTS`, #384) |
 | S1-004 | P2 | Training sandbox | uploads-only vs full user tree | Fix later | Open |
 | S1-005 | P2 | Hub publish | No re-assert in orchestrator | Fix | Fixed |
 | S1-006 | P2 | Kernels | Per-model restore clears all | Fix later | Open |
@@ -70,8 +70,8 @@ Full-tree correctness and engineering audit of SeisoLocalAI (~644 Python files, 
 
 | ID | Sev | Area | Evidence | Action | Status |
 |----|-----|------|----------|--------|--------|
-| INF-01 | P1 | Inference | `available_backends` returns single engine | Fix later | Open |
-| SLM-01 | P1 | Slime | vLLM/SGLang old_logprobs from actor | Document/guard later | Open |
+| INF-01 | P1 | Inference | `available_backends` returns single engine | Fix later | Fixed (multi-backend list, #384) |
+| SLM-01 | P1 | Slime | vLLM/SGLang old_logprobs from actor | Document/guard later | Fixed (docs + `*_sync_weights` required, #383/#389/#390) |
 | TRN-01 | P1 | Training UI | packing+`auto` guard gap | Fix | Fixed |
 | INF-02 | P2 | Inference | ROUTER enum vs local resolver | Document/reject | Open |
 | INF-03 | P2 | CLI chat | Prints device class not backend | Fix later | Open |
@@ -80,7 +80,7 @@ Full-tree correctness and engineering audit of SeisoLocalAI (~644 Python files, 
 | SLM-02 | P2 | Slime | `reward_nonzero_std` misnamed | Alias later | Open |
 | SLM-03 | P2 | CLI | slime multi-GPU parity | Document | Fixed (docs) |
 | EXP-01 | P2 | Export | `BASE` near-dead | Deprecate | Fixed |
-| EXP-02 | P2 | Export | LoRA→full copytree | Guard later | Open |
+| EXP-02 | P2 | Export | LoRA→full copytree | Guard later | Fixed (refuse FULL/BASE for LoRA-only, #379) |
 | INF-04/05 | P3 | Inference | Dead empty-set / fallthrough | Fix | Fixed |
 | PAR-02 | P3 | Naming | `slime_single_gpu_metrics.jsonl` | Keep + deprecate package | Deprecate note |
 
@@ -94,7 +94,7 @@ Full-tree correctness and engineering audit of SeisoLocalAI (~644 Python files, 
 | RP-02 | P0 | Claims | Multiseed/sweep claim boundary empty | Fix | Fixed |
 | RP-03 | P1 | Copy | “Deploy …” ignores evidence | Fix | Fixed |
 | RP-04 | P1 | Config | `stdlib` vs `python` training_backend | Alias | Fixed |
-| RP-05 | P1 | Presets | post_train dual registry | Open (larger) | Open |
+| RP-05 | P1 | Presets | post_train dual registry | Open (larger) | Fixed (`seiso/rl_quant/presets.py` single product registry) |
 | RP-06 | P1 | CLI | orphan `adaptive-rl-quant-*` names | Docs scrub | Partial |
 | RP-07 | P1 | Compress | Dual CLI surfaces | Document | Fixed (docs) |
 | RP-08 | P2 | Evidence | Nested `evidence.level` misread | Fix | Fixed |
@@ -104,11 +104,11 @@ Full-tree correctness and engineering audit of SeisoLocalAI (~644 Python files, 
 
 | ID | Sev | Area | Evidence | Action | Status |
 |----|-----|------|----------|--------|--------|
-| F4-01 | P0 | Code-exec | AST deny-list ≠ sandbox | Document + fail-closed note | Documented |
+| F4-01 | P0 | Code-exec | AST deny-list ≠ sandbox | Document + fail-closed note | Fixed (remote+code-exec hard refuse, #377/#392) |
 | F4-02 | P1 | Compat auth | `compare_digest` length → 500 | Fix | Fixed |
-| F4-03–05 | P1 | DB | `recipe_jobs` / `knowledge_bases` / `projects` schema-only | Delete or implement | Open |
+| F4-03–05 | P1 | DB | `recipe_jobs` / `knowledge_bases` / `projects` schema-only | Delete or implement | Fixed (dropped unused tables, #382) |
 | F4-06 | P1 | Hub publish | Memory-only jobs | Persist later | Open |
-| F4-07–09 | P2 | Jobs | Status aliases / error_text gaps | Later | Open |
+| F4-07–09 | P2 | Jobs | Status aliases / error_text gaps | Later | Partial (#382 narrowed SSE aliases; error_text UI fixed) |
 
 ### Phase 5 — UI
 
@@ -125,9 +125,9 @@ Full-tree correctness and engineering audit of SeisoLocalAI (~644 Python files, 
 |----|-----|------|----------|--------|--------|
 | F6-01 | P1 | Docs | `seiso slime` undocumented | Fix | Fixed |
 | F6-02 | P1 | Docs | Wrong `seiso compress` snippet | Fix | Fixed |
-| F6-03 | P2 | Tests | docs accuracy coverage thin | Expand later | Open |
+| F6-03 | P2 | Tests | docs accuracy coverage thin | Expand later | Partial (slime/compress/NeMo coverage, #381) |
 | F6-04 | P2 | Configs | Unreferenced smoke/examples | Adopt or archive later | Open |
-| F6-05 | P2 | Tests | GPU e2e / nvcc brittle | Soft-skip later | Open |
+| F6-05 | P2 | Tests | GPU e2e / nvcc brittle | Soft-skip later | Partial (nvcc soft-skip, #378) |
 
 ---
 
@@ -138,10 +138,10 @@ Full-tree correctness and engineering audit of SeisoLocalAI (~644 Python files, 
 | `seiso/slime_single_gpu` | **Deprecate** (shim retained) |
 | `ExportFormat.BASE` | **Deprecate** (alias to FULL behavior documented) |
 | Sync `POST /export/publish` + UI `publishToHub` | **Deprecate** (jobs path is canonical) |
-| DB `recipe_jobs`, `knowledge_bases`, `projects` | **Delete or implement** (open) |
+| DB `recipe_jobs`, `knowledge_bases`, `projects` | **Deleted** (#382) |
 | Route helpers `_jobs`/`_pipeline`/`_stream` | **Keep** |
-| Compat `/v1` stack | **Keep** (thin adapters) |
-| AST code-exec as “sandbox” | **Deprecate naming**; harden or gate under remote |
+| Compat `/v1` stack | **Keep** (thin adapters; inference key chat-only) |
+| AST code-exec as “sandbox” | **Deprecate naming**; remote+code-exec hard-refused |
 | Orphan adaptive_quant console script names | **Delete from docs**; use `seiso rl-quant` / `python -m` |
 
 ---
@@ -152,13 +152,15 @@ See git history / working tree for: PENDING cancel, deploy_quality_claimable, cl
 
 ## Follow-ups (not in this pass)
 
-1. Replace global DNS pin with httpx transport (S1-001).
-2. Unify path policy into `seiso.security` (S1-003).
-3. Multi-backend picker (INF-01); slime engine logprobs (SLM-01).
-4. Single RL-quant preset registry (RP-05).
-5. Persist or drop dead DB tables (F4-03–05).
-6. OS-level code-exec sandbox or hard disable under `allow_remote` (F4-01).
+**Done after this report (through v0.4.0+):** S1-001, S1-003, INF-01, SLM-01, EXP-02, F4-01, F4-03–05, RP-05; plus NeMo RL (#387), slime multi-GPU/GRPO correctness (#388–#390), training-config invariants (#389), red-team tools/KB/Compat hardening (#392).
+
+**Still open:**
+
+1. Remaining path-join consolidation edges (S1-012) and training upload sandbox scope (S1-004).
+2. Optional OS-level code-exec sandbox for localhost (F4-01 naming/isolation beyond remote refuse).
+3. Persist hub-publish jobs (F4-06); RL Quant stage-pipeline page (F5-02).
+4. Broader docs-accuracy / smoke-config hygiene (F6-03/F6-04).
 
 ---
 
-*Generated as part of the Full-Codebase Correctness and Engineering Review.*
+*Generated as part of the Full-Codebase Correctness and Engineering Review. Status column refreshed 2026-07-23.*

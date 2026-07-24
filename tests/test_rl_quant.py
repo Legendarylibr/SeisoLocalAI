@@ -12,8 +12,16 @@ from seiso.rl_quant.bootstrap import (
     require_adaptive_quant,
 )
 from seiso.rl_quant.config_builder import build_framework_config
-from seiso.rl_quant.presets import rl_quant_presets_response
+from seiso.rl_quant.presets import (
+    get_preset,
+    known_preset_ids,
+    lookup_preset,
+    normalize_preset_id,
+    rl_quant_presets_response,
+    sweep_grid_for_preset,
+)
 from seiso.rl_quant.recommendation import recommendation_to_gguf_quants
+from seiso.rl_quant.sweep import default_sweep_grid
 
 
 def test_rl_quant_presets_response_includes_hints():
@@ -25,6 +33,40 @@ def test_rl_quant_presets_response_includes_hints():
     assert payload["preset_hints"]["minimal"]
     assert payload["reward_weights_help"]["gamma_perplexity"]
     assert payload["auto_sweep_help"]["auto_sweep"]
+
+
+def test_product_preset_registry_is_single_source():
+    """API metadata, aliases, and sweep grids share one registry (RP-05)."""
+    assert set(known_preset_ids()) == {"minimal", "reproducible", "post_train"}
+    assert normalize_preset_id("posttrain") == "post_train"
+    assert normalize_preset_id("smoke") == "minimal"
+    assert lookup_preset("continuous") is None
+
+    post = get_preset("post_train")
+    assert post.prompt_library == "prompts/post_train_library.json"
+    assert post.backend == "simulator"
+    assert "reward_weights.beta_throughput" in post.sweep_grid
+
+    # Sweep helper must not keep a parallel post_train / smoke grid map.
+    assert default_sweep_grid({"preset": "posttrain"}) == sweep_grid_for_preset(
+        "post_train"
+    )
+    assert default_sweep_grid({"preset": "smoke"}) == sweep_grid_for_preset("minimal")
+
+
+def test_build_framework_config_post_train_uses_product_registry(tmp_path: Path):
+    require_adaptive_quant()
+    cfg = build_framework_config(
+        job_id="job-post",
+        user_id="user-1",
+        data_dir=tmp_path,
+        payload={"preset": "posttrain"},
+    )
+    assert cfg.backend == "simulator"
+    assert cfg.training_backend == "python"
+    assert cfg.continuous_training is True
+    assert cfg.router_enabled is True
+    assert str(cfg.prompt_library_path).endswith("post_train_library.json")
 
 
 def test_bundled_source_present():

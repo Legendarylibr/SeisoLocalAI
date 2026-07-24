@@ -7,6 +7,7 @@ from typing import Any
 
 from seiso.bundled.config_builder import job_output_root, resolve_config_file_path
 from seiso.rl_quant.bootstrap import bundle_root, ensure_adaptive_quant_importable
+from seiso.rl_quant.presets import lookup_preset
 
 
 def _artifact_paths(output_root: Path, run_name: str) -> dict[str, str]:
@@ -41,6 +42,7 @@ def build_framework_config(
 
     run_name = str(payload.get("run_name") or f"seiso_{job_id[:8]}")
     output_root = job_output_root(data_dir, "rl_quant", user_id, job_id)
+    product = lookup_preset(payload.get("preset"))
 
     if config_file := payload.get("config_file"):
         path = resolve_config_file_path(config_file, bundle_root=bundle_root())
@@ -48,9 +50,19 @@ def build_framework_config(
             raise ValueError(f"Config file not found: {config_file}")
         base = load_config(path)
     else:
-        base = named_preset(str(payload.get("preset", "reproducible")))
+        named = (
+            product.resolve_named_preset()
+            if product is not None
+            else str(payload.get("preset", "reproducible"))
+        )
+        base = named_preset(named)
 
-    preset = str(payload.get("preset", "")).lower()
+    # Product registry owns Seiso defaults (simulator/python). Research named_preset
+    # may still supply continuous/router knobs for post_train under those backends.
+    default_backend = product.backend if product is not None else base.backend
+    default_training_backend = (
+        product.training_backend if product is not None else base.training_backend
+    )
 
     overrides: dict[str, Any] = {
         **_artifact_paths(output_root, run_name),
@@ -61,15 +73,15 @@ def build_framework_config(
             payload.get("evaluation_episodes", base.evaluation_episodes)
         ),
         "seed": int(payload.get("seed", base.seed)),
-        "backend": str(payload.get("backend", base.backend)),
-        "training_backend": str(payload.get("training_backend", base.training_backend)),
+        "backend": str(payload.get("backend", default_backend)),
+        "training_backend": str(
+            payload.get("training_backend", default_training_backend)
+        ),
         "llama_cpp_gguf_export_enabled": bool(payload.get("gguf_export", False)),
     }
 
-    if preset in {"post_train", "posttrain"}:
-        overrides["prompt_library_path"] = str(
-            bundle_root() / "prompts" / "post_train_library.json"
-        )
+    if product is not None and product.prompt_library:
+        overrides["prompt_library_path"] = str(bundle_root() / product.prompt_library)
     elif payload.get("prompt_library"):
         overrides["prompt_library_path"] = str(payload["prompt_library"])
 

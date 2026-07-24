@@ -8,35 +8,7 @@ from typing import Any, cast
 
 from seiso.bundled.config_builder import resolve_config_file_path
 from seiso.rl_quant.bootstrap import bundle_root
-
-# Compact grids tuned for smoke vs research presets.
-_DEFAULT_SWEEP_GRIDS: dict[str, dict[str, tuple[Any, ...]]] = {
-    "minimal": {
-        "learning_rate": (0.025, 0.035),
-    },
-    "smoke": {
-        "learning_rate": (0.025, 0.035),
-    },
-    "reproducible": {
-        "learning_rate": (0.02, 0.035),
-        "value_learning_rate": (0.015, 0.025),
-    },
-    "post_train": {
-        "learning_rate": (0.02, 0.035),
-        "value_learning_rate": (0.015, 0.025),
-        "reward_weights.beta_throughput": (0.04, 0.08),
-    },
-    "posttrain": {
-        "learning_rate": (0.02, 0.035),
-        "value_learning_rate": (0.015, 0.025),
-        "reward_weights.beta_throughput": (0.04, 0.08),
-    },
-}
-
-_FALLBACK_GRID: dict[str, tuple[Any, ...]] = {
-    "learning_rate": (0.02, 0.035),
-    "value_learning_rate": (0.015, 0.025),
-}
+from seiso.rl_quant.presets import sweep_grid_for_preset
 
 
 def auto_sweep_enabled(payload: dict[str, Any]) -> bool:
@@ -68,8 +40,7 @@ def default_sweep_grid(payload: dict[str, Any]) -> dict[str, tuple[Any, ...]]:
             grid[key] = values
         return grid
 
-    preset = str(payload.get("preset", "reproducible")).lower().replace("-", "_")
-    return dict(_DEFAULT_SWEEP_GRIDS.get(preset, _FALLBACK_GRID))
+    return sweep_grid_for_preset(str(payload.get("preset", "reproducible")))
 
 
 def sweep_episode_budget(

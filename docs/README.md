@@ -23,7 +23,8 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Chat with a local model | [getting-started.md § Step 4](getting-started.md#step-4--chat-with-a-local-model) |
 | Fine-tune with QLoRA / LoRA | [training/quickstart.md](training/quickstart.md) |
 | Run each training pipeline step by step | [training/pipelines.md](training/pipelines.md) |
-| Single-GPU slime post-training | [training/quickstart.md § Slime Post-Training](training/quickstart.md#slime-post-training) |
+| Single-GPU / multi-GPU slime post-training | [training/quickstart.md § Slime](training/quickstart.md#slime-post-training) · [multi-gpu.md](training/multi-gpu.md) |
+| External NVIDIA NeMo RL (cite upstream) | [training/quickstart.md § NeMo RL](training/quickstart.md#nemo-rl) · [cli.md § seiso nemo-rl](cli.md#seiso-nemo-rl) · [pipelines.md](training/pipelines.md#nemo-rl) |
 | RL quant from CLI | [cli.md § seiso rl-quant](cli.md#seiso-rl-quant) · [compression.md](compression.md) |
 | Use Cursor / Continue with local models | [getting-started.md § Connect external tools](getting-started.md#connect-external-tools-cursor-continue-etc) |
 | Export to GGUF or Hugging Face Hub | [getting-started.md § Step 6](getting-started.md#step-6--export-and-deploy) · [cli.md](cli.md) |
@@ -169,6 +170,9 @@ seiso train --config configs/example_lora.yaml
 
 # Slime post-training (CLI → ./outputs/slime-train-method/)
 seiso train --config configs/example_training_slime.yaml
+
+# External NeMo RL (requires SEISO_NEMO_RL_ROOT checkout; dry-run: configs/smoke_nemo_rl.yaml)
+seiso nemo-rl --config configs/example_training_nemo_rl.yaml
 
 # RL quant (CLI → $SEISO_DATA_DIR/rl_quant/cli/<job_id>/)
 seiso rl-quant run --preset minimal --kernel-rl

@@ -211,6 +211,28 @@ unset SEISO_ALLOW_CODE_EXEC
 unset SEISO_ALLOW_REMOTE
 ```
 
+## NeMo RL checkout or `uv` not found
+
+**Symptom:** `FileNotFoundError: NeMo RL checkout not found` or `uv is required to launch NeMo RL`.
+
+**Cause:** `method: nemo_rl` / `seiso nemo-rl` only launches an **external** [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL) tree. Seiso does not ship NeMo RL or its lockfile.
+
+**Fix:**
+1. Clone recursively and export the root:
+   ```bash
+   git clone --recursive https://github.com/NVIDIA-NeMo/RL.git ~/nemo-rl
+   export SEISO_NEMO_RL_ROOT=~/nemo-rl
+   ```
+   Or set `nemo_rl_root: ~/nemo-rl` in the training YAML.
+2. Install [`uv`](https://docs.astral.sh/uv/) and ensure it is on `PATH`, or set `SEISO_UV` / `UV` to the executable.
+3. Preview Seiso’s projected Hydra command without running NeMo RL:
+   ```bash
+   seiso train --config configs/smoke_nemo_rl.yaml
+   ```
+4. For a 10-step install check inside a real checkout, set `nemo_rl_recipe: smoke`.
+
+See [training/quickstart.md § NeMo RL](training/quickstart.md#nemo-rl) (includes upstream citation).
+
 ## Compat `/v1` returns 401
 
 Use the inference-scoped key (not your admin password):
@@ -228,6 +250,8 @@ Get-Content "$env:USERPROFILE\.seiso\.inference_api_key"
 Use header: `Authorization: Bearer seiso_sk_...`
 
 Or log in via Forge and use the session JWT.
+
+**Tool calling on `/v1`:** even with `SEISO_ALLOW_COMPAT_TOOLS=true`, the inference API key stays chat-only. Use a Forge session JWT for Compat tools.
 
 ## Port in use / Forge already running
 
