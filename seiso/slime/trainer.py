@@ -52,6 +52,7 @@ from seiso.slime.policy import (  # noqa: F401
     _filter_rollout_groups,
     _group_reward_spread_mean,
     _group_verifier_stats,
+    _http_rollout_status,
     _keep_rollout_group,
     _masked_sequence_logprobs,
     _mean,
@@ -60,7 +61,6 @@ from seiso.slime.policy import (  # noqa: F401
     _pad_rollouts,
     _policy_loss,
     _response_mask_for_sequence,
-    _http_rollout_status,
     _rollout_status,
     _rollout_status_stats,
     _sequence_logprobs,
@@ -761,8 +761,8 @@ def _collect_rollouts(
                     proof_passed=score["proof_passed"],
                     proof_score=score["proof_score"],
                     proof_detail=score["proof_detail"],
-                    )
                 )
+            )
             if verifier_path is not None:
                 prompt_text = (
                     prompt_chunk[sample_idx] if sample_idx < len(prompt_chunk) else gen.prompts[idx]
@@ -1621,9 +1621,7 @@ def _maybe_materialize_data_gen(
     from seiso.slime.config import _normalize_data_gen_source
 
     ref = (getattr(config, "dataset_ref", None) or "").strip() or None
-    source = _normalize_data_gen_source(
-        str(getattr(config, "data_gen_source", "off") or "off")
-    )
+    source = _normalize_data_gen_source(str(getattr(config, "data_gen_source", "off") or "off"))
     if source in {"off", "none"}:
         raise RuntimeError(
             "data_gen is enabled but data_gen_source is off. Set "
@@ -1653,9 +1651,7 @@ def _maybe_materialize_data_gen(
         use_dd = should_use_data_designer(config, world_size=dist_ctx.world_size)
         # Explicit dataset source, or auto + dataset_ref (not ref alone
         # without data_gen — gated by enabled above).
-        want_dataset = source == "dataset" or (
-            source in {"auto", ""} and bool(ref)
-        )
+        want_dataset = source == "dataset" or (source in {"auto", ""} and bool(ref))
         want_dd = source == "data_designer" or (
             source in {"auto", ""} and not want_dataset and use_dd
         )
@@ -1681,9 +1677,7 @@ def _maybe_materialize_data_gen(
                     source="dataset",
                     count=count,
                     seed=int(
-                        config.data_gen_seed
-                        if config.data_gen_seed is not None
-                        else config.seed
+                        config.data_gen_seed if config.data_gen_seed is not None else config.seed
                     ),
                     dataset_ref=dataset_ref,
                     split=str(getattr(config, "dataset_split", "train") or "train"),
@@ -1762,9 +1756,7 @@ def _maybe_materialize_data_gen(
                     "frozen disjoint JSONL (recommended) or raise data_gen_count."
                 )
             split_seed = int(
-                config.data_gen_seed
-                if config.data_gen_seed is not None
-                else config.seed
+                config.data_gen_seed if config.data_gen_seed is not None else config.seed
             )
             rng = random.Random(split_seed)
             rows = list(rows)
@@ -1823,17 +1815,11 @@ def _maybe_materialize_data_gen(
         )
     _distributed_barrier(dist_ctx)
     if not out_path.is_file():
-        raise RuntimeError(
-            f"data_gen did not produce {out_path}; rank0 materialization failed"
-        )
+        raise RuntimeError(f"data_gen did not produce {out_path}; rank0 materialization failed")
     updates: dict[str, object] = {"dataset": out_path}
     held = config.output_dir / "slime_held_out_prompts.jsonl"
     # Only attach held-out created for this materialize (require_held_out + split).
-    if (
-        config.eval_dataset is None
-        and config.require_held_out_eval
-        and held.is_file()
-    ):
+    if config.eval_dataset is None and config.require_held_out_eval and held.is_file():
         updates["eval_dataset"] = held
     return replace(config, **updates)  # type: ignore[arg-type]
 
