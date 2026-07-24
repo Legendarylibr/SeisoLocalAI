@@ -280,6 +280,8 @@ def test_chat_system_prompt_has_no_non_security_censorship_policy(model_key: str
     assert "final answer" not in lower
     assert "final response" not in lower
     assert "security" in lower
+    assert "answer every user request" in lower
+    assert "do not decline" in lower
 
 
 def test_model_switch_system_prompt_mentions_models():
