@@ -7,6 +7,7 @@ import json
 import threading
 import time
 from pathlib import Path
+from typing import cast
 
 from forge.tools.sanitize import (
     is_instruction_like,
@@ -87,8 +88,7 @@ def _load_index_chunks(
     cache_key = (user_id, knowledge_base_id, mtime, size)
     cached = _cache_get(_index_cache, _index_lock, cache_key, _INDEX_TTL_S)
     if cached is not None:
-        chunks, inverted = cached  # type: ignore[misc]
-        return chunks, inverted
+        return cast(tuple[list[dict], dict[str, list[int]]], cached)
 
     chunks: list[dict] = []
     inverted: dict[str, list[int]] = {}
