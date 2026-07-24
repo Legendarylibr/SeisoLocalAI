@@ -845,15 +845,17 @@ def run_training(
     )
     if config.method == TrainMethod.SLIME:
         from seiso.slime.trainer import train_slime
+        from seiso.training.cancel import should_stop
         from seiso.training.metrics import is_main_process
 
         slime_config = config.to_single_gpu_slime_config()
-        out = train_slime(slime_config)
+        out = train_slime(slime_config, should_stop=should_stop(job_id))
         if is_main_process():
             _write_slime_manifest(config, out)
         return out
     if config.method == TrainMethod.NEMO_RL:
         from seiso.nemo_rl.runner import train_nemo_rl
+        from seiso.training.cancel import should_stop
         from seiso.training.metrics import is_main_process
 
         if on_log:
@@ -861,7 +863,9 @@ def run_training(
                 "NeMo RL: launching external NVIDIA-NeMo/RL via uv "
                 "(set SEISO_NEMO_RL_ROOT if the checkout is not auto-discovered)."
             )
-        out = train_nemo_rl(config.to_nemo_rl_config())
+        out = train_nemo_rl(
+            config.to_nemo_rl_config(), should_stop=should_stop(job_id)
+        )
         if is_main_process():
             # Manifest is written by the NeMo RL runner; ensure path exists.
             manifest = out / "seiso_manifest.json"

@@ -657,21 +657,21 @@ class SeisoTrainer:
                     trainer.args.per_device_train_batch_size = cfg.batch_size
                     trainer.args.per_device_eval_batch_size = cfg.batch_size
                     trainer.args.gradient_accumulation_steps = cfg.gradient_accumulation_steps
-                # Keep resume pointing at the latest HF checkpoint under output_dir
-                # when possible so OOM rebuild does not restart from step 0.
-                if resume_from_checkpoint:
-                    latest = self._latest_checkpoint_dir(cfg.output_dir)
-                    if latest is not None:
-                        resume_from_checkpoint = str(latest)
-                        self._log(
-                            f"OOM recovery: resuming from latest checkpoint {latest}"
-                        )
-                    else:
-                        self._log(
-                            "OOM recovery: no checkpoint found under output_dir; "
-                            "continuing without resume"
-                        )
-                        resume_from_checkpoint = None
+                # Always prefer the latest HF checkpoint under output_dir so OOM
+                # rebuild does not restart from step 0 even when the initial call
+                # had no resume_from_checkpoint.
+                latest = self._latest_checkpoint_dir(cfg.output_dir)
+                if latest is not None:
+                    resume_from_checkpoint = str(latest)
+                    self._log(
+                        f"OOM recovery: resuming from latest checkpoint {latest}"
+                    )
+                else:
+                    self._log(
+                        "OOM recovery: no checkpoint found under output_dir; "
+                        "continuing without resume"
+                    )
+                    resume_from_checkpoint = None
 
     def _resolve_load_model_id(self) -> str:
         """Prefer cached local snapshot path for offline merge/export after training."""

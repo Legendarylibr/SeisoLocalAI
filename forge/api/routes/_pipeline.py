@@ -1,5 +1,6 @@
 """Factory for stage-based pipeline job routers (compress)."""
 
+import json
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -93,16 +94,27 @@ def register_formatted_job_routes(
                 yield event
             if row and row.get("error_text"):
                 yield {"event": "error", "data": row["error_text"]}
+            status = str((row or {}).get("status") or "").lower()
+            formatted = routes.format_job(dict(row)) if row else {}
+            # Replay before_result hooks (e.g. RL-quant recommendation) after
+            # orchestrator eviction so the UI still receives recommendation SSE.
+            if routes.before_result and formatted:
+                for event in routes.before_result(formatted):
+                    yield event
             # Default schema stores stage_results_json='{}' — only emit a real
             # result for successful terminal jobs with non-empty payloads.
             stage_json = (row or {}).get("stage_results_json") or ""
-            status = str((row or {}).get("status") or "").lower()
             if (
                 status == "completed"
                 and stage_json.strip()
                 and stage_json.strip() not in {"{}", "null", "None"}
             ):
                 yield {"event": "result", "data": stage_json}
+            elif status == "completed" and formatted.get("recommendation"):
+                yield {
+                    "event": "result",
+                    "data": json.dumps(formatted, default=str),
+                }
 
         return EventSourceResponse(db_event_gen())
 

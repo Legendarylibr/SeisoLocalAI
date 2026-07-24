@@ -44,12 +44,19 @@ class ChatMixin:
                 ]
             return dict(thread_row), messages
 
-    async def update_thread_model(self, thread_id: str, model_id: str | None) -> None:
+    async def update_thread_model(
+        self,
+        thread_id: str,
+        model_id: str | None,
+        *,
+        user_id: str | None = None,
+    ) -> None:
         now = now_iso()
+        owner_clause = " AND user_id = ?" if user_id is not None else ""
         async with self._conn() as conn:
             await conn.execute(
-                "UPDATE chat_threads SET model_id = ?, updated_at = ? WHERE id = ?",
-                (model_id, now, thread_id),
+                f"UPDATE chat_threads SET model_id = ?, updated_at = ? WHERE id = ?{owner_clause}",  # nosec B608
+                (model_id, now, thread_id, *((user_id,) if user_id is not None else ())),
             )
             await conn.commit()
 
@@ -122,26 +129,36 @@ class ChatMixin:
         metadata: dict | None = None,
         *,
         model_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict:
         mid = str(uuid.uuid4())
         now = now_iso()
         enc_content = self._enc(content)
         enc_metadata = self._enc(json.dumps(metadata or {}))
         async with self._conn() as conn:
+            if user_id is not None:
+                async with conn.execute(
+                    "SELECT id FROM chat_threads WHERE id = ? AND user_id = ?",
+                    (thread_id, user_id),
+                ) as cur:
+                    if await cur.fetchone() is None:
+                        raise PermissionError(f"Thread {thread_id} not found for user")
             await conn.execute(
                 """INSERT INTO chat_messages (id, thread_id, role, content, metadata_json, created_at)
                    VALUES (?, ?, ?, ?, ?, ?)""",
                 (mid, thread_id, role, enc_content, enc_metadata, now),
             )
+            owner_clause = " AND user_id = ?" if user_id is not None else ""
+            owner_params = (user_id,) if user_id is not None else ()
             if model_id is not None:
                 await conn.execute(
-                    "UPDATE chat_threads SET model_id = ?, updated_at = ? WHERE id = ?",
-                    (model_id, now, thread_id),
+                    f"UPDATE chat_threads SET model_id = ?, updated_at = ? WHERE id = ?{owner_clause}",  # nosec B608
+                    (model_id, now, thread_id, *owner_params),
                 )
             else:
                 await conn.execute(
-                    "UPDATE chat_threads SET updated_at = ? WHERE id = ?",
-                    (now, thread_id),
+                    f"UPDATE chat_threads SET updated_at = ? WHERE id = ?{owner_clause}",  # nosec B608
+                    (now, thread_id, *owner_params),
                 )
             await conn.commit()
         return {

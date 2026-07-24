@@ -595,7 +595,9 @@ async def chat(
                         yield {"event": "token", "data": token}
                     content = "".join(parts)
                     if body.thread_id:
-                        await db.add_message(body.thread_id, "assistant", content)
+                        await db.add_message(
+                            body.thread_id, "assistant", content, user_id=user_id
+                        )
                     yield {"event": "message", "data": content}
                     yield {"event": "done", "data": job_id}
                 except asyncio.CancelledError:
@@ -966,6 +968,7 @@ async def chat(
                                 "finish_reason": finish_reason,
                                 "output_tokens": total_output_tokens,
                             },
+                            user_id=user_id,
                         )
                     final_stats = {
                         "output_tokens": total_output_tokens,
@@ -1011,7 +1014,9 @@ async def chat(
                         strip_tool_calls=not body.tools,
                     )
                     if body.thread_id:
-                        await db.add_message(body.thread_id, "assistant", content)
+                        await db.add_message(
+                            body.thread_id, "assistant", content, user_id=user_id
+                        )
                     yield {"event": "message", "data": content}
                 yield {"event": "done", "data": job_id}
             except asyncio.CancelledError:
@@ -1040,7 +1045,9 @@ async def chat(
         raise HTTPException(500, job.error or "Inference failed")
     if body.thread_id and job.result.get("content"):
         content = sanitize_llm_output(job.result["content"], strip_tool_calls=not body.tools)
-        await db.add_message(body.thread_id, "assistant", content)
+        await db.add_message(
+            body.thread_id, "assistant", content, user_id=user_id
+        )
     result = dict(job.result)
     if result.get("content") and not body.tools:
         result["content"] = sanitize_llm_output(result["content"], strip_tool_calls=True)

@@ -180,6 +180,20 @@ class TrainingOrchestrator(Orchestrator):
                     with contextlib.suppress(Exception):
                         await asyncio.shield(training_future)
                     raise
+                except Exception as exc:
+                    # Cooperative slime/NeMo cancel raises InterruptedError in-thread.
+                    if isinstance(exc, InterruptedError) or (
+                        isinstance(exc, RuntimeError)
+                        and "cancelled" in str(exc).lower()
+                    ):
+                        raise asyncio.CancelledError() from exc
+                    # Executor wraps some exceptions; unwrap common cancel signals.
+                    cause = getattr(exc, "__cause__", None) or getattr(
+                        exc, "__context__", None
+                    )
+                    if isinstance(cause, InterruptedError):
+                        raise asyncio.CancelledError() from exc
+                    raise
                 from seiso.training.cancel import is_requested
 
                 if is_requested(job_id):

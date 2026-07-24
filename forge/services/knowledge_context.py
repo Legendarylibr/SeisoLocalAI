@@ -66,8 +66,14 @@ def _load_index_chunks(
     user_id: str,
     knowledge_base_id: str,
 ) -> tuple[list[dict], dict[str, list[int]]]:
+    from forge.services.user_paths import assert_user_path
+
     kb_dir = safe_join(data_dir, "knowledge", user_id, knowledge_base_id)
     index_path = kb_dir / "index.jsonl"
+    if not index_path.exists() and not index_path.is_symlink():
+        return [], {}
+    # Resolve symlinks and enforce tenant scope before reading the index.
+    index_path = assert_user_path(data_dir, user_id, index_path)
     if not index_path.is_file():
         return [], {}
 
@@ -123,8 +129,13 @@ def count_knowledge_chunks(
     )
     if chunks:
         return len(chunks)
+    from forge.services.user_paths import assert_user_path
+
     kb_dir = safe_join(data_dir, "knowledge", user_id, knowledge_base_id)
     index_path = kb_dir / "index.jsonl"
+    if not index_path.exists() and not index_path.is_symlink():
+        return 0
+    index_path = assert_user_path(data_dir, user_id, index_path)
     if not index_path.is_file():
         return 0
     count = 0

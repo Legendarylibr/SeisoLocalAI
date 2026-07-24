@@ -23,6 +23,9 @@ _CHUNK_SIZE = 1_200
 _TOOL_OPEN = TOOL_CALL_OPEN
 _TOOL_CLOSE = TOOL_CALL_CLOSE
 _PARTIAL_TOOL_PREFIXES = tuple(_TOOL_OPEN[:i] for i in range(1, len(_TOOL_OPEN) + 1))
+_PARTIAL_TOOL_CLOSE_PREFIXES = tuple(
+    _TOOL_CLOSE[:i] for i in range(1, len(_TOOL_CLOSE) + 1)
+)
 
 _FUNCTION_JSON_PATTERN = re.compile(
     r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{.*?\}\s*\}',
@@ -140,7 +143,9 @@ class StreamingOutputSanitizer:
             if self._in_tool_call:
                 close_idx = self._pending.find(_TOOL_CLOSE)
                 if close_idx == -1:
-                    self._pending = ""
+                    # Keep a trailing partial close tag across chunk boundaries.
+                    _, leftover = self._split_pending_close_prefixes(self._pending)
+                    self._pending = leftover
                     break
                 self._pending = self._pending[close_idx + len(_TOOL_CLOSE) :]
                 self._in_tool_call = False
@@ -181,6 +186,13 @@ class StreamingOutputSanitizer:
     @staticmethod
     def _split_pending_prefixes(text: str) -> tuple[str, str]:
         for prefix in reversed(_PARTIAL_TOOL_PREFIXES):
+            if text.lower().endswith(prefix.lower()):
+                return text[: -len(prefix)], prefix
+        return text, ""
+
+    @staticmethod
+    def _split_pending_close_prefixes(text: str) -> tuple[str, str]:
+        for prefix in reversed(_PARTIAL_TOOL_CLOSE_PREFIXES):
             if text.lower().endswith(prefix.lower()):
                 return text[: -len(prefix)], prefix
         return text, ""

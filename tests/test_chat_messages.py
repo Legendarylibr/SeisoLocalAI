@@ -28,6 +28,7 @@ class FakeChatDb:
         self.added: list[tuple[str, str, str]] = []
         self.thread_model_id = thread_model_id
         self.updated_models: list[tuple[str, str | None]] = []
+        self.owner_id: str | None = None
 
     async def get_messages(self, _thread_id: str) -> list[dict]:
         return self.messages
@@ -48,7 +49,10 @@ class FakeChatDb:
         metadata: dict | None = None,
         *,
         model_id: str | None = None,
+        user_id: str | None = None,
     ) -> dict:
+        if user_id is not None and self.owner_id and user_id != self.owner_id:
+            raise PermissionError("not owner")
         self.added.append((thread_id, role, content))
         self.messages.append({"role": role, "content": content})
         if model_id is not None:
@@ -64,7 +68,15 @@ class FakeChatDb:
     async def get_thread_for_user(self, _thread_id: str, _user_id: str) -> dict | None:
         return {"id": "thread-1", "model_id": self.thread_model_id}
 
-    async def update_thread_model(self, thread_id: str, model_id: str | None) -> None:
+    async def update_thread_model(
+        self,
+        thread_id: str,
+        model_id: str | None,
+        *,
+        user_id: str | None = None,
+    ) -> None:
+        if user_id is not None and self.owner_id and user_id != self.owner_id:
+            raise PermissionError("not owner")
         self.updated_models.append((thread_id, model_id))
         self.thread_model_id = model_id
 

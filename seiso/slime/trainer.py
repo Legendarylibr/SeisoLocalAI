@@ -15,7 +15,7 @@ import logging
 import math
 import os
 import random
-from collections.abc import Iterable, Iterator
+from collections.abc import Callable, Iterable, Iterator
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -87,7 +87,11 @@ logger = logging.getLogger(__name__)
 _GRADIENT_CHECKPOINTING_KWARGS = {"use_reentrant": False}
 
 
-def train_slime(config: SingleGpuSlimeConfig) -> Path:
+def train_slime(
+    config: SingleGpuSlimeConfig,
+    *,
+    should_stop: Callable[[], bool] | None = None,
+) -> Path:
     """Run a compact slime-style rollout/reward/update loop.
 
     When launched under Accelerate with WORLD_SIZE > 1, this keeps the original
@@ -101,6 +105,7 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
     ``train_single_gpu_slime`` is a compatibility alias for this function.
     """
 
+    stop_fn = should_stop or (lambda: False)
     config.validate()
     if config.kl_coef == 0.0 and config.epochs > 1:
         logger.warning(
@@ -200,8 +205,12 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
     )
 
     for epoch in range(config.epochs):
+        if stop_fn():
+            raise InterruptedError("slime training cancelled")
         sample_batches = _PushbackIterator(iter(_iter_sample_batches(config, rng, dist_ctx, torch)))
         for batch_samples in sample_batches:
+            if stop_fn():
+                raise InterruptedError("slime training cancelled")
             saw_sample = True
             rollout_batch = _collect_training_rollout_batch(
                 model=model,
@@ -1028,6 +1037,8 @@ def _backprop_policy_step(
 
     total = len(rollouts)
     stats = _empty_stats()
+    # Policy loss must see dropout/train semantics; rollouts used eval().
+    model.train()
     chunks = list(_chunked(rollouts, config.policy_micro_batch_size))
     last_idx = len(chunks) - 1
     for idx, chunk in enumerate(chunks):
@@ -1050,16 +1061,20 @@ def _flush_accumulated_gradients(model, dist_ctx: _DistributedSlimeContext, torc
 
     Used when training ends mid-accumulation so ``optimizer.step`` sees the same
     DDP-averaged gradient as a full sync backward would have produced.
+
+    Missing grads are zeroed before all_reduce so ranks never disagree on which
+    parameters participate in the collective.
     """
     if not dist_ctx.enabled:
         return
     world = float(dist_ctx.world_size)
     for param in model.parameters():
-        grad = param.grad
-        if grad is None:
+        if not param.requires_grad:
             continue
-        torch.distributed.all_reduce(grad, op=torch.distributed.ReduceOp.SUM)
-        grad /= world
+        if param.grad is None:
+            param.grad = torch.zeros_like(param)
+        torch.distributed.all_reduce(param.grad, op=torch.distributed.ReduceOp.SUM)
+        param.grad /= world
 
 
 def _build_optimizer(model, config: SingleGpuSlimeConfig):

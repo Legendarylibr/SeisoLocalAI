@@ -191,18 +191,35 @@ class ResearchPipeline:
         analysis: dict[str, object] = {}
         if self._runs("analysis"):
             analysis = run_research_analysis(config, history_path)
-        # Match actual run order: benchmark → frontier_eval → analysis → paper_bundle.
+        # Only claim phases that were enabled (and thus attempted) for this run.
+        stage_to_phase = {
+            "train": "train",
+            "evaluate": "evaluate",
+            "recommend": "recommendation",
+            "benchmark": "benchmark",
+            "frontier_eval": "frontier_eval",
+            "analysis": "analysis",
+            "paper_bundle": "paper_bundle",
+        }
         phases = [
-            "train",
-            "evaluate",
-            "recommendation",
-            "benchmark",
+            stage_to_phase[stage]
+            for stage in (
+                "train",
+                "evaluate",
+                "recommend",
+                "benchmark",
+                "frontier_eval",
+                "analysis",
+                "paper_bundle",
+            )
+            if self._runs(stage)
         ]
-        if config.llama_cpp_gguf_export_enabled:
-            phases.insert(3, "gguf_export")
-        if frontier_summary is not None:
-            phases.append("frontier_eval")
-        phases.extend(["analysis", "paper_bundle"])
+        if config.llama_cpp_gguf_export_enabled and "recommendation" in phases:
+            # Export sits after recommendation when enabled.
+            idx = phases.index("recommendation") + 1
+            phases.insert(idx, "gguf_export")
+        elif config.llama_cpp_gguf_export_enabled:
+            phases.insert(0, "gguf_export")
         research = build_research_contract(
             config,
             git_commit=commit,
