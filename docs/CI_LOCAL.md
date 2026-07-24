@@ -32,7 +32,7 @@ Or use the shell wrapper:
 | **types** | `mypy seiso forge seiso_cli` | no |
 | **test** | smoke imports + `pytest -m "not slow"` | no |
 | **security** | `bandit`, `detect-secrets`, `pip check`, `pip-audit` | no |
-| **frontend** | `npm run typecheck` + `npm run build` in `forge-ui/` | yes |
+| **frontend** | `npm run typecheck` + `npm test` (vitest) + `npm run build` in `forge-ui/` | yes |
 | **imports** | optional-extra import smokes (`train`, `mlx` on macOS) | yes |
 
 ### Lint detail
@@ -62,14 +62,31 @@ Refresh after fixing types:
 python3 scripts/run_ci_local.py --job types --update-mypy-baseline --skip-install
 ```
 
+### Smoke configs
+
+Presets under `configs/` for agent/CI loops (not all run in default `ci-fast`):
+
+| Config | Use |
+|--------|-----|
+| `configs/smoke_train_cpu.yaml` | CPU SFT smoke (`seiso train`) |
+| `configs/smoke_train_gpu.yaml` | GPU SFT smoke |
+| `configs/smoke_train_moe_cpu.yaml` | MoE CPU smoke |
+| `configs/smoke_train_gpu_e2e.yaml` | Longer GPU e2e |
+| `configs/smoke_slime_cpu.yaml` | Slime GRPO CPU smoke |
+| `configs/smoke_nemo_rl.yaml` | NeMo RL dry-run / smoke |
+| `configs/rl_quant_smoke.json` | RL quant product smoke |
+| `configs/distill_rl_smoke.json` | Distill-RL smoke |
+
 ### Test detail
 
 - Installs `.[forge,train,dev]` once unless `--skip-install`
 - `tests/test_docs_accuracy.py` — doc links, example configs, and training API references stay aligned with the codebase
 - Runs CPU unit/integration tests excluding `@pytest.mark.slow` and `@pytest.mark.gpu`
 - `--pytest-workers N|auto|logical` enables pytest-xdist; GitHub CI uses `auto` with `--pytest-dist worksteal`
-- `--hardware-tests` selects non-slow `@pytest.mark.gpu` tests on hosts with a matching runtime/toolkit
-- Slow tests: `pytest -m slow`
+- `--hardware-tests` selects non-slow `@pytest.mark.gpu` tests on hosts with a matching runtime/toolkit (`make test-hardware`)
+- Slow tests: `pytest -m slow` (also scheduled weekly in GitHub Actions)
+- GPU e2e stays opt-in (PR CI excludes `@gpu`; soft-skip when toolkit missing — F6-05)
+- Live Forge check: `make live-check` (scheduled weekly in GitHub Actions — F6-07)
 
 ### Security detail
 

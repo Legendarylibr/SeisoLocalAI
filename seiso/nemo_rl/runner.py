@@ -35,7 +35,20 @@ def train_nemo_rl(
     if config.sandbox_root is not None:
         from seiso.security import assert_within
 
-        assert_within(Path(config.sandbox_root), output_dir)
+        sandbox = Path(config.sandbox_root)
+        assert_within(sandbox, output_dir)
+        # Path-like Hydra overrides must stay inside the Forge user sandbox (NEMO-01).
+        for item in config.extra_overrides or ():
+            text = str(item)
+            if "=" not in text:
+                continue
+            _key, _, value = text.partition("=")
+            value = value.strip().strip("'\"")
+            if not value or value.startswith(("http://", "https://", "s3://")):
+                continue
+            candidate = Path(value).expanduser()
+            if candidate.is_absolute() or value.startswith(("./", "../", "~/")):
+                assert_within(sandbox, candidate)
 
     try:
         nemo_root = resolve_nemo_rl_root(config.nemo_rl_root)

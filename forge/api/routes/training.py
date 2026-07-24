@@ -52,7 +52,7 @@ from forge.services.user_paths import (
 from seiso.models.hf_env import configure_hf_hub_cache
 from seiso.models.hub_quant import native_quant_training_block_reason
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
-from seiso.security import SecurityError
+from seiso.security import SecurityError, safe_join
 from seiso.training.config import DatasetFormat, TrainConfig
 from seiso.training.recommendations import recommend_training_config
 
@@ -416,7 +416,7 @@ async def start_training(
             "sandbox_user_id": user_id,
             "extra": extra,
         },
-        "output_dir": str(settings.checkpoints_dir / user_id / job_id),
+        "output_dir": str(safe_join(settings.checkpoints_dir, user_id, job_id)),
         "multi_gpu": body.multi_gpu,
         "user_id": user_id,
         "hf_token": hf_token,
@@ -501,11 +501,11 @@ async def start_training(
                                     settings, user_id, hub
                                 )
 
-                            export_dir = (
-                                settings.data_dir
-                                / "exports"
-                                / user_id
-                                / f"train-{job_id}"
+                            export_dir = safe_join(
+                                settings.data_dir,
+                                "exports",
+                                user_id,
+                                f"train-{job_id}",
                             )
                             export_cfg.update(
                                 {

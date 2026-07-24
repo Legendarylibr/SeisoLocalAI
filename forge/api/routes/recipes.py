@@ -27,6 +27,8 @@ async def run_recipe(
     user_id: Annotated[str, Depends(get_current_user_id)],
     orchestrator: Annotated[RecipeOrchestrator, Depends(get_recipe_orchestrator)],
 ) -> dict:
+    # Ephemeral orchestrator job (F4-06b): short-lived recipe runs are not
+    # persisted to SQLite; durable artifact state lives on the filesystem.
     job_id = orchestrator.create_job(user_id=user_id)
     spawn_background(
         orchestrator.start(job_id, {**body.model_dump(), "user_id": user_id})

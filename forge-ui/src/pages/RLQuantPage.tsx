@@ -1,14 +1,13 @@
 import { useEffect, useState } from "react";
-import { api, RLQuantJob, RLQuantPreset } from "@/lib/api";
-import { invalidateApiCache } from "@/lib/api/getCache";
-import { usePipelineJobStream } from "@/hooks/usePipelineJobStream";
+import { api, RLQuantJob } from "@/lib/api";
+import { useStagePipelinePage } from "@/hooks/useStagePipelinePage";
+import { StagePipelineJobsTable } from "@/components/studio/StagePipelineJobsTable";
 import { StudioPageShell } from "@/components/StudioPageShell";
 import { StudioCardBody } from "@/components/studio/StudioCardBody";
 import { StudioCardHeader } from "@/components/studio/StudioCardHeader";
 import { FormSection } from "@/components/research/FormSection";
 import { RewardWeights } from "@/components/research/RewardWeights";
 import { ArtifactViewer } from "@/components/research/ArtifactViewer";
-import { DataTable } from "@/components/research/DataTable";
 import { LogStream } from "@/components/research/LogStream";
 
 const DEFAULT_REWARD = {
@@ -21,15 +20,54 @@ const DEFAULT_REWARD = {
   iota_kernel_latency: 0.008,
 };
 
+const FALLBACK_STAGES = [
+  "train",
+  "evaluate",
+  "recommend",
+  "export_gguf",
+];
+
+const RL_QUANT_PIPELINE = {
+  fallbackStages: FALLBACK_STAGES,
+  initialPreset: "minimal",
+  loadPresets: async () => {
+    const r = await api.rlQuantPresets();
+    return {
+      presets: r.presets.map((p) => ({ id: p.id, label: p.label, stages: p.stages })),
+      stages: r.stages,
+      help: r.help,
+      defaults: Object.fromEntries(
+        Object.entries(r.defaults ?? {}).map(([k, v]) => [k, String(v)]),
+      ),
+    };
+  },
+  listJobs: api.listRLQuantJobs,
+  startJob: api.startRLQuant,
+  streamPath: (jobId: string) => `/rl-quant/jobs/${jobId}/stream`,
+};
+
 export function RLQuantPage() {
-  const [jobs, setJobs] = useState<RLQuantJob[]>([]);
-  const [presets, setPresets] = useState<RLQuantPreset[]>([]);
+  const {
+    jobs,
+    starting,
+    runPipeline,
+    logs,
+    activeJob,
+    preset,
+    setPreset,
+    presetList,
+    presetsLoading,
+    presetsReady,
+    allStages,
+    stageHelp,
+    selectedStages,
+    toggleStage,
+  } = useStagePipelinePage<RLQuantJob>(RL_QUANT_PIPELINE);
+
   const [presetHints, setPresetHints] = useState<Record<string, string>>({});
-  const [allStages, setAllStages] = useState<string[]>([]);
-  const [stageHelp, setStageHelp] = useState<Record<string, string>>({});
-  const [selectedStages, setSelectedStages] = useState<string[]>([]);
-  const [presetsLoading, setPresetsLoading] = useState(true);
-  const [preset, setPreset] = useState("minimal");
+  const [presetMeta, setPresetMeta] = useState<
+    Record<string, { backend?: string; training_backend?: string }>
+  >({});
   const [trainingEpisodes, setTrainingEpisodes] = useState(256);
   const [evaluationEpisodes, setEvaluationEpisodes] = useState(64);
   const [backend, setBackend] = useState("simulator");
@@ -47,78 +85,56 @@ export function RLQuantPage() {
   const [configOverrides, setConfigOverrides] = useState("");
   const [configError, setConfigError] = useState("");
   const [recommendation, setRecommendation] = useState<Record<string, unknown> | null>(null);
-  const [starting, setStarting] = useState(false);
-  const { logs, activeJob, resetStream, watchJob } = usePipelineJobStream();
 
   useEffect(() => {
-    api.listRLQuantJobs().then(setJobs).catch(console.error);
     api
       .rlQuantPresets()
       .then((r) => {
-        setPresets(r.presets);
         setPresetHints(r.preset_hints ?? {});
-        setAllStages(r.stages ?? []);
-        setStageHelp(r.help ?? {});
-        if (r.presets.length > 0) {
-          setPreset((current) => (r.presets.some((p) => p.id === current) ? current : r.presets[0].id));
+        const meta: Record<string, { backend?: string; training_backend?: string }> = {};
+        for (const p of r.presets) {
+          meta[p.id] = { backend: p.backend, training_backend: p.training_backend };
         }
+        setPresetMeta(meta);
       })
-      .catch(console.error)
-      .finally(() => setPresetsLoading(false));
+      .catch(console.error);
   }, []);
 
-  const refreshJobs = () => api.listRLQuantJobs().then(setJobs).catch(console.error);
-
-  useEffect(() => {
-    const p = presets.find((x) => x.id === preset);
-    if (!p) return;
-    setSelectedStages(p.stages.length ? p.stages : allStages);
-  }, [preset, presets, allStages]);
-
-  const toggleStage = (stage: string) => {
-    setSelectedStages((prev) =>
-      prev.includes(stage) ? prev.filter((s) => s !== stage) : [...prev, stage],
-    );
-  };
-
   const start = async () => {
-    setStarting(true);
-    resetStream();
     setRecommendation(null);
     setConfigError("");
-    try {
-      const body: Record<string, unknown> = {
-        preset,
-        stages: selectedStages,
-        training_episodes: trainingEpisodes,
-        evaluation_episodes: evaluationEpisodes,
-        backend,
-        training_backend: trainingBackend,
-        checkpoint_path: checkpoint || undefined,
-        gguf_path: ggufPath || undefined,
-        link_training_job_id: linkTrainingJob || undefined,
-        gguf_export: ggufExport,
-        moe_enabled: moeEnabled,
-        kernel_rl_enabled: kernelRlEnabled,
-        kernel_live_benchmark: kernelLiveBenchmark,
-        kernel_hidden_dim: kernelRlEnabled ? kernelHiddenDim : undefined,
-        kernel_batch_rows: kernelRlEnabled ? kernelBatchRows : undefined,
-        auto_sweep: allStages.includes("auto_sweep")
-          ? selectedStages.includes("auto_sweep")
-          : true,
-        reward_weights: reward,
-        seed: 13,
-      };
-      if (configOverrides.trim()) {
-        try {
-          Object.assign(body, JSON.parse(configOverrides));
-        } catch {
-          setConfigError("Config overrides must be valid JSON.");
-          return;
-        }
+    const body: Record<string, unknown> = {
+      preset,
+      stages: selectedStages,
+      training_episodes: trainingEpisodes,
+      evaluation_episodes: evaluationEpisodes,
+      backend,
+      training_backend: trainingBackend,
+      checkpoint_path: checkpoint || undefined,
+      gguf_path: ggufPath || undefined,
+      link_training_job_id: linkTrainingJob || undefined,
+      gguf_export: ggufExport,
+      moe_enabled: moeEnabled,
+      kernel_rl_enabled: kernelRlEnabled,
+      kernel_live_benchmark: kernelLiveBenchmark,
+      kernel_hidden_dim: kernelRlEnabled ? kernelHiddenDim : undefined,
+      kernel_batch_rows: kernelRlEnabled ? kernelBatchRows : undefined,
+      auto_sweep: allStages.includes("auto_sweep")
+        ? selectedStages.includes("auto_sweep")
+        : true,
+      reward_weights: reward,
+      seed: 13,
+    };
+    if (configOverrides.trim()) {
+      try {
+        Object.assign(body, JSON.parse(configOverrides));
+      } catch {
+        setConfigError("Config overrides must be valid JSON.");
+        return;
       }
-      const res = await api.startRLQuant(body);
-      watchJob(`/rl-quant/jobs/${res.job_id}/stream`, res.job_id, {
+    }
+    try {
+      await runPipeline(body, {
         onEvent: (event, data) => {
           if (event === "recommendation") {
             try {
@@ -128,21 +144,15 @@ export function RLQuantPage() {
             }
           }
         },
-        onResult: () => {
-          invalidateApiCache("/inference/models");
-          invalidateApiCache("/training/models");
-          refreshJobs();
-        },
       });
-      refreshJobs();
-    } finally {
-      setStarting(false);
+    } catch (err) {
+      setConfigError(err instanceof Error ? err.message : "Failed to start pipeline");
     }
   };
 
-  const selectedPreset = presets.find((p) => p.id === preset);
   const selectedHint = presetHints[preset];
-  const canStart = !presetsLoading && presets.length > 0 && !!selectedPreset;
+  const selectedMeta = presetMeta[preset];
+  const canStart = presetsReady;
 
   return (
     <StudioPageShell
@@ -165,19 +175,19 @@ export function RLQuantPage() {
                 <div className="form-field">
                   <label>Preset</label>
                   <select value={preset} onChange={(e) => setPreset(e.target.value)}>
-                    {presets.map((p) => (
+                    {presetList.map((p) => (
                       <option key={p.id} value={p.id}>{p.label}</option>
                     ))}
                   </select>
                 </div>
                 {selectedHint && <p className="field-hint">{selectedHint}</p>}
                 {presetsLoading && <p className="field-hint">Loading presets…</p>}
-                {!presetsLoading && presets.length === 0 && (
+                {!presetsLoading && presetList.length === 0 && (
                   <p className="field-hint">Presets unavailable — check Forge connection.</p>
                 )}
-                {selectedPreset && (
+                {selectedMeta && (
                   <p className="field-hint">
-                    Backend {selectedPreset.backend} · trainer {selectedPreset.training_backend}
+                    Backend {selectedMeta.backend} · trainer {selectedMeta.training_backend}
                   </p>
                 )}
                 {allStages.length > 0 && (
@@ -367,47 +377,10 @@ export function RLQuantPage() {
             )}
           </div>
 
-          <div className="card studio-card studio-card-compact">
-            <StudioCardHeader
-              icon="③"
-              title="History"
-              description="Past RL quant jobs on this machine"
-              tone="history"
-              meta={
-                jobs.length > 0 ? (
-                  <span className="badge badge-dim">{jobs.length}</span>
-                ) : undefined
-              }
-            />
-            <DataTable
-              columns={[
-                {
-                  key: "id",
-                  header: "ID",
-                  mono: true,
-                  render: (j) => `${j.id.slice(0, 8)}…`,
-                },
-                {
-                  key: "status",
-                  header: "Status",
-                  render: (j) => <span className={`badge badge-${j.status}`}>{j.status}</span>,
-                },
-                {
-                  key: "gguf_quants",
-                  header: "Quants",
-                  render: (j) => j.gguf_quants?.join(", ") || "—",
-                },
-                {
-                  key: "created_at",
-                  header: "Created",
-                  render: (j) => j.created_at?.slice(0, 10) ?? "—",
-                },
-              ]}
-              rows={jobs.slice(0, 6)}
-              getRowKey={(j) => j.id}
-              emptyMessage="No jobs yet."
-            />
-          </div>
+          <StagePipelineJobsTable
+            jobs={jobs}
+            emptyMessage="No RL quant jobs yet."
+          />
         </div>
       </div>
     </StudioPageShell>

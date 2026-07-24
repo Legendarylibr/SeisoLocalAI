@@ -544,6 +544,7 @@ def job_frontend(root: Path, env: dict[str, str]) -> None:
         else:
             _step("npm ci", [*pm_cmd, "ci"], cwd=ui, env=env)
     _step("TypeScript check", [*pm_cmd, "run", "typecheck"], cwd=ui, env=env)
+    _step("Unit tests (vitest)", [*pm_cmd, "test"], cwd=ui, env=env)
     _step("Production build", [*pm_cmd, "run", "build"], cwd=ui, env=env)
 
 

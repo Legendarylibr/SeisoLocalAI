@@ -65,7 +65,9 @@ def _run_multiseed_job(
     seeds: list[int],
     on_log: Callable[[str], None] | None,
 ) -> dict[str, Any]:
-    parent = data_dir / "distill_rl" / user_id / f"{job_id}-multiseed"
+    from seiso.security import safe_join
+
+    parent = safe_join(data_dir, "distill_rl", user_id, f"{job_id}-multiseed")
     parent.mkdir(parents=True, exist_ok=True)
     run_dirs: list[Path] = []
     seed_results: list[dict[str, Any]] = []

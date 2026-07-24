@@ -165,7 +165,10 @@ def build_default_registry(
         reg.register(
             ToolSpec(
                 name="execute_code",
-                description="Run Python code in a sandboxed environment. Returns stdout or error.",
+                description=(
+                    "Run Python code in an AST-checked subprocess with resource "
+                    "limits (not an OS sandbox). Returns stdout or error."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {

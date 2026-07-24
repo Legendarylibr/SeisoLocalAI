@@ -659,15 +659,23 @@ def _patch_post_attention_residual_norm(model: Any, decoder: Any) -> bool:
             return self_norm._seiso_orig_forward(hidden_states)
         return _fallback(hidden_states)
 
-    norm._seiso_residual_norm_forward = _residual_norm_forward
+    created_orig = False
     if not hasattr(norm, "_seiso_orig_forward"):
         norm._seiso_orig_forward = fallback
+        created_orig = True
+    norm._seiso_residual_norm_forward = _residual_norm_forward
     try:
         norm.forward = types.MethodType(_residual_norm_forward, norm)
         register_patch(model, norm)
     except Exception:
-        norm.forward = norm._seiso_orig_forward
-        delattr(norm, "_seiso_orig_forward")
+        if hasattr(norm, "_seiso_residual_norm_forward"):
+            delattr(norm, "_seiso_residual_norm_forward")
+        if created_orig:
+            if hasattr(norm, "_seiso_orig_forward"):
+                delattr(norm, "_seiso_orig_forward")
+            norm.forward = fallback
+        else:
+            norm.forward = norm._seiso_orig_forward
         raise
     return True
 
@@ -678,6 +686,7 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
         return False
 
     orig = decoder.forward
+    created_orig = not hasattr(decoder, "_seiso_orig_forward")
     attn_dropout = getattr(decoder, "resid_attn_dropout", None)
     mlp_dropout = getattr(decoder, "resid_mlp_dropout", None)
 
@@ -727,13 +736,20 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
         return hidden_states
 
     decoder._seiso_residual_decoder_forward = _decoder_forward
-    decoder._seiso_orig_forward = orig
+    if created_orig:
+        decoder._seiso_orig_forward = orig
     try:
         decoder.forward = types.MethodType(_decoder_forward, decoder)
         register_patch(model, decoder)
     except Exception:
-        decoder.forward = decoder._seiso_orig_forward
-        delattr(decoder, "_seiso_orig_forward")
+        if hasattr(decoder, "_seiso_residual_decoder_forward"):
+            delattr(decoder, "_seiso_residual_decoder_forward")
+        if created_orig:
+            if hasattr(decoder, "_seiso_orig_forward"):
+                delattr(decoder, "_seiso_orig_forward")
+            decoder.forward = orig
+        else:
+            decoder.forward = decoder._seiso_orig_forward
         raise
     return True
 

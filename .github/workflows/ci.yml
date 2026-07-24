@@ -277,3 +277,40 @@ jobs:
         run: uv pip install -e ".[forge,train,dev]"
       - name: Run slow tests
         run: python -m pytest tests/ -q -m "slow and not gpu" -n auto --dist worksteal
+
+  live-check:
+    name: Live Forge frontend/backend check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.10"
+          enable-cache: true
+          activate-environment: true
+          cache-dependency-glob: |
+            pyproject.toml
+            requirements-dev.txt
+            locks/python.lock
+      - name: Install dependencies
+        run: uv pip install -e ".[forge,train,dev]"
+      - name: Start Forge and run live-check
+        env:
+          SEISO_DATA_DIR: ${{ runner.temp }}/seiso-live
+          SEISO_SECRET_KEY: ci-live-check-secret-key-32bytes!!
+          SEISO_ALLOW_TINY_RL: "1"
+        run: |
+          mkdir -p "$SEISO_DATA_DIR"
+          uvicorn forge.main:create_app --factory --host 127.0.0.1 --port 8765 &
+          FORGE_PID=$!
+          cleanup() { kill "$FORGE_PID" 2>/dev/null || true; }
+          trap cleanup EXIT
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8765/health >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+          curl -sf http://127.0.0.1:8765/health
+          python scripts/live_frontend_backend_check.py

@@ -7,6 +7,7 @@ from forge.db.stores.chat import ChatMixin
 from forge.db.stores.compress import CompressMixin
 from forge.db.stores.distill_rl import DistillRLMixin
 from forge.db.stores.export import ExportMixin
+from forge.db.stores.hub_publish import HubPublishMixin
 from forge.db.stores.job_events import JobEventsMixin
 from forge.db.stores.maintenance import MaintenanceMixin
 from forge.db.stores.models import ModelsMixin
@@ -25,6 +26,7 @@ class Database(
     JobEventsMixin,
     ProvidersMixin,
     ExportMixin,
+    HubPublishMixin,
     RLQuantMixin,
     CompressMixin,
     DistillRLMixin,

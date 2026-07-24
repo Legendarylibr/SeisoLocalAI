@@ -1,4 +1,8 @@
-"""Platform sandbox helpers for subprocess code execution."""
+"""Platform resource-limit helpers for subprocess code execution.
+
+Naming note: this is not an OS sandbox — only rlimits / best-effort process
+isolation. Prefer ``SEISO_ALLOW_CODE_EXEC=false`` (especially with remote access).
+"""
 
 from __future__ import annotations
 

@@ -1572,9 +1572,27 @@ export function TrainPage() {
                       : "Start training"}
             </button>
             {activeJob && (
-              <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>
-                View metrics
-              </button>
+              <>
+                <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>
+                  View metrics
+                </button>
+                {(jobStatus === "pending" || jobStatus === "running") && (
+                  <button
+                    type="button"
+                    className="btn"
+                    onClick={() => {
+                      api.cancelTraining(activeJob).then((r) => {
+                        if (r.cancelled) {
+                          setJobStatus("cancelled");
+                          api.listTrainingJobs().then(setJobs);
+                        }
+                      }).catch(console.error);
+                    }}
+                  >
+                    Cancel
+                  </button>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -1909,9 +1927,27 @@ export function TrainPage() {
                 {starting ? "Starting…" : "Start training"}
               </button>
               {activeJob && (
-                <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>
-                  View metrics
-                </button>
+                <>
+                  <button type="button" className="btn" onClick={() => setMetricsOpen(true)}>
+                    View metrics
+                  </button>
+                  {(jobStatus === "pending" || jobStatus === "running") && (
+                    <button
+                      type="button"
+                      className="btn"
+                      onClick={() => {
+                        api.cancelTraining(activeJob).then((r) => {
+                          if (r.cancelled) {
+                            setJobStatus("cancelled");
+                            api.listTrainingJobs().then(setJobs);
+                          }
+                        }).catch(console.error);
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  )}
+                </>
               )}
             </div>
           </div>

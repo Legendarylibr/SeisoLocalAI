@@ -22,7 +22,9 @@ def resolve_preset(
 
 def job_output_root(data_dir: Path, pipeline: str, user_id: str, job_id: str) -> Path:
     """Create and return the per-job output directory under the user sandbox."""
-    root = data_dir / pipeline / user_id / job_id
+    from seiso.security import safe_join
+
+    root = safe_join(data_dir, pipeline, user_id, job_id)
     root.mkdir(parents=True, exist_ok=True)
     return root
 
@@ -33,6 +35,12 @@ def validate_stages(stages: list[str], stage_order: tuple[str, ...]) -> None:
     for stage in stages:
         if stage not in allowed:
             raise ValueError(f"Unknown pipeline stage: {stage}")
+
+
+def sort_stages(stages: list[str], stage_order: tuple[str, ...]) -> list[str]:
+    """Return stages sorted by canonical pipeline order (membership already validated)."""
+    order_index = {name: idx for idx, name in enumerate(stage_order)}
+    return sorted(stages, key=lambda stage: order_index[stage])
 
 
 def resolve_config_file_path(

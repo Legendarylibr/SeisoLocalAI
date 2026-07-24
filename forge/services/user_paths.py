@@ -61,7 +61,12 @@ def assert_user_config_file(sandbox_root: Path, user_id: str, config_file: str) 
 def resolve_training_dataset_path(
     sandbox_root: Path, user_id: str, dataset: str, *, install_root: Path | None = None
 ) -> str:
-    """Map CLI-style relative dataset paths into the user's uploads sandbox."""
+    """Map CLI-style relative dataset paths into the user sandbox.
+
+    Search order matches ``assert_user_path`` / ``USER_SCOPED_DATA_ROOTS`` so
+    relative paths can resolve under uploads, checkpoints, knowledge, etc.
+    (S1-004). Bare filenames still prefer uploads (and may copy bundled samples).
+    """
     if not dataset or not is_local_filesystem_path(dataset):
         return dataset
 
@@ -69,11 +74,31 @@ def resolve_training_dataset_path(
     if path.is_absolute():
         return dataset
 
+    from seiso.security import USER_SCOPED_DATA_ROOTS, SecurityError, assert_within
+
+    rel_parts = [p for p in path.parts if p not in (".",)]
+    # Prefer uploads for bare filenames (historical CLI UX).
+    search_roots = ("uploads",) + tuple(
+        sorted(r for r in USER_SCOPED_DATA_ROOTS if r != "uploads")
+    )
+    for category in search_roots:
+        try:
+            root = user_dir(sandbox_root, user_id, category)
+        except Exception:
+            continue
+        if not rel_parts:
+            continue
+        candidate = root.joinpath(*rel_parts)
+        try:
+            if candidate.is_file():
+                assert_within(root, candidate)
+                return str(candidate.resolve())
+        except (OSError, ValueError, SecurityError):
+            continue
+
     uploads = user_dir(sandbox_root, user_id, "uploads")
     uploads.mkdir(parents=True, exist_ok=True)
     user_copy = uploads / path.name
-    if user_copy.exists():
-        return str(user_copy)
 
     if path.name == "sample.jsonl":
         candidates: list[Path] = []

@@ -81,7 +81,9 @@ def _read_cli_token() -> str | None:
 
 
 def _user_token_path(data_dir: Path, user_id: str) -> Path:
-    return data_dir / "hf_tokens" / user_id
+    from seiso.security import safe_join
+
+    return safe_join(data_dir, "hf_tokens", user_id)
 
 
 def save_user_hf_token(

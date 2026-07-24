@@ -101,9 +101,10 @@ def _setup_ready(repo: Path) -> dict[str, Any]:
         "package_importable": import_ok,
         "import_error": import_error,
         "package_version": _package_version(),
-        "cli_research": _cli_path(repo, "adaptive-rl-quant"),
-        "cli_pytorch": _cli_path(repo, "adaptive-rl-quant-pytorch"),
-        "cli_ui": _cli_path(repo, "adaptive-rl-quant-ui"),
+        "cli_product": "seiso rl-quant",
+        "cli_research": "python -m seiso.adaptive_quant",
+        "cli_pytorch": "python -m seiso.adaptive_quant (pytorch trainer)",
+        "cli_ui": "seiso forge  # Forge UI /rl-quant",
     }
 
 

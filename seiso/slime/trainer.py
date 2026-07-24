@@ -1247,9 +1247,19 @@ def _iter_shuffled_samples(
 
 
 def _load_samples(config: SingleGpuSlimeConfig) -> Iterable[dict[str, Any]]:
+    from seiso.training.config import DatasetFormat
+    from seiso.training.datasets import detect_format
+
     for sample in iter_jsonl(config.dataset):
         if config.prompt_field not in sample:
             raise ValueError(f"sample missing prompt field {config.prompt_field!r}")
+        # Preference pairs are not verifiable GRPO rows (TRN-04).
+        if detect_format(sample) == DatasetFormat.PREFERENCE:
+            raise ValueError(
+                "Preference datasets (chosen/rejected) are incompatible with slime GRPO. "
+                "Use Distill-RL/DPO for preference pairs, or provide prompt/answer "
+                "(or prompt + tests) rows for verifiable rewards."
+            )
         yield sample
 
 

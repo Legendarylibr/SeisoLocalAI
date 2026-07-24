@@ -82,10 +82,16 @@ def strip_spurious_chat_artifacts(content: str) -> str:
 
 
 def sanitize_llm_output(content: str, *, strip_tool_calls: bool = False) -> str:
-    """Return assistant text, optionally stripping spurious chat artifacts."""
+    """Return assistant text with reasoning stripped; optionally strip tool markup.
+
+    Reasoning leaks (``<think>`` / ``redacted_thinking``) are always removed so
+    tools-enabled chat cannot bypass the strip (CHAT-01). ``strip_tool_calls``
+    only controls tool-call syntax removal.
+    """
+    cleaned = strip_leaked_reasoning(content)
     if strip_tool_calls:
-        return strip_spurious_chat_artifacts(content)
-    return content
+        cleaned = strip_spurious_tool_syntax(cleaned)
+    return cleaned
 
 
 def chunk_sanitized_output(content: str, *, chunk_size: int = _CHUNK_SIZE) -> Iterator[str]:
@@ -109,11 +115,13 @@ class StreamingOutputSanitizer:
     def feed(self, text: str) -> list[str]:
         if not text:
             return []
-        if not self._strip:
-            return [text]
-
         self._pending += text
-        self._drain_pending()
+        if self._strip:
+            self._drain_pending()
+        else:
+            # Tools allowed: keep tool markup, still accumulate for reasoning strip.
+            self._visible += self._pending
+            self._pending = ""
         if not self._thinking_resolved:
             if not self._should_release_holdback(self._visible):
                 return []
@@ -121,10 +129,8 @@ class StreamingOutputSanitizer:
         return self._emit_visible_delta()
 
     def finish(self) -> list[str]:
-        if not self._strip:
-            return []
         self._thinking_resolved = True
-        if self._in_tool_call:
+        if self._strip and self._in_tool_call:
             self._pending = ""
             self._in_tool_call = False
         else:
@@ -134,9 +140,7 @@ class StreamingOutputSanitizer:
 
     def finalize(self, *, full_text: str) -> str:
         """Sanitize the complete assistant reply after streaming finishes."""
-        if not self._strip:
-            return full_text
-        return sanitize_llm_output(full_text, strip_tool_calls=True)
+        return sanitize_llm_output(full_text, strip_tool_calls=self._strip)
 
     def _drain_pending(self) -> None:
         while self._pending:

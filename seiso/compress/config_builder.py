@@ -9,6 +9,7 @@ from seiso.bundled.config_builder import (
     job_output_root,
     resolve_config_file_path,
     resolve_preset,
+    sort_stages,
     validate_stages,
 )
 from seiso.compress.bootstrap import bundle_root, ensure_codellama_compress_importable
@@ -104,6 +105,7 @@ def build_pipeline_config(
         payload.get("stages") or preset.get("stages") or PRESETS["smoke"]["stages"]
     )
     validate_stages(stages, STAGE_ORDER)
+    stages = sort_stages(stages, STAGE_ORDER)
 
     output_root = job_output_root(data_dir, "compress", user_id, job_id)
 

@@ -437,6 +437,10 @@ class Orchestrator(ABC):
         task = self._tasks.get(job_id)
         if task and not task.done():
             task.cancel()
+            # Await task finally so GPU release / resource unlock finish before
+            # cancel() returns to the API (S1-014).
+            with contextlib.suppress(asyncio.CancelledError, Exception):
+                await task
             return True
         # Task already finished execute but _run may not have written status yet.
         if rec.status in (JobStatus.PENDING, JobStatus.RUNNING):

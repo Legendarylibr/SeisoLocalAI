@@ -35,6 +35,21 @@ def test_stage_order():
     assert STAGE_ORDER.index("quantize_awq") < STAGE_ORDER.index("export")
 
 
+def test_build_pipeline_config_sorts_out_of_order_stages(tmp_path: Path):
+    """CMP-ORD: UI/toggle order must not evaluate before quantize."""
+    require_codellama_compress()
+    cfg = build_pipeline_config(
+        job_id="job-ord",
+        user_id="user-1",
+        data_dir=tmp_path,
+        payload={
+            "preset": "smoke",
+            "stages": ["evaluate", "export", "distill", "quantize_gptq"],
+        },
+    )
+    assert cfg["stages"] == ["distill", "quantize_gptq", "evaluate", "export"]
+
+
 def test_build_pipeline_config_smoke(tmp_path: Path):
     require_codellama_compress()
     cfg = build_pipeline_config(

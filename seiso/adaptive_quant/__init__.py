@@ -4,10 +4,10 @@ The default path is a **stdlib simulator**; optional **PyTorch** accelerates tra
 replaces simulated metrics when you configure a binary and GGUF. Public symbols listed in ``__all__`` are
 lazy-imported where useful so importing ``seiso.adaptive_quant`` does not pull optional CUDA stacks until needed.
 
-Entrypoints: ``adaptive-rl-quant`` (Python trainer), ``adaptive-rl-quant-pytorch`` (CUDA trainer),
-``adaptive-rl-quant-online`` (continual adaptation), ``ResearchPipeline`` / ``run_pipeline_entrypoint``,
-and ``run_online_pipeline`` for programmatic runs. Configure via ``FrameworkConfig`` or JSON/TOML
-(``load_config`` / ``FrameworkConfig.from_file``).
+Product CLI: ``seiso rl-quant``. Research internals: ``python -m seiso.adaptive_quant``,
+``ResearchPipeline`` / ``run_pipeline_entrypoint``, and ``run_online_pipeline``.
+Configure via ``FrameworkConfig`` or JSON/TOML (``load_config`` / ``FrameworkConfig.from_file``).
+Legacy console-script names ``adaptive-rl-quant*`` are not installed by Seiso.
 """
 
 from __future__ import annotations

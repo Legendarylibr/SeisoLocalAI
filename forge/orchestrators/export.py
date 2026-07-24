@@ -16,7 +16,8 @@ from seiso.security import SecurityError, assert_within
 
 class ExportOrchestrator(Orchestrator):
     kind = "export"
-    resource_key = "gpu"
+    # GPU exclusivity: prepare_for_gpu_task + file lock + GPU_EXECUTOR (S1-009).
+    resource_key = None
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         from forge.services.memory_release import (
@@ -40,7 +41,9 @@ class ExportOrchestrator(Orchestrator):
 
         hub_meta_raw = payload.get("hub_metadata")
         hub_metadata = HubModelMetadata(**hub_meta_raw) if hub_meta_raw else None
-        user_exports = (self.sandbox_root / "exports" / user_id).resolve()
+        from forge.services.user_paths import user_dir
+
+        user_exports = user_dir(self.sandbox_root, user_id, "exports").resolve()
         default_output = user_exports / job_id
         raw_output = Path(payload.get("output_dir", default_output))
         if not raw_output.is_absolute():

@@ -386,23 +386,23 @@ def _keep_rollout_group(
     """Keep groups that can form a GRPO baseline with outcome diversity.
 
     Always requires ≥2 non-truncated/non-empty rollouts — otherwise advantages
-    are forced to 0 and the step is vacuous. ``reward_nonzero_std`` /
-    ``outcome_nonzero_std`` additionally require nonzero *outcome* spread
-    among those valid rollouts (wiped truncated zeros must not fake diversity;
-    format-only composite spread is ignored).
+    are forced to 0 and the step is vacuous. ``outcome_nonzero_std`` requires
+    nonzero *outcome* spread among valid rollouts (wiped truncated zeros must
+    not fake diversity). ``reward_nonzero_std`` uses composite ``reward``
+    (outcome + format/process) so the filter name matches the signal (SLM-02).
     """
     valid = [rollout for rollout in group if rollout.status not in _INVALID_ADVANTAGE_STATUS]
     if len(valid) < 2:
         return False
-    if config.dynamic_sampling_filter in {
-        "reward_nonzero_std",
-        "outcome_nonzero_std",
-    }:
-        outcomes = [float(rollout.outcome_reward) for rollout in valid]
-        mean = sum(outcomes) / len(outcomes)
-        variance = sum((value - mean) ** 2 for value in outcomes) / len(outcomes)
-        return math.sqrt(variance) > config.dynamic_sampling_min_reward_std
-    return True
+    if config.dynamic_sampling_filter == "outcome_nonzero_std":
+        values = [float(rollout.outcome_reward) for rollout in valid]
+    elif config.dynamic_sampling_filter == "reward_nonzero_std":
+        values = [float(rollout.reward) for rollout in valid]
+    else:
+        return True
+    mean = sum(values) / len(values)
+    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    return math.sqrt(variance) > config.dynamic_sampling_min_reward_std
 
 
 def _truncate_rollout_groups(

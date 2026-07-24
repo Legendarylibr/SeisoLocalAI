@@ -137,11 +137,11 @@ async def run_bundled_job(
         try:
             result = await future
         except asyncio.CancelledError:
-            # Thread-pool work cannot be killed; wait briefly then proceed so
-            # cancel status is not stuck behind a long GPU job. Remaining work
-            # may still finish in the executor, but we release the job lifecycle.
-            with contextlib.suppress(Exception, asyncio.TimeoutError):
-                await asyncio.wait_for(asyncio.shield(future), timeout=2.0)
+            # Thread-pool work cannot be killed. Await completion before
+            # release_after_task in finally — a timed wait left the future
+            # running during GPU/kernel release (S1-017).
+            with contextlib.suppress(Exception):
+                await asyncio.shield(future)
             raise
     finally:
         release_after_task(
@@ -170,7 +170,8 @@ def bundled_orchestrator(
     """Build a thin Orchestrator subclass for a bundled pipeline runner."""
 
     class _BundledOrchestrator(Orchestrator):
-        resource_key = "gpu"
+        # GPU exclusivity: prepare_for_gpu_task + file lock + GPU_EXECUTOR (S1-009).
+        resource_key = None
 
         async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             return await run_bundled_job(

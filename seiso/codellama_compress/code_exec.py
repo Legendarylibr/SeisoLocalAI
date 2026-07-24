@@ -69,8 +69,8 @@ def _limit_resources() -> None:
         resource.setrlimit(resource.RLIMIT_FSIZE, (10_000_000, 10_000_000))
         if hasattr(resource, "RLIMIT_CORE"):
             resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
-        if hasattr(resource, "RLIMIT_NPROC"):
-            resource.setrlimit(resource.RLIMIT_NPROC, (32, 32))
+        # Do not clamp RLIMIT_NPROC: on Linux the limit is per real UID and a
+        # low cap races with pytest-xdist workers (fork/EAGAIN flakes).
         if hasattr(resource, "RLIMIT_NOFILE"):
             resource.setrlimit(resource.RLIMIT_NOFILE, (64, 64))
     except Exception:

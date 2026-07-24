@@ -23,6 +23,8 @@ seed: 42
 rollouts_per_prompt: 4
 rollout_batch_size: 2
 nemo_rl_recipe: grpo
+# Acknowledge that Hydra recipes ignore TrainConfig.dataset (NEMO-02):
+nemo_rl_ack_recipe_corpus: true
 # nemo_rl_root: ~/nemo-rl   # or set SEISO_NEMO_RL_ROOT
 nemo_rl_gpus_per_node: 1
 nemo_rl_num_nodes: 1

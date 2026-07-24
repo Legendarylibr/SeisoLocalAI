@@ -108,6 +108,12 @@ def strip_integrity_meta(record: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def config_fingerprint(config: FrameworkConfig) -> str:
+    """Stable hash of the flat FrameworkConfig contract.
+
+    Domain-specific (excludes volatile keys via ``_CONFIG_FINGERPRINT_EXCLUDE``).
+    Generic JSON fingerprints use ``seiso.research.provenance.content_fingerprint``
+    (RP-10); compress/distill already delegate there.
+    """
     flat = config_to_flat_dict(config)
     body = {
         key: flat[key] for key in sorted(flat) if key not in _CONFIG_FINGERPRINT_EXCLUDE

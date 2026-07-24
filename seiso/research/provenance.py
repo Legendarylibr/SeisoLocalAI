@@ -59,11 +59,32 @@ def write_json(path: Path, data: Any) -> None:
     path.write_text(json.dumps(data, indent=2, default=str), encoding="utf-8")
 
 
+def _jsonable(obj: Any) -> Any:
+    """Normalize nested configs so dataclass/dict fingerprints agree after reload."""
+    if hasattr(obj, "__dataclass_fields__"):
+        from dataclasses import asdict
+
+        return {k: _jsonable(v) for k, v in asdict(obj).items()}
+    if isinstance(obj, dict):
+        return {str(k): _jsonable(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_jsonable(v) for v in obj]
+    if isinstance(obj, Path):
+        return str(obj)
+    return obj
+
+
 def content_fingerprint(payload: Any) -> str:
     """Stable SHA-256 fingerprint for JSON-serializable config snapshots."""
     import hashlib
 
-    blob = json.dumps(payload, sort_keys=True, default=str, separators=(",", ":"))
+    blob = json.dumps(
+        _jsonable(payload),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    )
     return hashlib.sha256(blob.encode("utf-8")).hexdigest()
 
 
