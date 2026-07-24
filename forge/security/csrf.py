@@ -54,13 +54,13 @@ def validate_csrf(request: Request) -> bool:
     # Bearer text must not bypass double-submit cookie checks.
     auth = request.headers.get("authorization", "")
     if auth.lower().startswith("bearer ") and auth[7:].strip():
-        try:
-            from forge.config import get_settings
-            from forge.security.auth import InvalidTokenError, decode_token
+        from forge.config import get_settings
+        from forge.security.auth import InvalidTokenError, decode_token
 
+        try:
             decode_token(auth[7:].strip(), get_settings())
             return True
-        except Exception:
+        except InvalidTokenError:
             pass
     if not (path.startswith("/api") or path.startswith("/v1")):
         return True

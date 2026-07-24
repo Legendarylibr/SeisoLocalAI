@@ -77,10 +77,11 @@ async def durable_job_events(
             yield {"event": "metric", "data": json.dumps(payload, default=str)}
         elif event_type == "status":
             # Match live training SSE: plain status string (F4-10).
-            if isinstance(payload, dict):
-                status = payload.get("status", "unknown")
-            else:
-                status = payload
+            status = (
+                payload.get("status", "unknown")
+                if isinstance(payload, dict)
+                else payload
+            )
             yield {"event": "status", "data": str(status)}
         elif event_type == "result":
             yield {"event": "result", "data": json.dumps(payload, default=str)}
