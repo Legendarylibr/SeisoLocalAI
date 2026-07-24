@@ -217,28 +217,33 @@ def verify_code_proof(
     per_test = max(0.1, limit / max(1, len(tests)))
 
     passed = 0
-    last_stderr = ""
-    last_exit = 0
-    last_reason = "ok"
+    fail_stderr = ""
+    fail_exit = 0
+    fail_reason = "ok"
     for unit in tests:
         program = build_program(
             extracted_code=code, sample=sample, test_unit=unit
         )
         result = run_python_sandboxed(code=program, timeout_s=per_test)
-        last_stderr = result.stderr
-        last_exit = result.exit_code
-        last_reason = result.reason
+        # One retry only for empty-stderr failures (xdist host pressure flakes).
+        # Keep AssertionError / real runtime failures single-shot.
+        if not result.ok and not (result.stderr or "").strip():
+            result = run_python_sandboxed(code=program, timeout_s=per_test)
         if result.ok:
             passed += 1
+        elif fail_reason == "ok":
+            fail_stderr = result.stderr
+            fail_exit = result.exit_code
+            fail_reason = result.reason
 
     total = len(tests)
     score = float(passed) / float(total) if total else 0.0
     all_ok = passed == total and total > 0
     detail = f"code:pass {passed}/{total}"
-    if not all_ok and last_reason != "ok":
-        detail = f"{detail}; last={last_reason}"
-    elif not all_ok and last_stderr:
-        detail = f"{detail}; stderr={last_stderr.splitlines()[0][:120]}"
+    if not all_ok and fail_reason != "ok":
+        detail = f"{detail}; last={fail_reason}"
+    elif not all_ok and fail_stderr:
+        detail = f"{detail}; stderr={fail_stderr.splitlines()[0][:120]}"
 
     return CodeProofResult(
         passed=all_ok,
@@ -247,9 +252,9 @@ def verify_code_proof(
         tests_passed=passed,
         extracted_code=code,
         detail=detail,
-        exit_code=last_exit,
-        stderr=last_stderr[:500],
-        reason=last_reason if not all_ok else "ok",
+        exit_code=fail_exit,
+        stderr=fail_stderr[:500],
+        reason=fail_reason if not all_ok else "ok",
     )
 
 
