@@ -133,12 +133,15 @@ def generate_sglang_chunk(
 ) -> GeneratedChunk:
     """Generate ``rollouts_per_prompt`` completions per prompt via SGLang HTTP."""
     del tokenizer  # prompts are already formatted strings
+    from seiso.slime.rollout_http import sglang_engine_urls
+
     client = SGLangRolloutClient.from_config(config)
     return _generate_http_chunk(
         client=client,
         prompts=prompts,
         rollouts_per_prompt=config.rollouts_per_prompt,
         max_workers=int(getattr(config, "sglang_max_workers", 8) or 8),
+        engine_urls=sglang_engine_urls(config),
     )
 
 
@@ -150,12 +153,19 @@ def generate_vllm_chunk(
 ) -> GeneratedChunk:
     """Generate ``rollouts_per_prompt`` completions per prompt via vLLM HTTP."""
     del tokenizer  # prompts are already formatted strings
+    from seiso.slime.rollout_http import resolve_vllm_base_url, vllm_engine_urls
+
     client = VLLMRolloutClient.from_config(config)
+    engines = vllm_engine_urls(config, allow_empty_primary=True)
+    if not engines:
+        base = resolve_vllm_base_url(config)
+        engines = [base] if base else [client.base_url]
     return _generate_http_chunk(
         client=client,
         prompts=prompts,
         rollouts_per_prompt=config.rollouts_per_prompt,
         max_workers=int(getattr(config, "vllm_max_workers", 8) or 8),
+        engine_urls=engines,
     )
 
 
@@ -165,19 +175,40 @@ def _generate_http_chunk(
     prompts: list[str],
     rollouts_per_prompt: int,
     max_workers: int,
+    engine_urls: list[str] | None = None,
 ) -> GeneratedChunk:
-    """Shared OpenAI ``/v1/completions`` fan-out for SGLang and vLLM."""
+    """Shared OpenAI ``/v1/completions`` fan-out for SGLang and vLLM.
+
+    When multiple engine URLs are configured, jobs are round-robined across
+    engines (weight sync still fans out to all).
+    """
+    import copy
+
     n = int(rollouts_per_prompt)
     jobs: list[tuple[int, str]] = []
     for p_idx, prompt in enumerate(prompts):
         for _ in range(n):
             jobs.append((p_idx, prompt))
 
+    engines = [u.rstrip("/") for u in (engine_urls or []) if str(u).strip()]
+    if not engines:
+        engines = [str(client.base_url).rstrip("/")]
+
+    # One client per engine so concurrent workers never race on base_url.
+    engine_clients: list[Any] = []
+    for url in engines:
+        cloned = copy.copy(client)
+        cloned.base_url = url
+        engine_clients.append(cloned)
+
     results: list[tuple[str, list[int] | None] | None] = [None] * len(jobs)
     workers = min(max(1, int(max_workers)), max(1, len(jobs)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
-            pool.submit(client.complete_with_tokens, prompt): idx
+            pool.submit(
+                engine_clients[idx % len(engine_clients)].complete_with_tokens,
+                prompt,
+            ): idx
             for idx, (_p_idx, prompt) in enumerate(jobs)
         }
         for fut in as_completed(futures):

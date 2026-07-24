@@ -370,10 +370,6 @@ def _filter_rollout_groups(
     rollouts: list[Rollout],
     config: SingleGpuSlimeConfig,
 ) -> tuple[list[Rollout], set[int], int]:
-    if config.dynamic_sampling_filter == "none":
-        group_count = math.ceil(len(rollouts) / config.rollouts_per_prompt)
-        return rollouts, set(range(group_count)), 0
-
     kept: list[Rollout] = []
     kept_group_indexes: set[int] = set()
     rejected = 0
@@ -391,19 +387,22 @@ def _keep_rollout_group(
     group: list[Rollout],
     config: SingleGpuSlimeConfig,
 ) -> bool:
-    """Keep groups that have nonzero *outcome* spread for GRPO.
+    """Keep groups that can form a GRPO baseline with outcome diversity.
 
-    ``reward_nonzero_std`` / ``outcome_nonzero_std`` intentionally ignore pure
-    format-shaping spread on the composite ``reward``. Format remains a small
-    shaping term *after* a group already has outcome diversity.
+    Always requires ≥2 non-truncated/non-empty rollouts — otherwise advantages
+    are forced to 0 and the step is vacuous. ``reward_nonzero_std`` /
+    ``outcome_nonzero_std`` additionally require nonzero *outcome* spread
+    among those valid rollouts (wiped truncated zeros must not fake diversity;
+    format-only composite spread is ignored).
     """
+    valid = [rollout for rollout in group if rollout.status not in _INVALID_ADVANTAGE_STATUS]
+    if len(valid) < 2:
+        return False
     if config.dynamic_sampling_filter in {
         "reward_nonzero_std",
         "outcome_nonzero_std",
     }:
-        outcomes = [float(rollout.outcome_reward) for rollout in group]
-        if len(outcomes) < 2:
-            return False
+        outcomes = [float(rollout.outcome_reward) for rollout in valid]
         mean = sum(outcomes) / len(outcomes)
         variance = sum((value - mean) ** 2 for value in outcomes) / len(outcomes)
         return math.sqrt(variance) > config.dynamic_sampling_min_reward_std

@@ -262,6 +262,9 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
                     "rollout_groups_trained": float(trained_groups),
                 },
             )
+            # Sync grads only on the last accumulation microbatch so DDP does
+            # not all-reduce on every intermediate backward.
+            will_step = (pending_accumulation_steps + 1) >= config.gradient_accumulation_steps
             stats = _backprop_policy_step(
                 model,
                 rollouts,
@@ -269,6 +272,7 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
                 config,
                 torch,
                 loss_scale=1.0 / config.gradient_accumulation_steps,
+                sync_gradients=will_step,
             )
             stats.update(rollout_batch.stats)
             stats = _reduce_stats(stats, torch, dist_ctx)
@@ -276,7 +280,9 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
 
             health_reason = _check_training_health(stats, config)
             if health_reason:
+                # Non-finite stats: discard the window (do not step on bad grads).
                 optimizer.zero_grad(set_to_none=True)
+                pending_accumulation_steps = 0
                 if dist_ctx.is_main and global_step % config.log_every_steps == 0:
                     _append_metrics(
                         metrics_path,
@@ -343,7 +349,22 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
 
             global_step += 1
             if decision.should_stop:
-                optimizer.zero_grad(set_to_none=True)
+                # Apply any partial accumulation window before exiting so early
+                # stop does not silently drop healthy grads (DDP-safe flush).
+                if pending_accumulation_steps:
+                    _flush_accumulated_gradients(model, dist_ctx, torch)
+                    _optimizer_step(model, optimizer, torch, config)
+                    pending_accumulation_steps = 0
+                    _sync_rollout_engine_weights(
+                        model=model,
+                        tokenizer=tokenizer,
+                        config=config,
+                        dist_ctx=dist_ctx,
+                        step=global_step,
+                        sync_state=weight_sync_state,
+                    )
+                else:
+                    optimizer.zero_grad(set_to_none=True)
                 _maybe_run_held_out_eval(
                     model=model,
                     tokenizer=tokenizer,
@@ -359,7 +380,9 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
                 return final_output_dir
             if config.max_steps is not None and global_step >= config.max_steps:
                 if pending_accumulation_steps:
+                    _flush_accumulated_gradients(model, dist_ctx, torch)
                     _optimizer_step(model, optimizer, torch, config)
+                    pending_accumulation_steps = 0
                     _sync_rollout_engine_weights(
                         model=model,
                         tokenizer=tokenizer,
@@ -408,7 +431,9 @@ def train_slime(config: SingleGpuSlimeConfig) -> Path:
             "or set dynamic_sampling_filter: none only for debugging."
         )
     if pending_accumulation_steps:
+        _flush_accumulated_gradients(model, dist_ctx, torch)
         _optimizer_step(model, optimizer, torch, config)
+        pending_accumulation_steps = 0
         _sync_rollout_engine_weights(
             model=model,
             tokenizer=tokenizer,
@@ -977,16 +1002,52 @@ def _backprop_policy_step(
     torch,
     *,
     loss_scale: float,
+    sync_gradients: bool = True,
 ):
+    """Accumulate policy grads; optionally defer DDP all-reduce until the last chunk.
+
+    When ``sync_gradients`` is False (intermediate grad-accum steps), wrap every
+    microbatch in ``model.no_sync()``. When True, only the final microbatch
+    synchronizes so DDP peers share one averaged gradient per optimizer step.
+    Partial leftover windows must call ``_flush_accumulated_gradients`` before
+    ``_optimizer_step``.
+    """
+    import contextlib
+
     total = len(rollouts)
     stats = _empty_stats()
-    for chunk in _chunked(rollouts, config.policy_micro_batch_size):
+    chunks = list(_chunked(rollouts, config.policy_micro_batch_size))
+    last_idx = len(chunks) - 1
+    for idx, chunk in enumerate(chunks):
         loss, chunk_stats = _policy_loss(model, chunk, pad_token_id, config, torch)
         weighted = len(chunk) / total
-        (loss * weighted * loss_scale).backward()
+        sync_this = bool(sync_gradients) and idx == last_idx
+        if sync_this or not hasattr(model, "no_sync"):
+            ctx = contextlib.nullcontext()
+        else:
+            ctx = model.no_sync()
+        with ctx:
+            (loss * weighted * loss_scale).backward()
         _merge_stats(stats, chunk_stats, weight=weighted)
         del loss
     return stats
+
+
+def _flush_accumulated_gradients(model, dist_ctx: _DistributedSlimeContext, torch) -> None:
+    """Average local grads across ranks after a no_sync accumulation window.
+
+    Used when training ends mid-accumulation so ``optimizer.step`` sees the same
+    DDP-averaged gradient as a full sync backward would have produced.
+    """
+    if not dist_ctx.enabled:
+        return
+    world = float(dist_ctx.world_size)
+    for param in model.parameters():
+        grad = param.grad
+        if grad is None:
+            continue
+        torch.distributed.all_reduce(grad, op=torch.distributed.ReduceOp.SUM)
+        grad /= world
 
 
 def _build_optimizer(model, config: SingleGpuSlimeConfig):

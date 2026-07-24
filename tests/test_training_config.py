@@ -428,3 +428,42 @@ def test_materialize_source_hf_dataset_alias(tmp_path: Path):
 
     assert normalize_materialize_source("hf_dataset") == "dataset"
     assert normalize_materialize_source("dataset") == "dataset"
+
+
+def test_cloud_gpu_slime_vllm_requires_engine_url():
+    import pytest
+
+    with pytest.raises(ValueError, match="vllm_base_url"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": "./slime.jsonl",
+                "method": "slime",
+                "require_held_out_eval": False,
+                "cloud_gpu_enabled": True,
+                "cloud_gpu_provider": "aws",
+                "cloud_gpu_instance_type": "p5.48xlarge",
+                "rollout_backend": "vllm",
+                "vllm_base_url": "",
+            }
+        )
+
+
+def test_cloud_gpu_slime_vllm_accepts_engine_url():
+    cfg = TrainConfig.model_validate(
+        {
+            "model_id": "test/model",
+            "dataset": "./slime.jsonl",
+            "method": "slime",
+            "require_held_out_eval": False,
+            "cloud_gpu_enabled": True,
+            "cloud_gpu_provider": "aws",
+            "cloud_gpu_instance_type": "p5.48xlarge",
+            "rollout_backend": "vllm",
+            "vllm_base_url": "http://10.0.0.5:8000",
+            "slime_use_lora": True,
+            "vllm_weight_mode": "auto",
+        }
+    )
+    assert cfg.vllm_base_url.startswith("http")
+    cfg.to_single_gpu_slime_config().validate()
