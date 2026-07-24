@@ -610,7 +610,7 @@ Found a vulnerability? Report it privately via [GitHub private vulnerability rep
 | `SEISO_ALLOW_REMOTE=true` | — | Allows LAN/WAN binding; requires `SEISO_REMOTE_ACK=1` |
 | `SEISO_REMOTE_ACK=1` | — | Required acknowledgement to bind beyond localhost |
 | `SEISO_REMOTE_DANGEROUS_ACK=1` | — | Required for remote + tools/compat-tools |
-| `SEISO_REMOTE_CODE_EXEC_ACK=1` | — | Required for remote + code-exec (AST sandbox is not OS isolation) |
+| `SEISO_ALLOW_CODE_EXEC` + remote | blocked | Remote + code-exec is refused (AST sandbox is not OS isolation) |
 | `SEISO_TRUST_PROXY=true` | — | Honor `X-Forwarded-*` only from `SEISO_TRUSTED_PROXY_IPS` |
 | `SEISO_TRUSTED_PROXY_IPS` | — | Comma-separated proxy IPs/CIDRs (e.g. `127.0.0.1,::1`) |
 | `SEISO_SECURE_COOKIES=true` | — | Secure cookies when TLS is terminated upstream |
@@ -623,7 +623,7 @@ Deploy configs: [`deploy/`](deploy/) · Guide: [docs/deployment/reverse-proxy.md
 |----------|---------|
 | `SEISO_ALLOW_TOOLS=true` | Web search, artifact writes |
 | `SEISO_ALLOW_CODE_EXEC=true` | Sandboxed `execute_code` tool |
-| `SEISO_ALLOW_COMPAT_TOOLS=true` | Tool calling on Compat API `/v1/chat/completions` |
+| `SEISO_ALLOW_COMPAT_TOOLS=true` | Tool calling on Compat API `/v1` (session JWT only; inference API key stays chat-only) |
 
 ### Path sandbox & tenant isolation
 

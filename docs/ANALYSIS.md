@@ -6,7 +6,7 @@
 
 This document provides a software engineering analysis: architecture, features, code health, security, platform notes, WIP status, and actionable recommendations.
 
-**July 2026 full-tree review:** See [reports/codebase-review-2026-07.md](reports/codebase-review-2026-07.md) for phased findings (safety, product surfaces, research claims, Forge/UI/docs), keep/deprecate/delete decisions, and remediations landed in that pass. Top residual risks: global DNS-pin concurrency (S1-001), AST-only code-exec under remote (F4-01), dual RL-quant preset registries (RP-05), multi-backend chat picker (INF-01).
+**July 2026 full-tree review:** See [reports/codebase-review-2026-07.md](reports/codebase-review-2026-07.md) for phased findings (safety, product surfaces, research claims, Forge/UI/docs), keep/deprecate/delete decisions, and remediations landed in that pass. Top residual risks: global DNS-pin concurrency (S1-001), dual RL-quant preset registries (RP-05), multi-backend chat picker (INF-01). Remote + code-exec is hard-refused (AST sandbox is not OS isolation).
 
 ---
 

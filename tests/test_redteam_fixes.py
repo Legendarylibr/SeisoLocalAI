@@ -716,15 +716,15 @@ def test_remote_access_requires_ack(monkeypatch, tmp_path):
         ForgeSettings()
 
 
-def test_remote_code_exec_requires_dedicated_ack(monkeypatch):
-    """Remote + code-exec fail-closed unless SEISO_REMOTE_CODE_EXEC_ACK=1."""
+def test_remote_code_exec_always_refused(monkeypatch):
+    """Remote + code-exec is refused entirely (AST sandbox is not OS isolation)."""
     from types import SimpleNamespace
 
     from forge.security.startup import validate_security_settings
 
     monkeypatch.setenv("SEISO_REMOTE_ACK", "1")
-    monkeypatch.delenv("SEISO_REMOTE_CODE_EXEC_ACK", raising=False)
-    # Shared tools ack alone must not re-enable remote code-exec.
+    # Legacy ack must not re-enable remote code-exec.
+    monkeypatch.setenv("SEISO_REMOTE_CODE_EXEC_ACK", "1")
     monkeypatch.setenv("SEISO_REMOTE_DANGEROUS_ACK", "1")
 
     settings = SimpleNamespace(
@@ -736,11 +736,8 @@ def test_remote_code_exec_requires_dedicated_ack(monkeypatch):
         trusted_proxy_ips="",
         debug=False,
     )
-    with pytest.raises(RuntimeError, match="SEISO_REMOTE_CODE_EXEC_ACK"):
+    with pytest.raises(RuntimeError, match="cannot be combined with code execution"):
         validate_security_settings(settings)
-
-    monkeypatch.setenv("SEISO_REMOTE_CODE_EXEC_ACK", "1")
-    validate_security_settings(settings)
 
 
 def test_remote_tools_still_use_dangerous_ack(monkeypatch):
@@ -805,6 +802,53 @@ async def test_inference_api_key_scoped_to_compat(app, auth_client, tmp_path):
         headers={"Authorization": f"Bearer {settings.inference_api_key}"},
     )
     assert admin.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_inference_api_key_cannot_use_compat_tools(monkeypatch, app, auth_client):
+    """Inference API key stays chat-only even when Compat tools are server-enabled."""
+    from forge.api.deps import clear_dependency_caches
+    from forge.config import get_settings
+    from forge.security.compat_auth import CompatIdentity
+
+    assert CompatIdentity("u1", "inference_key").tools_allowed is False
+    assert CompatIdentity("u1", "session").tools_allowed is True
+
+    monkeypatch.setenv("SEISO_ALLOW_COMPAT_TOOLS", "true")
+    clear_dependency_caches()
+    try:
+        settings = get_settings()
+        assert settings.allow_compat_tools is True
+        client, token, headers, _tmp = auth_client
+        key_res = await client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {settings.inference_api_key}"},
+            json={
+                "model": "default",
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": [{"type": "function", "function": {"name": "web_search"}}],
+                "stream": False,
+            },
+        )
+        assert key_res.status_code == 403
+        assert "chat-only" in key_res.json()["detail"].lower()
+
+        # Session JWT may proceed past the auth-method gate (may fail later on model).
+        jwt_res = await client.post(
+            "/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": "default",
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": [{"type": "function", "function": {"name": "web_search"}}],
+                "stream": False,
+            },
+        )
+        assert "chat-only" not in jwt_res.text.lower()
+        assert token  # keep fixture unpack used
+    finally:
+        monkeypatch.delenv("SEISO_ALLOW_COMPAT_TOOLS", raising=False)
+        clear_dependency_caches()
 
 
 @pytest.mark.asyncio

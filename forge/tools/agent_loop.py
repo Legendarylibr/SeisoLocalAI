@@ -58,9 +58,18 @@ async def run_agent_loop_async(
                 "tool_call",
                 user_id=user_id,
                 tool=name,
+                round=round_i + 1,
                 args_sha256=hash_audit_payload(args),
             )
             result = await registry.execute_async(name, args)
+            audit_event(
+                "tool_result",
+                user_id=user_id,
+                tool=name,
+                round=round_i + 1,
+                result_sha256=hash_audit_payload(result),
+                result_chars=len(result) if isinstance(result, str) else None,
+            )
             history.append({"role": "tool", "name": name, "content": result})
 
     final = await generate_fn(history)

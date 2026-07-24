@@ -210,17 +210,22 @@ def format_knowledge_context(chunks: list[dict], *, knowledge_base_id: str | Non
         "Prefer facts from these excerpts; say when the excerpts do not cover the question.",
         "",
     ]
+    included = 0
     for index, chunk in enumerate(chunks, start=1):
         source = chunk.get("source") or chunk.get("source_path") or "document"
         text = str(chunk.get("text", "")).strip()
         if not text:
             continue
-        text, _flagged = prepare_kb_chunk_text(text)
-        if not text:
+        text, flagged = prepare_kb_chunk_text(text)
+        # Quarantine: never inject instruction-like KB text into the model context.
+        if flagged or not text:
             continue
         envelope_source = f"kb:{knowledge_base_id}" if knowledge_base_id else f"kb:{source}"
         label = f"[{index}] ({source})"
         parts.append(wrap_kb_reference(envelope_source, f"{label}\n{text}"))
         parts.append("")
+        included += 1
 
+    if included == 0:
+        return ""
     return "\n".join(parts).strip()

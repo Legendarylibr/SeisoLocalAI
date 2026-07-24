@@ -111,7 +111,7 @@ Types are **vendor-neutral** (any standard chat-completions HTTP server). Legacy
 Managed multi-GPU is **opt-in** and never replaces Ollama/llama-swap GGUF sidecars.
 Free memory stops a Seiso-managed multi-GPU process.
 
-Set `SEISO_ALLOW_COMPAT_TOOLS=true` to enable tool calling on this endpoint (legacy alias: `SEISO_ALLOW_OPENAI_TOOLS`). See [forge.md](../forge.md).
+Set `SEISO_ALLOW_COMPAT_TOOLS=true` to enable tool calling on this endpoint for **session JWT** clients (legacy alias: `SEISO_ALLOW_OPENAI_TOOLS`). The inference API key remains chat-only. See [forge.md](../forge.md).
 
 ## Training vs inference
 

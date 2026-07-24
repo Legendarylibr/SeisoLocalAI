@@ -203,13 +203,26 @@ def test_prepare_chat_context_includes_knowledge_block():
     )
 
 
-def test_prepare_chat_context_skips_system_prompt_when_tools_enabled():
+def test_prepare_chat_context_keeps_security_prompt_when_tools_enabled():
     messages = prepare_chat_context(
         [{"role": "user", "content": "hi"}],
         model_key="Qwen/Qwen3.6-4B",
         tools_enabled=True,
     )
-    assert messages == [{"role": "user", "content": "hi"}]
+    assert messages[0]["role"] == "system"
+    assert "security boundaries" in messages[0]["content"].lower()
+    assert "kb_reference" in messages[0]["content"].lower()
+    assert messages[-1] == {"role": "user", "content": "hi"}
+
+
+def test_chat_system_prompt_always_returns_security_boundaries_with_tools():
+    prompt = chat_system_prompt("meta-llama/Llama-3.1-8B", tools_enabled=True)
+    assert prompt
+    lower = prompt.lower()
+    assert "security boundaries" in lower
+    assert "kb_reference" in lower
+    assert "tool/function-call markup" in lower
+    assert "when tools are disabled" not in lower
 
 
 def test_chat_system_prompt_keeps_security_boundary_for_reasoning_models():

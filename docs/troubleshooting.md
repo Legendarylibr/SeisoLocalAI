@@ -203,10 +203,12 @@ export SEISO_REMOTE_DANGEROUS_ACK=1
 
 **Symptom:** Remote + code-exec blocked at startup
 
-**Fix:** Code execution is AST deny-list only (not a full OS sandbox). Prefer
-keeping it disabled with remote access. To override deliberately:
+**Fix:** Code execution is AST deny-list only (not a full OS sandbox) and **cannot**
+be combined with `SEISO_ALLOW_REMOTE`. Disable one of:
 ```bash
-export SEISO_REMOTE_CODE_EXEC_ACK=1
+unset SEISO_ALLOW_CODE_EXEC
+# or
+unset SEISO_ALLOW_REMOTE
 ```
 
 ## Compat `/v1` returns 401

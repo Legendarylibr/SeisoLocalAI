@@ -11,7 +11,7 @@ from typing import Any
 from forge.config import get_settings
 from forge.orchestrators.base import JobStatus, Orchestrator
 from forge.providers.router import chat_completion, stream_chat_completion
-from forge.security.audit import audit_event
+from forge.security.audit import audit_event, hash_audit_payload
 from forge.tools.registry import build_default_registry
 from seiso.inference.backends import BACKEND_ROUTER
 from seiso.inference.runner import get_inference_runner
@@ -185,6 +185,25 @@ class InferenceOrchestrator(Orchestrator):
         self._emit_log(
             job_id,
             f"Messages: {len(messages)}, tools={use_tools}, provider={provider_label}",
+        )
+        audit_event(
+            "chat_turn",
+            user_id=user_id,
+            job_id=job_id,
+            tools=bool(use_tools),
+            allow_code_exec=bool(allow_code_exec),
+            provider=provider_label,
+            message_count=len(messages),
+            messages_sha256=hash_audit_payload(
+                [
+                    {
+                        "role": m.get("role"),
+                        "content": m.get("content"),
+                    }
+                    for m in messages
+                    if isinstance(m, dict)
+                ]
+            ),
         )
 
         def on_log(msg: str) -> None:
