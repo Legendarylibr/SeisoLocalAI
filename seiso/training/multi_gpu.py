@@ -154,9 +154,13 @@ def configure_distributed_training_args(
     if ddp_backend:
         args["ddp_backend"] = str(ddp_backend)
     # Expert LoRA / MoE leave unused params each step.
+    # MoE mode is stored on TrainConfig.extra["moe_finetune"], not a top-level attr.
     model_id = str(getattr(config, "model_id", "") or "")
+    extra = getattr(config, "extra", None) or {}
+    moe_from_extra = bool(extra.get("moe_finetune", False)) if isinstance(extra, dict) else False
     if (
         getattr(config, "moe_finetune", False)
+        or moe_from_extra
         or getattr(config, "is_moe", False)
         or "moe" in model_id.lower()
         or "mixtral" in model_id.lower()

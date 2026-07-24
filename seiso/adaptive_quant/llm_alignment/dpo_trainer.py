@@ -317,6 +317,16 @@ class DPOTrainer:
                             self._save_checkpoint()
 
             if accum_metrics:
+                # Leftover microbatches were each scaled by 1/accum; renormalize
+                # so the final step matches a full accumulation window mean.
+                remaining = micro_steps % self.settings.gradient_accumulation_steps
+                if remaining:
+                    scale = float(self.settings.gradient_accumulation_steps) / float(
+                        remaining
+                    )
+                    for param in self.policy_model.parameters():
+                        if param.grad is not None:
+                            param.grad.mul_(scale)
                 self._maybe_clip_and_step()
                 scheduler.step()
                 self.global_step += 1

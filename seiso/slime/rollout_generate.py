@@ -24,6 +24,8 @@ class GeneratedChunk:
     prompt_width: int | None = None
     # Optional per-completion token ids from SGLang when the server provides them.
     completion_token_ids: list[list[int] | None] | None = None
+    # OpenAI-style finish_reason per completion (HTTP backends); None for HF.
+    finish_reasons: list[str | None] | None = None
 
 
 def _as_chat_messages(prompt: str | list[Any]) -> list[dict[str, str]]:
@@ -201,12 +203,12 @@ def _generate_http_chunk(
         cloned.base_url = url
         engine_clients.append(cloned)
 
-    results: list[tuple[str, list[int] | None] | None] = [None] * len(jobs)
+    results: list[Any | None] = [None] * len(jobs)
     workers = min(max(1, int(max_workers)), max(1, len(jobs)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
             pool.submit(
-                engine_clients[idx % len(engine_clients)].complete_with_tokens,
+                engine_clients[idx % len(engine_clients)].complete_http,
                 prompt,
             ): idx
             for idx, (_p_idx, prompt) in enumerate(jobs)
@@ -217,14 +219,23 @@ def _generate_http_chunk(
 
     completions: list[str] = []
     token_id_lists: list[list[int] | None] = []
+    finish_reasons: list[str | None] = []
     for item in results:
         if item is None:
             completions.append("")
             token_id_lists.append(None)
+            finish_reasons.append(None)
         else:
-            text, tids = item
-            completions.append(text)
-            token_id_lists.append(tids)
+            # HttpCompletion or legacy (text, token_ids) tuple from older mocks.
+            if hasattr(item, "text"):
+                completions.append(str(item.text))
+                token_id_lists.append(getattr(item, "token_ids", None))
+                finish_reasons.append(getattr(item, "finish_reason", None))
+            else:
+                text, tids = item
+                completions.append(text)
+                token_id_lists.append(tids)
+                finish_reasons.append(None)
     expanded_prompts = [prompt for _p_idx, prompt in jobs]
     return GeneratedChunk(
         prompts=expanded_prompts,
@@ -232,6 +243,7 @@ def _generate_http_chunk(
         sequences=None,
         prompt_width=None,
         completion_token_ids=token_id_lists,
+        finish_reasons=finish_reasons,
     )
 
 

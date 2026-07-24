@@ -153,29 +153,41 @@ def build_pipeline_config(
             distill_overrides[key] = payload[key]
     distill_cfg = merge_dataclass(DistillConfig(), distill_overrides)
     finetune_file = dict(config_blob.get("finetune") or {})
+    finetune_overrides: dict[str, Any] = {
+        "steps": int(
+            payload.get(
+                "finetune_steps",
+                finetune_file.get("steps", preset.get("finetune_steps", 2)),
+            )
+        ),
+        "trust_remote_code": bool(payload.get("trust_remote_code", False)),
+    }
+    for key in ("lr", "seq_len", "warmup_steps", "weight_decay", "grad_accum_steps",
+                "micro_batch_size", "max_grad_norm", "precision"):
+        if key in finetune_file and key not in payload:
+            finetune_overrides[key] = finetune_file[key]
     finetune_cfg = merge_dataclass(
         DistillConfig(teacher_model="", alpha=0.0, temperature=1.0),
-        {
-            "steps": int(
-                payload.get(
-                    "finetune_steps",
-                    finetune_file.get("steps", preset.get("finetune_steps", 2)),
-                )
-            ),
-            "trust_remote_code": bool(payload.get("trust_remote_code", False)),
-        },
+        finetune_overrides,
     )
-    gptq_cfg = merge_dataclass(
-        GPTQConfig(),
-        {
-            "seed": seed,
-            "calibration_samples": int(
-                payload.get(
+    gptq_file = dict(config_blob.get("gptq") or config_blob.get("awq") or {})
+    gptq_overrides: dict[str, Any] = {
+        "seed": seed,
+        "calibration_samples": int(
+            payload.get(
+                "calibration_samples",
+                gptq_file.get(
                     "calibration_samples", preset.get("calibration_samples", 32)
-                )
-            ),
-        },
-    )
+                ),
+            )
+        ),
+    }
+    for key in ("bits", "group_size", "desc_act", "damp_percent", "calibration_seq_len"):
+        if key in gptq_file:
+            gptq_overrides[key] = gptq_file[key]
+        if key in payload:
+            gptq_overrides[key] = payload[key]
+    gptq_cfg = merge_dataclass(GPTQConfig(), gptq_overrides)
 
     model_dir = payload.get("model_dir")
     if model_dir:

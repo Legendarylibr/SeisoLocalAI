@@ -365,7 +365,12 @@ class TrainingOrchestrator(Orchestrator):
         eval_losses = [
             float(m["eval_loss"]) for m in training if m.get("eval_loss") is not None
         ]
-        rewards = [float(m["reward"]) for m in training if m.get("reward") is not None]
+        rewards: list[float] = []
+        for m in training:
+            if m.get("reward") is not None:
+                rewards.append(float(m["reward"]))
+            elif m.get("reward_mean") is not None:
+                rewards.append(float(m["reward_mean"]))
         return {
             "total_steps": max((int(m.get("step", 0)) for m in training), default=0),
             "final_loss": losses[-1] if losses else None,

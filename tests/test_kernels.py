@@ -78,6 +78,10 @@ def test_dispatch_and_patch_restore(monkeypatch):
     clear_kernel_patches(model)
     assert not hasattr(model[0], "_seiso_orig_forward")
     assert restore_kernel_patches(model) == 0
+    # MLP was patched under a separate model id — restore it explicitly so
+    # later tests do not see orphan registry entries.
+    assert restore_kernel_patches(mlp_model) >= 0
+    assert restore_kernel_patches() == 0
 
 
 def test_kernel_patch_session_restores_on_exception(monkeypatch):
@@ -87,6 +91,9 @@ def test_kernel_patch_session_restores_on_exception(monkeypatch):
 
     from seiso.kernels.hooks import apply_training_kernels
     from seiso.kernels.lifecycle import KernelPatchSession, restore_kernel_patches
+
+    # Prior tests may leave orphan registry entries under other model ids.
+    restore_kernel_patches()
 
     monkeypatch.setattr(
         "seiso.kernels.hooks.detect_gpu",

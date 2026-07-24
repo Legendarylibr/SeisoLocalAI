@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import contextlib
-from typing import Any
+from typing import Any, NamedTuple
 
 from seiso.slime.config import SingleGpuSlimeConfig
 from seiso.slime.rollout_http import (
@@ -15,6 +15,14 @@ from seiso.slime.rollout_http import (
     sglang_engine_urls,
     vllm_engine_urls,
 )
+
+
+class HttpCompletion(NamedTuple):
+    """One remote completion: text, optional engine ids, OpenAI finish_reason."""
+
+    text: str
+    token_ids: list[int] | None
+    finish_reason: str | None
 
 
 def _extract_completion_token_ids(
@@ -32,7 +40,117 @@ def _extract_completion_token_ids(
             value = meta.get(key)
             if isinstance(value, list) and value and all(isinstance(x, int) for x in value):
                 return [int(x) for x in value]
+    # logprobs.tokens may be strings ("token") or ids depending on engine.
+    logprobs = choice.get("logprobs")
+    if isinstance(logprobs, dict):
+        tokens = logprobs.get("token_ids") or logprobs.get("tokens")
+        if isinstance(tokens, list) and tokens and all(isinstance(x, int) for x in tokens):
+            return [int(x) for x in tokens]
     return None
+
+
+def _extract_finish_reason(choice: dict[str, Any]) -> str | None:
+    raw = choice.get("finish_reason")
+    if raw is None:
+        raw = choice.get("stop_reason")
+    if raw is None:
+        return None
+    text = str(raw).strip().lower()
+    return text or None
+
+
+def _normalize_rollout_finish_status(finish_reason: str | None) -> str | None:
+    """Map OpenAI/vLLM/SGLang finish_reason → slime status, or None if unknown."""
+    if not finish_reason:
+        return None
+    key = str(finish_reason).strip().lower()
+    if key in {"stop", "eos", "end_turn", "stop_sequence", "tool_calls"}:
+        return "stop"
+    if key in {"length", "max_tokens", "model_length", "max_length"}:
+        return "length"
+    return None
+
+
+def _completions_payload(
+    *,
+    model: str,
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    top_p: float,
+    request_token_ids: bool = False,
+) -> dict[str, Any]:
+    """OpenAI completions body; optional engine-specific token-id knobs."""
+    payload: dict[str, Any] = {
+        "model": model,
+        "prompt": prompt,
+        "max_tokens": max_tokens,
+        "temperature": temperature,
+        "top_p": top_p,
+        "n": 1,
+    }
+    if request_token_ids:
+        # Best-effort: some vLLM/SGLang builds return sampled ids when asked.
+        payload["return_tokens_as_token_ids"] = True
+    return payload
+
+
+def _post_completion(
+    post_json,
+    *,
+    model: str,
+    prompt: str,
+    max_tokens: int,
+    temperature: float,
+    top_p: float,
+    label: str,
+) -> HttpCompletion:
+    """POST /v1/completions; retry without token-id knobs if the engine rejects them."""
+    attempts = (True, False)
+    last_exc: Exception | None = None
+    for request_ids in attempts:
+        payload = _completions_payload(
+            model=model,
+            prompt=prompt,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            request_token_ids=request_ids,
+        )
+        try:
+            data = post_json("/v1/completions", payload)
+        except RuntimeError as exc:
+            last_exc = exc
+            detail = str(exc).lower()
+            if request_ids and (
+                "400" in detail
+                or "unknown" in detail
+                or "unexpected" in detail
+                or "invalid" in detail
+            ):
+                continue
+            raise
+        choices = data.get("choices")
+        if not isinstance(choices, list) or not choices:
+            raise RuntimeError(f"{label} /v1/completions returned no choices")
+        first = choices[0]
+        if not isinstance(first, dict):
+            raise RuntimeError(f"{label} choice payload is invalid")
+        text = first.get("text")
+        if not isinstance(text, str):
+            message = first.get("message")
+            if isinstance(message, dict) and isinstance(message.get("content"), str):
+                text = message["content"]
+            else:
+                raise RuntimeError(f"{label} choice missing text")
+        return HttpCompletion(
+            text=text,
+            token_ids=_extract_completion_token_ids(first, data),
+            finish_reason=_extract_finish_reason(first),
+        )
+    if last_exc is not None:
+        raise last_exc
+    raise RuntimeError(f"{label} /v1/completions failed")
 
 
 class SGLangRolloutClient:
@@ -77,35 +195,24 @@ class SGLangRolloutClient:
         )
 
     def complete(self, prompt: str) -> str:
-        text, _token_ids = self.complete_with_tokens(prompt)
-        return text
+        return self.complete_http(prompt).text
 
     def complete_with_tokens(self, prompt: str) -> tuple[str, list[int] | None]:
-        """Return (text, optional engine token ids when the server provides them)."""
-        payload = {
-            "model": self.model,
-            "prompt": prompt,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-            "top_p": self.top_p,
-            "n": 1,
-        }
-        data = self._post_json("/v1/completions", payload)
-        choices = data.get("choices")
-        if not isinstance(choices, list) or not choices:
-            raise RuntimeError("SGLang /v1/completions returned no choices")
-        first = choices[0]
-        if not isinstance(first, dict):
-            raise RuntimeError("SGLang choice payload is invalid")
-        text = first.get("text")
-        if not isinstance(text, str):
-            message = first.get("message")
-            if isinstance(message, dict) and isinstance(message.get("content"), str):
-                text = message["content"]
-            else:
-                raise RuntimeError("SGLang choice missing text")
-        token_ids = _extract_completion_token_ids(first, data)
-        return text, token_ids
+        """Back-compat: ``(text, token_ids)``. Prefer ``complete_http``."""
+        result = self.complete_http(prompt)
+        return result.text, result.token_ids
+
+    def complete_http(self, prompt: str) -> HttpCompletion:
+        """Return text, optional engine token ids, and finish_reason."""
+        return _post_completion(
+            self._post_json,
+            model=self.model,
+            prompt=prompt,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            label="SGLang",
+        )
 
     def update_weights_from_disk(
         self,
@@ -223,35 +330,24 @@ class VLLMRolloutClient:
         return client
 
     def complete(self, prompt: str) -> str:
-        text, _token_ids = self.complete_with_tokens(prompt)
-        return text
+        return self.complete_http(prompt).text
 
     def complete_with_tokens(self, prompt: str) -> tuple[str, list[int] | None]:
-        """Return (text, optional engine token ids when the server provides them)."""
-        payload = {
-            "model": self._active_model,
-            "prompt": prompt,
-            "max_tokens": self.max_tokens,
-            "temperature": self.temperature,
-            "top_p": self.top_p,
-            "n": 1,
-        }
-        data = self._post_json("/v1/completions", payload)
-        choices = data.get("choices")
-        if not isinstance(choices, list) or not choices:
-            raise RuntimeError("vLLM /v1/completions returned no choices")
-        first = choices[0]
-        if not isinstance(first, dict):
-            raise RuntimeError("vLLM choice payload is invalid")
-        text = first.get("text")
-        if not isinstance(text, str):
-            message = first.get("message")
-            if isinstance(message, dict) and isinstance(message.get("content"), str):
-                text = message["content"]
-            else:
-                raise RuntimeError("vLLM choice missing text")
-        token_ids = _extract_completion_token_ids(first, data)
-        return text, token_ids
+        """Back-compat: ``(text, token_ids)``. Prefer ``complete_http``."""
+        result = self.complete_http(prompt)
+        return result.text, result.token_ids
+
+    def complete_http(self, prompt: str) -> HttpCompletion:
+        """Return text, optional engine token ids, and finish_reason."""
+        return _post_completion(
+            self._post_json,
+            model=self._active_model,
+            prompt=prompt,
+            max_tokens=self.max_tokens,
+            temperature=self.temperature,
+            top_p=self.top_p,
+            label="vLLM",
+        )
 
     def use_lora_model(self, enabled: bool = True) -> None:
         """Route completions to the dynamic LoRA name after a successful load."""

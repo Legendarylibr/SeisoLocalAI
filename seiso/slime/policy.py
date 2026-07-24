@@ -354,14 +354,10 @@ def _assign_grouped_advantages(
             std = math.sqrt(variance)
             scale = std + 1e-6
             adv_by_id = {
-                id(rollout): value / scale
-                for rollout, value in zip(valid, centered, strict=True)
+                id(rollout): value / scale for rollout, value in zip(valid, centered, strict=True)
             }
         else:
-            adv_by_id = {
-                id(rollout): value
-                for rollout, value in zip(valid, centered, strict=True)
-            }
+            adv_by_id = {id(rollout): value for rollout, value in zip(valid, centered, strict=True)}
         for rollout in group:
             rollout.advantage = float(adv_by_id.get(id(rollout), 0.0))
 
@@ -425,6 +421,33 @@ def _rollout_status(response_tokens, eos_token_id: int | None) -> str:
     if eos_token_id is not None and bool((response_tokens == eos_token_id).any().item()):
         return "stop"
     return "length"
+
+
+def _http_rollout_status(
+    *,
+    finish_reason: str | None,
+    response_tokens,
+    eos_token_id: int | None,
+    completion_text: str = "",
+) -> str:
+    """Status for HTTP rollouts: prefer engine finish_reason over EOS-in-ids.
+
+    Stock OpenAI ``/v1/completions`` rarely returns token ids; retokenized text
+    usually omits EOS, so EOS-only detection falsely marks stopped samples as
+    truncated and wipes GRPO rewards.
+    """
+    n_tokens = (
+        int(response_tokens.numel()) if hasattr(response_tokens, "numel") else len(response_tokens)
+    )
+    if n_tokens == 0 and not str(completion_text or "").strip():
+        return "empty"
+    from seiso.slime.rollout_clients import _normalize_rollout_finish_status
+
+    mapped = _normalize_rollout_finish_status(finish_reason)
+    if mapped is not None:
+        return mapped
+    # Fall back to token/EOS heuristic when the engine omitted finish_reason.
+    return _rollout_status(response_tokens, eos_token_id)
 
 
 def _response_mask_for_sequence(

@@ -507,6 +507,11 @@ class TrainConfig(BaseModel):
                 f"{self.dataset_format.value} datasets; use packing only for plain "
                 "text (dataset_format=text) or disable train_on_responses_only"
             )
+        if self.packing and bool(getattr(self, "assistant_only_loss", False)):
+            raise ValueError(
+                "packing cannot be combined with assistant_only_loss "
+                "(Seiso renders packed text without TRL assistant span masks)"
+            )
         if self.dataset_format == DatasetFormat.PREFERENCE:
             if self.method == TrainMethod.SLIME:
                 raise ValueError(

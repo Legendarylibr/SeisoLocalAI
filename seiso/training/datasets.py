@@ -467,6 +467,15 @@ def _tokenize_chat_row(
             full_ids, labels, attention, max_seq_length
         )
 
+    # After keep_end truncation, refuse rows with no supervised tokens instead of
+    # inventing an EOS label on an otherwise fully-masked prompt.
+    if mask_assistant_only and not any(lab != -100 for lab in labels):
+        raise ValueError(
+            "Response-only sample has no supervised tokens after truncation "
+            f"(max_seq_length={max_seq_length}). Shorten the prompt, raise "
+            "max_seq_length, or disable train_on_responses_only."
+        )
+
     full_ids, labels, attention = _ensure_eos(
         full_ids, labels, attention, eos_id, max_len=max_seq_length
     )

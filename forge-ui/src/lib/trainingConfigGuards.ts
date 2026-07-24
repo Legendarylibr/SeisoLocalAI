@@ -108,11 +108,16 @@ export function getTrainingConfigBlockers(
     });
   }
 
+  // Packing conflict must use the *posted* format. Start still sends
+  // dataset_format: "auto" even when analysis resolved to text — server
+  // Treats auto as packing-blocked, so prefer the selected format here.
+  const packingFormat =
+    input.datasetFormat === "auto" ? "auto" : format;
   if (
     packingConflictsWithResponseMask(
       input.packing,
       input.trainOnResponsesOnly,
-      format,
+      packingFormat,
     )
   ) {
     blockers.push({

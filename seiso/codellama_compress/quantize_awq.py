@@ -45,7 +45,7 @@ def run_awq_quantization(
     )
     quant_config = {
         "w_bit": int(cfg.bits),
-        "q_group_size": 128,
+        "q_group_size": int(getattr(cfg, "group_size", 128) or 128),
         "zero_point": True,
         "version": "GEMM",
     }

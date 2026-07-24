@@ -1139,13 +1139,18 @@ class LocalInferenceRunner:
                     break
                 text = extract_mlx_token_text(token)
                 if text:
-                    yield StreamToken(text)
+                    from seiso.inference.streaming import estimate_chunk_tokens
+
+                    yield StreamToken(text, estimate_chunk_tokens(text))
             return
         except (ImportError, TypeError):
             pass
 
         if not should_stop():
-            yield StreamToken(generate(model, tokenizer, **gen_kwargs))
+            from seiso.inference.streaming import estimate_chunk_tokens
+
+            full = generate(model, tokenizer, **gen_kwargs)
+            yield StreamToken(full, estimate_chunk_tokens(str(full)))
 
     def _mlx_complete(
         self,
@@ -1465,7 +1470,9 @@ class LocalInferenceRunner:
                         break
                     continue
                 if text:
-                    yield StreamToken(text)
+                    from seiso.inference.streaming import estimate_chunk_tokens
+
+                    yield StreamToken(text, estimate_chunk_tokens(text))
         finally:
             # HF generate is not cooperatively cancellable. Wait for the
             # worker to finish so pool unload cannot free the model under it.
@@ -1957,7 +1964,9 @@ class LocalInferenceRunner:
                         emit, abort = guard.feed_text(str(content))
                         if emit:
                             emitted_text = True
-                            yield StreamToken(emit)
+                            from seiso.inference.streaming import estimate_chunk_tokens
+
+                            yield StreamToken(emit, estimate_chunk_tokens(emit))
                         if abort:
                             # Thinking budget exhausted before visible content —
                             # same recovery path as Ollama empty length burns.

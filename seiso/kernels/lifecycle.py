@@ -108,25 +108,42 @@ def restore_kernel_patches(model: Any | None = None) -> int:
     restored = 0
 
     if model is not None:
-        model_id = id(model)
-        modules = _PATCH_REGISTRY.pop(model_id, [])
-        for module in modules:
-            if hasattr(module, "_seiso_orig_forward"):
-                module.forward = module._seiso_orig_forward  # type: ignore[method-assign]
-                restored += 1
-            _clear_patch_markers(module)
-        # PeftModel / compile wrappers use a different id than register_patch.
-        if _PATCH_REGISTRY:
-            restored += restore_kernel_patches()
+        restored += _restore_registry_key(id(model))
+        # PeftModel / compile wrappers use a different id than register_patch —
+        # restore only registry entries whose modules belong to this model tree.
+        orphan_keys = [
+            mid
+            for mid, modules in list(_PATCH_REGISTRY.items())
+            if any(_module_belongs_to_model(model, module) for module in modules)
+        ]
+        for mid in orphan_keys:
+            restored += _restore_registry_key(mid)
         return restored
 
-    for modules in list(_PATCH_REGISTRY.values()):
-        for module in modules:
-            if hasattr(module, "_seiso_orig_forward"):
-                module.forward = module._seiso_orig_forward  # type: ignore[method-assign]
-                restored += 1
-            _clear_patch_markers(module)
+    for mid in list(_PATCH_REGISTRY.keys()):
+        restored += _restore_registry_key(mid)
     _PATCH_REGISTRY.clear()
+    return restored
+
+
+def _module_belongs_to_model(model: Any, module: Any) -> bool:
+    try:
+        for child in model.modules():
+            if child is module:
+                return True
+    except Exception:
+        return False
+    return False
+
+
+def _restore_registry_key(model_id: int) -> int:
+    modules = _PATCH_REGISTRY.pop(model_id, [])
+    restored = 0
+    for module in modules:
+        if hasattr(module, "_seiso_orig_forward"):
+            module.forward = module._seiso_orig_forward  # type: ignore[method-assign]
+            restored += 1
+        _clear_patch_markers(module)
     return restored
 
 

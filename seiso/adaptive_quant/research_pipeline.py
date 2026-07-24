@@ -191,18 +191,18 @@ class ResearchPipeline:
         analysis: dict[str, object] = {}
         if self._runs("analysis"):
             analysis = run_research_analysis(config, history_path)
+        # Match actual run order: benchmark → frontier_eval → analysis → paper_bundle.
         phases = [
             "train",
             "evaluate",
             "recommendation",
             "benchmark",
-            "analysis",
-            "paper_bundle",
         ]
-        if frontier_summary is not None:
-            phases.insert(5, "frontier_eval")
         if config.llama_cpp_gguf_export_enabled:
             phases.insert(3, "gguf_export")
+        if frontier_summary is not None:
+            phases.append("frontier_eval")
+        phases.extend(["analysis", "paper_bundle"])
         research = build_research_contract(
             config,
             git_commit=commit,

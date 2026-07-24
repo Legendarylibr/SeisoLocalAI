@@ -306,7 +306,9 @@ def _analysis_payload(
         length_stats=length_stats,
     )
     payload: dict[str, Any] = {
-        "valid": kept > 0,
+        # Preference stats-only scans must not mark the corpus train-ready —
+        # SFT still requires preference_as_sft (or Distill-RL/DPO).
+        "valid": kept > 0 and resolved_fmt != DatasetFormat.PREFERENCE,
         "dataset": str(dataset),
         "split": split,
         "columns": columns,
