@@ -39,6 +39,7 @@ Seiso combines a **web workspace (Forge)** and a **Python core (CLI + library)**
 | QLoRA / LoRA / full fine-tune | Training Studio | `seiso train` |
 | Single-GPU slime post-training | CLI | `seiso train --config configs/example_training_slime.yaml` |
 | Multi-GPU slime (vLLM rollouts) | CLI | `scripts/run_slime_vllm_ddp.sh 2 configs/example_training_slime_vllm.yaml` |
+| External NVIDIA NeMo RL | CLI | `seiso nemo-rl --config configs/example_training_nemo_rl.yaml` |
 | Merge, GGUF, Hub publish | Export | `seiso export` |
 | LLM distill → prune → quant | Compress | `seiso compress run` |
 | Teacher distill + DPO alignment | Distill-RL | `seiso distill-rl run` |
@@ -372,6 +373,7 @@ Forge details: **[docs/forge.md](docs/forge.md)**
 | `seiso doctor` | Diagnose install / HF / GPU stack |
 | `seiso train` | Train from YAML config |
 | `seiso slime` | Single-process slime GRPO post-train (also `seiso train -c … method: slime`) |
+| `seiso nemo-rl` | Launch external [NVIDIA NeMo RL](https://github.com/NVIDIA-NeMo/RL) (`method: nemo_rl`; requires `SEISO_NEMO_RL_ROOT`) |
 | `seiso chat` | Terminal chat with local models |
 | `seiso export` | Export merged / GGUF / LoRA + Hub push |
 | `seiso compress run` | LLM compression pipeline |
@@ -465,12 +467,13 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 
 ### Training
 
-- **Methods:** LoRA, QLoRA (4-bit), full fine-tune, embedding training, single-GPU slime post-training
+- **Methods:** LoRA, QLoRA (4-bit), full fine-tune, embedding training, slime GRPO, external NVIDIA NeMo RL
 - **Formats:** JSONL chat datasets with auto format detection
 - **Optimizations:** gradient checkpointing, packing, RSLoRA, train-on-responses-only
 - **Multi-GPU:** `torchrun` distributed workers; rank-0 checkpoint writes ([multi-gpu](docs/training/multi-gpu.md))
 - **Fused kernels:** RMSNorm, SwiGLU MLP, cross-entropy, fused LoRA delta ([kernels](docs/training/kernels.md))
 - **Release-style post-training:** `method: slime` adds rollout rewards, verifier data, best/final checkpoints, and plateau auto-stop; multi-GPU rollouts can use **vLLM** (`rollout_backend: vllm`) or SGLang ([training](docs/training/quickstart.md#slime-post-training))
+- **External NeMo RL:** `method: nemo_rl` shells out to a local [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL) checkout via `uv run` (not vendored); see [NeMo RL](docs/training/quickstart.md#nemo-rl)
 
 ### Inference
 
@@ -669,6 +672,7 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 | CLI commands | [docs/cli.md](docs/cli.md) |
 | Quant regression study | [docs/cli.md § seiso experiment](docs/cli.md#seiso-experiment) |
 | Training | [docs/training/quickstart.md](docs/training/quickstart.md) |
+| NeMo RL (external) | [docs/training/quickstart.md § NeMo RL](docs/training/quickstart.md#nemo-rl) |
 | GPU kernels | [docs/training/kernels.md](docs/training/kernels.md) |
 | Multi-GPU | [docs/training/multi-gpu.md](docs/training/multi-gpu.md) |
 | Inference backends | [docs/inference/backends.md](docs/inference/backends.md) |
@@ -682,7 +686,25 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 ---
 ## RL Stack
 
-The slime RL path is built on top of slime (https://github.com/THUDM/slime). Single-GPU uses colocated HF generate; multi-GPU can drive rollouts through **vLLM** (`rollout_backend: vllm`, including Seiso managed multi-GPU) or SGLang.
+Seiso exposes two post-training RL paths:
+
+| Path | Upstream | Role in Seiso |
+|------|----------|----------------|
+| **slime** (`method: slime`) | [THUDM/slime](https://github.com/THUDM/slime) | Seiso-native GRPO: colocated HF generate on single-GPU; multi-GPU can drive rollouts through **vLLM** (`rollout_backend: vllm`, including Seiso-managed multi-GPU) or SGLang |
+| **NeMo RL** (`method: nemo_rl`) | [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL) | External launcher only — Seiso does **not** vendor NeMo RL. Point `SEISO_NEMO_RL_ROOT` at a recursive clone; Seiso projects YAML knobs into Hydra overrides and runs `uv run python examples/run_*.py` inside that checkout |
+
+Prefer **slime** for local `rl_verify` loops and Forge SSE metrics. Prefer **NeMo RL** for Ray-scale multi-node jobs, Megatron/DTensor backends, DAPO/GDPO recipes, or NeMo-Gym environments. Details: [docs/training/quickstart.md § NeMo RL](docs/training/quickstart.md#nemo-rl).
+
+If you use NeMo RL in research, cite NVIDIA’s BibTeX:
+
+```bibtex
+@misc{nemo-rl,
+title = {NeMo RL: A Scalable and Efficient Post-Training Library},
+howpublished = {\url{https://github.com/NVIDIA-NeMo/RL}},
+year = {2025},
+note = {GitHub repository},
+}
+```
 
 ## Inference Stack
 

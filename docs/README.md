@@ -24,7 +24,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Fine-tune with QLoRA / LoRA | [training/quickstart.md](training/quickstart.md) |
 | Run each training pipeline step by step | [training/pipelines.md](training/pipelines.md) |
 | Single-GPU / multi-GPU slime post-training | [training/quickstart.md § Slime](training/quickstart.md#slime-post-training) · [multi-gpu.md](training/multi-gpu.md) |
-| External NVIDIA NeMo RL | [training/quickstart.md § NeMo RL](training/quickstart.md#nemo-rl) · [cli.md § seiso nemo-rl](cli.md#seiso-nemo-rl) |
+| External NVIDIA NeMo RL (cite upstream) | [training/quickstart.md § NeMo RL](training/quickstart.md#nemo-rl) · [cli.md § seiso nemo-rl](cli.md#seiso-nemo-rl) · [pipelines.md](training/pipelines.md#nemo-rl) |
 | RL quant from CLI | [cli.md § seiso rl-quant](cli.md#seiso-rl-quant) · [compression.md](compression.md) |
 | Use Cursor / Continue with local models | [getting-started.md § Connect external tools](getting-started.md#connect-external-tools-cursor-continue-etc) |
 | Export to GGUF or Hugging Face Hub | [getting-started.md § Step 6](getting-started.md#step-6--export-and-deploy) · [cli.md](cli.md) |

@@ -70,14 +70,15 @@ seiso train --config configs/example_training_slime.yaml
 
 Use `method: slime` for local rollout/reward policy updates with LoRA adapters, verifier JSONL, best/final checkpoints, and plateau auto-stop. See [training/quickstart.md § Slime Post-Training](training/quickstart.md#slime-post-training).
 
-NVIDIA [NeMo RL](https://github.com/NVIDIA-NeMo/RL) is a separate first-class method that shells out to an external checkout:
+NVIDIA [NeMo RL](https://github.com/NVIDIA-NeMo/RL) is a separate first-class method that shells out to an **external** checkout (Apache 2.0; not vendored into Seiso). Seiso maps YAML → Hydra overrides and runs `uv run python examples/run_*.py` inside that tree:
 
 ```bash
-export SEISO_NEMO_RL_ROOT=~/nemo-rl   # git clone --recursive https://github.com/NVIDIA-NeMo/RL.git
+git clone --recursive https://github.com/NVIDIA-NeMo/RL.git ~/nemo-rl
+export SEISO_NEMO_RL_ROOT=~/nemo-rl   # uv required: https://docs.astral.sh/uv/
 seiso train --config configs/example_training_nemo_rl.yaml
 ```
 
-Use `method: nemo_rl` with `nemo_rl_recipe: grpo|dpo|distillation|smoke`. Dry-run preview: `configs/smoke_nemo_rl.yaml` (`nemo_rl_dry_run: true`). See [training/quickstart.md § NeMo RL](training/quickstart.md#nemo-rl).
+Use `method: nemo_rl` with `nemo_rl_recipe: grpo|dpo|distillation|smoke`. Dry-run preview: `configs/smoke_nemo_rl.yaml` (`nemo_rl_dry_run: true`). Cite NeMo RL when publishing results — BibTeX and slime-vs-NeMo guidance in [training/quickstart.md § NeMo RL](training/quickstart.md#nemo-rl).
 
 ## `seiso slime`
 
@@ -89,11 +90,13 @@ seiso slime --config configs/example_training_slime.yaml
 
 ## `seiso nemo-rl`
 
-Dedicated NeMo RL launcher (same core as `seiso train -c … method: nemo_rl`):
+Dedicated NeMo RL launcher (same core as `seiso train -c … method: nemo_rl`). Requires a recursive [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL) clone (`SEISO_NEMO_RL_ROOT` or `nemo_rl_root`) and `uv` on PATH (or `SEISO_UV`):
 
 ```bash
 seiso nemo-rl --config configs/example_training_nemo_rl.yaml
 ```
+
+Writes `{output_dir}/nemo_rl_launch.yaml` + `seiso_manifest.json` before (and even during dry-run of) the external process. Checkpoints land under NeMo RL’s `checkpointing.checkpoint_dir` (Seiso defaults that to `output_dir`).
 
 For multi-GPU / vLLM / SGLang rollouts, prefer `seiso train` with a slime YAML (or `scripts/run_slime_vllm_ddp.sh`). Forge Training Studio runs the same training stack with full-dataset analysis, live recommendations, and SSE job streaming via `/api/training/*` (see [training/quickstart.md](training/quickstart.md)).
 

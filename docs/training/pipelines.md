@@ -75,6 +75,38 @@ SEISO_DATA_DIR=/tmp/seiso-distill-smoke seiso distill-rl --help
 
 Use the Forge job page when validating streamed logs and cancel behavior.
 
+## NeMo RL
+
+[NVIDIA NeMo RL](https://github.com/NVIDIA-NeMo/RL) is an **external** post-training
+stack (not vendored). Seiso only resolves a checkout, writes a launch sidecar, and
+shells out with `uv run`. Cite NeMo RL when publishing results that use it — see
+[quickstart.md § NeMo RL](quickstart.md#nemo-rl) for the upstream BibTeX.
+
+1. Clone recursively and point Seiso at the tree:
+
+```bash
+git clone --recursive https://github.com/NVIDIA-NeMo/RL.git ~/nemo-rl
+export SEISO_NEMO_RL_ROOT=~/nemo-rl
+# uv on PATH (or SEISO_UV): https://docs.astral.sh/uv/
+```
+
+2. Preview without executing (no checkout required for the Seiso-side dry-run):
+
+```bash
+seiso train --config configs/smoke_nemo_rl.yaml
+# Inspect outputs/…/nemo_rl_launch.yaml and seiso_manifest.json
+```
+
+3. Run a short GRPO recipe (or `nemo_rl_recipe: smoke` for the 10-step install check):
+
+```bash
+seiso nemo-rl --config configs/example_training_nemo_rl.yaml
+```
+
+Prefer slime for Seiso-native GRPO + `rl_verify`. Prefer NeMo RL for Ray/Megatron
+scale, DAPO/GDPO, or upstream NeMo recipes. Troubleshoot missing checkout / `uv`
+in [../troubleshooting.md](../troubleshooting.md#nemo-rl-checkout-or-uv-not-found).
+
 ## RL quant and quant regression
 
 Run the documented quant regression study with the example config:

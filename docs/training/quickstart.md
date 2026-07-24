@@ -158,38 +158,82 @@ Modern training defaults (bf16 compute on CUDA when supported, paged AdamW 8-bit
 
 ## NeMo RL
 
-Use `method: nemo_rl` to launch **[NVIDIA NeMo RL](https://github.com/NVIDIA-NeMo/RL)** as an external post-training stack (Ray + DTensor/Megatron + vLLM/SGLang). Seiso does **not** vendor NeMo RL — it projects a small Seiso config into Hydra overrides and runs `uv run python examples/run_*.py` inside your checkout.
+Use `method: nemo_rl` to launch **[NVIDIA NeMo RL](https://github.com/NVIDIA-NeMo/RL)** — an open-source post-training library under the [NVIDIA NeMo Framework](https://github.com/NVIDIA-NeMo) — as an **external** process. NeMo RL scales GRPO/GSPO/DAPO, DPO, SFT, and on-policy distillation with Ray, DTensor or Megatron training backends, and vLLM/SGLang (or Megatron-native) generation.
+
+Seiso does **not** vendor NeMo RL source or its dependency lockfile. The integration in `seiso/nemo_rl/` is a thin launcher:
+
+1. Resolve a checkout (`nemo_rl_root` → `SEISO_NEMO_RL_ROOT` → common sibling/`~/nemo-rl` paths).
+2. Project Seiso YAML knobs into Hydra overrides (`policy.model_name`, `cluster.*`, `grpo.*`, LoRA, LR, …).
+3. Write a reproducible sidecar `output_dir/nemo_rl_launch.yaml` plus `seiso_manifest.json`.
+4. Run `uv run python examples/run_*.py --config <base> <overrides…>` with cwd = the NeMo RL root (unless `nemo_rl_dry_run: true`).
+
+Upstream docs: [NeMo RL documentation](https://docs.nvidia.com/nemo/rl/latest/index.html). License: Apache 2.0.
+
+**Citation** (from NVIDIA’s README) if you publish results that use NeMo RL:
+
+```bibtex
+@misc{nemo-rl,
+title = {NeMo RL: A Scalable and Efficient Post-Training Library},
+howpublished = {\url{https://github.com/NVIDIA-NeMo/RL}},
+year = {2025},
+note = {GitHub repository},
+}
+```
 
 **Prerequisites**
 
 ```bash
 git clone --recursive https://github.com/NVIDIA-NeMo/RL.git ~/nemo-rl
 export SEISO_NEMO_RL_ROOT=~/nemo-rl
-# uv required: https://docs.astral.sh/uv/
+# uv required (NeMo RL bare-metal launches use `uv run`): https://docs.astral.sh/uv/
+# Optional: export SEISO_UV=/path/to/uv  if `uv` is not on PATH
 ```
+
+The recursive clone matters — NeMo RL pulls submodules used by Megatron and related stacks. First real launch lets `uv` sync the NeMo RL environment from that checkout’s lockfile (separate from Seiso’s `.venv`).
 
 **Launch**
 
 ```bash
 seiso train --config configs/example_training_nemo_rl.yaml
-# or
+# or dedicated CLI (same core):
 seiso nemo-rl --config configs/example_training_nemo_rl.yaml
 ```
 
 | Field | Description |
 |-------|-------------|
-| `nemo_rl_recipe` | `grpo` (default), `dpo`, `distillation`, or `smoke` (10-step GRPO install check) |
+| `nemo_rl_recipe` | `grpo` (default → `examples/run_grpo.py` + `grpo_math_1B.yaml`), `dpo`, `distillation`, or `smoke` (10-step GRPO install check via `grpo_smoke.yaml`) |
 | `nemo_rl_root` | Checkout path (else `SEISO_NEMO_RL_ROOT` / sibling discovery) |
 | `nemo_rl_base_config` | Optional YAML relative to the checkout (recipe default otherwise) |
-| `nemo_rl_gpus_per_node` / `nemo_rl_num_nodes` | Cluster size passed to NeMo RL |
+| `nemo_rl_gpus_per_node` / `nemo_rl_num_nodes` | Cluster size passed to NeMo RL (`cluster.*`) |
 | `nemo_rl_max_steps` | Caps `grpo.max_num_steps` when set |
 | `nemo_rl_use_lora` | Sets `policy.lora_cfg.enabled=true` |
+| `rollouts_per_prompt` | Mapped to `grpo.num_generations_per_prompt` (must be ≥2 for GRPO/smoke; default 4) |
+| `rollout_batch_size` | Mapped to `grpo.num_prompts_per_step` when set |
 | `nemo_rl_extra_overrides` | Extra Hydra overrides (list of `key=value` strings) |
 | `nemo_rl_dry_run` | Write `nemo_rl_launch.yaml` + manifest without executing |
 
+`dataset` / `model_id` still appear in Seiso’s TrainConfig YAML for validation, but NeMo recipes typically use **their own** corpora and reward wiring from the base Hydra config. Override data paths with `nemo_rl_extra_overrides` or a custom `nemo_rl_base_config` when you need a different corpus.
+
+**Artifacts**
+
+| Path | What |
+|------|------|
+| `{output_dir}/nemo_rl_launch.yaml` | Seiso launch record (recipe, root, Hydra overrides) |
+| `{output_dir}/seiso_manifest.json` | Seiso job manifest (`method: nemo_rl`) |
+| NeMo `checkpointing.checkpoint_dir` | Model checkpoints (Seiso sets this to `output_dir` by default) |
+
 Dry-run smoke (no GPU / no checkout required): `configs/smoke_nemo_rl.yaml`.
 
-Prefer **slime** when you want Seiso-native GRPO with `rl_verify` and Forge SSE metrics. Prefer **NeMo RL** when you need NeMo’s Ray scale, Megatron path, DAPO/GDPO recipes, or NeMo-Gym environments.
+**When to use slime vs NeMo RL**
+
+| Need | Prefer |
+|------|--------|
+| Local GRPO with Seiso `rl_verify`, verifier JSONL, Forge SSE metrics | **slime** (`method: slime`) |
+| Single-machine HF/vLLM/SGLang rollouts already wired in Seiso | **slime** |
+| Ray multi-node scale, Megatron 6D parallelism, DAPO/GDPO, NeMo-Gym | **NeMo RL** (`method: nemo_rl`) |
+| Reproduce NVIDIA NeMotron-style recipes from upstream YAML | **NeMo RL** |
+
+Also see [cli.md § seiso nemo-rl](../cli.md#seiso-nemo-rl) and [pipelines.md § NeMo RL](pipelines.md#nemo-rl).
 
 ---
 
