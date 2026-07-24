@@ -711,13 +711,14 @@ def _collect_rollouts(
                 response_mask = row["response_mask"]
                 # Prefer engine finish_reason: retokenized text usually lacks EOS,
                 # so EOS-only status falsely marks stopped samples as truncated.
+                finish_reasons = getattr(gen, "finish_reasons", None)
+                finish_reason = (
+                    finish_reasons[idx]
+                    if isinstance(finish_reasons, list) and idx < len(finish_reasons)
+                    else None
+                )
                 status = _http_rollout_status(
-                    finish_reason=(
-                        gen.finish_reasons[idx]
-                        if getattr(gen, "finish_reasons", None) is not None
-                        and idx < len(gen.finish_reasons or [])
-                        else None
-                    ),
+                    finish_reason=finish_reason,
                     response_tokens=input_ids[int(row["prompt_len"]) :],
                     eos_token_id=tokenizer.eos_token_id,
                     completion_text=completion,
