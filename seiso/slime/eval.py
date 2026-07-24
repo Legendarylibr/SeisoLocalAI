@@ -43,9 +43,7 @@ def score_held_out_completions(
 ) -> dict[str, float]:
     """Score generated completions against unit tests / verifiers."""
     if len(completions) != len(samples):
-        raise ValueError(
-            f"completions ({len(completions)}) != samples ({len(samples)})"
-        )
+        raise ValueError(f"completions ({len(completions)}) != samples ({len(samples)})")
     outcomes: list[float] = []
     proof_passes = 0
     proof_total = 0
@@ -114,9 +112,7 @@ def run_held_out_eval(
                 f"eval sample prompt field {config.prompt_field!r} must be "
                 f"str or list, got {type(raw_prompt).__name__}"
             )
-        prompts.append(
-            format_generation_prompt(tokenizer, raw_prompt, eval_config)
-        )
+        prompts.append(format_generation_prompt(tokenizer, raw_prompt, eval_config))
     # Rollout collection restores train(); eval must disable dropout for stable
     # pass-rate reports, then restore the caller's mode.
     was_training = bool(getattr(model, "training", False))
@@ -149,9 +145,7 @@ def run_held_out_eval(
             model.train()
 
 
-def _eval_reward_sample(
-    sample: dict[str, Any], config: SingleGpuSlimeConfig
-) -> dict[str, Any]:
+def _eval_reward_sample(sample: dict[str, Any], config: SingleGpuSlimeConfig) -> dict[str, Any]:
     """Minimal verifier sample (tests/answer) without trainer-side imports cycle."""
     out = dict(sample)
     if "answer" not in out and config.answer_field in out:

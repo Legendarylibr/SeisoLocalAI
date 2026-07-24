@@ -711,10 +711,11 @@ def _collect_rollouts(
                 response_mask = row["response_mask"]
                 # Prefer engine finish_reason: retokenized text usually lacks EOS,
                 # so EOS-only status falsely marks stopped samples as truncated.
-                finish_reasons = getattr(gen, "finish_reasons", None)
+                # Use __getitem__ so pylint E1136 does not treat Optional as unsubscriptable.
+                finish_reasons = gen.finish_reasons
                 finish_reason = (
-                    finish_reasons[idx]
-                    if isinstance(finish_reasons, list) and idx < len(finish_reasons)
+                    finish_reasons.__getitem__(idx)
+                    if finish_reasons is not None and idx < len(finish_reasons)
                     else None
                 )
                 status = _http_rollout_status(

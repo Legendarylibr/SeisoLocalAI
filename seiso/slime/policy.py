@@ -354,14 +354,10 @@ def _assign_grouped_advantages(
             std = math.sqrt(variance)
             scale = std + 1e-6
             adv_by_id = {
-                id(rollout): value / scale
-                for rollout, value in zip(valid, centered, strict=True)
+                id(rollout): value / scale for rollout, value in zip(valid, centered, strict=True)
             }
         else:
-            adv_by_id = {
-                id(rollout): value
-                for rollout, value in zip(valid, centered, strict=True)
-            }
+            adv_by_id = {id(rollout): value for rollout, value in zip(valid, centered, strict=True)}
         for rollout in group:
             rollout.advantage = float(adv_by_id.get(id(rollout), 0.0))
 
@@ -441,9 +437,7 @@ def _http_rollout_status(
     truncated and wipes GRPO rewards.
     """
     n_tokens = (
-        int(response_tokens.numel())
-        if hasattr(response_tokens, "numel")
-        else len(response_tokens)
+        int(response_tokens.numel()) if hasattr(response_tokens, "numel") else len(response_tokens)
     )
     if n_tokens == 0 and not str(completion_text or "").strip():
         return "empty"

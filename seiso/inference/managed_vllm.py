@@ -66,7 +66,11 @@ def resolve_vllm_command() -> list[str] | None:
     try:
         import vllm  # noqa: F401
 
-        return [os.environ.get("SEISO_PYTHON", "python3"), "-m", "vllm.entrypoints.openai.api_server"]
+        return [
+            os.environ.get("SEISO_PYTHON", "python3"),
+            "-m",
+            "vllm.entrypoints.openai.api_server",
+        ]
     except ImportError:
         pass
     from shutil import which
@@ -134,7 +138,11 @@ def build_launch_command(
             raise ValueError("gpu_memory_utilization must be between 0.1 and 1.0")
         cmd.extend(["--gpu-memory-utilization", str(float(util))])
 
-    mml = max_model_len if max_model_len is not None else env_int("SEISO_MANAGED_VLLM_MAX_MODEL_LEN", 0)
+    mml = (
+        max_model_len
+        if max_model_len is not None
+        else env_int("SEISO_MANAGED_VLLM_MAX_MODEL_LEN", 0)
+    )
     if mml and mml > 0:
         cmd.extend(["--max-model-len", str(int(mml))])
 
@@ -439,8 +447,7 @@ def start_managed_vllm(
             if proc.poll() is not None:
                 _STATE = None
                 raise RuntimeError(
-                    f"Managed vLLM exited early (code={proc.returncode}). "
-                    f"See log: {log_path}"
+                    f"Managed vLLM exited early (code={proc.returncode}). See log: {log_path}"
                 )
             if _health_ok(launch["base_url"]):
                 return _STATE.to_status()
