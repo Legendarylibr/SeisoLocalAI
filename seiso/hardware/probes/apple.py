@@ -8,10 +8,8 @@ from typing import Any
 from seiso.hardware.probes.common import sanitize_hardware_label
 
 
-def _mlx_device_info() -> dict[str, Any]:
+def _mlx_device_info(mx: Any) -> dict[str, Any]:
     """Return MLX device_info dict (new API preferred, metal fallback)."""
-    import mlx.core as mx
-
     info_fn = getattr(mx, "device_info", None)
     if callable(info_fn):
         info = info_fn()
@@ -26,9 +24,7 @@ def _mlx_device_info() -> dict[str, Any]:
     return {}
 
 
-def _mlx_active_memory_bytes() -> int | None:
-    import mlx.core as mx
-
+def _mlx_active_memory_bytes(mx: Any) -> int | None:
     for owner in (mx, getattr(mx, "metal", None)):
         if owner is None:
             continue
@@ -49,11 +45,12 @@ def probe_apple_mlx_gpu() -> list[dict[str, Any]]:
     }:
         return []
     try:
-        import mlx.core as mx  # noqa: F401
+        # Optional macOS-only dependency; absent on Linux CI runners.
+        import mlx.core as mx  # pylint: disable=import-error,no-name-in-module
     except ImportError:
         return []
 
-    info = _mlx_device_info()
+    info = _mlx_device_info(mx)
     device_name = sanitize_hardware_label(str(info.get("device_name") or "Apple GPU"))
     # Prefer full unified memory_size — NOT max_recommended_working_set_size,
     # which is a Metal soft budget (~70% of RAM) and under-reports capacity.
@@ -66,7 +63,7 @@ def probe_apple_mlx_gpu() -> list[dict[str, Any]]:
         vram_total_mb = None
 
     vram_used_mb: float | None = None
-    active = _mlx_active_memory_bytes()
+    active = _mlx_active_memory_bytes(mx)
     if active is not None and active >= 0:
         vram_used_mb = round(active / (1024**2), 1)
 
