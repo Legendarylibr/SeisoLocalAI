@@ -29,15 +29,20 @@ TIER_LABELS: dict[HardwareTier, str] = {
 }
 
 
+def _is_apple_unified_gpu(gpu: dict[str, Any]) -> bool:
+    """True for Apple Silicon / MLX stubs (unified memory, not discrete VRAM)."""
+    if gpu.get("unified_memory") is True:
+        return True
+    name = str(gpu.get("name") or "").lower()
+    if "apple gpu" in name:
+        return True
+    # MLX device_info names look like "Apple M4 Pro (MLX)".
+    return "apple" in name and "mlx" in name
+
+
 def _discrete_gpu_entries(gpus: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Non-Apple entries from local GPU probes."""
-    discrete: list[dict[str, Any]] = []
-    for gpu in gpus:
-        name = str(gpu.get("name") or "").lower()
-        if "apple gpu" in name:
-            continue
-        discrete.append(gpu)
-    return discrete
+    return [gpu for gpu in gpus if not _is_apple_unified_gpu(gpu)]
 
 
 def classify_tier(profile: dict[str, Any]) -> HardwareTier:

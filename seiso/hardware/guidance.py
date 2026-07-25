@@ -20,6 +20,14 @@ def build_guidance(
 ) -> list[GuideStep]:
     """Hardware-aware next steps — no cloud, no data collection."""
     vram_total = max((g.get("vram_total_mb") or 0) for g in gpus) if gpus else 0
+    # Apple MLX / unified memory: treat installed RAM as the capacity signal when
+    # the probe omitted a VRAM total (legacy stubs) or reported unified size.
+    if backend == Backend.MLX or any(
+        g.get("unified_memory") is True
+        or ("apple" in str(g.get("name") or "").lower() and "mlx" in str(g.get("name") or "").lower())
+        for g in gpus
+    ):
+        vram_total = max(vram_total, int(float(ram_gb or 0) * 1024))
     steps: list[GuideStep] = []
 
     if goal == "chat":

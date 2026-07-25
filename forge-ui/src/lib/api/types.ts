@@ -247,6 +247,7 @@ export type HardwareProfile = {
     vram_used_mb: number | null;
     utilization_pct: number | null;
     temperature_c: number | null;
+    unified_memory?: boolean;
   }>;
   local_only: boolean;
   privacy: string;
@@ -270,6 +271,7 @@ export type SystemMetrics = {
     vram_used_mb: number | null;
     utilization_pct: number | null;
     temperature_c: number | null;
+    unified_memory?: boolean;
   }>;
   local_only: boolean;
   ts: number;

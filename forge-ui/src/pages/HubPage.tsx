@@ -211,6 +211,9 @@ export function HubPage() {
           <div className="hub-hw-strip-main">
             <span className="trust-badge">{hwSummary.tier_label}</span>
             <span className="muted-text">
+              {hwSummary.ram_gb != null && hwSummary.ram_gb > 0
+                ? `${Math.round(hwSummary.ram_gb)} GB · `
+                : null}
               ~{Math.round((vramStatus?.headroom_mb ?? hwSummary.vram_headroom_mb) / 1024)} GB{" "}
               {vramStatus?.memory_label || hwSummary.memory_headroom_label || "memory"} free
               {" · "}
