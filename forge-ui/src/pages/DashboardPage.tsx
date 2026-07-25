@@ -123,7 +123,13 @@ export function DashboardPage() {
                 <div className="hw-card-label">GPU {hw.gpus.length > 1 ? i + 1 : ""}</div>
                 <div className="hw-card-value">{g.name}</div>
                 <div className="hw-card-meta">
-                  {g.vram_total_mb ? `${Math.round(g.vram_total_mb / 1024)} GB VRAM` : "Unified memory"}
+                  {g.vram_total_mb
+                    ? hw.tier === "apple_unified" || g.unified_memory
+                      ? `${Math.round(g.vram_total_mb / 1024)} GB unified`
+                      : `${Math.round(g.vram_total_mb / 1024)} GB VRAM`
+                    : hw.ram_gb
+                      ? `${Math.round(hw.ram_gb)} GB unified`
+                      : "Unified memory"}
                 </div>
               </div>
             ))

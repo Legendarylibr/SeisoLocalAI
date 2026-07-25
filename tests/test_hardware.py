@@ -349,6 +349,35 @@ def test_apple_mlx_stub_gpu_does_not_report_zero_headroom(monkeypatch):
     assert round(vram_headroom_mb(profile) / 1024, 1) == 10.4
 
 
+def test_apple_mlx_populated_gpu_still_uses_unified_ram_headroom(monkeypatch):
+    """Full memory_size on the Apple GPU must not switch to discrete VRAM math."""
+    from seiso.hardware.tiers import classify_tier, effective_budget_mb, vram_headroom_mb
+
+    class Memory:
+        available = int(11.37 * 1024**3)
+
+    monkeypatch.setattr("psutil.virtual_memory", lambda: Memory())
+    profile = {
+        "platform": "darwin",
+        "arch": "arm64",
+        "backend": "mlx",
+        "gpus": [
+            {
+                "index": 0,
+                "name": "Apple M4 Pro (MLX)",
+                "vram_total_mb": 24576.0,
+                "vram_used_mb": 0.0,
+                "unified_memory": True,
+            }
+        ],
+        "ram_gb": 24,
+    }
+
+    assert classify_tier(profile).value == "apple_unified"
+    assert round(vram_headroom_mb(profile) / 1024, 1) == 10.4
+    assert effective_budget_mb(profile) == 24 * 1024 - 1024
+
+
 def test_cpu_only_headroom_uses_available_ram_minus_reserve(monkeypatch):
     from seiso.hardware.tiers import vram_headroom_mb
 

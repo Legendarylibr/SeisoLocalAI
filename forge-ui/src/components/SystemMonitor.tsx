@@ -71,8 +71,11 @@ export function SystemMonitor() {
                   </div>
                   {bar(g.utilization_pct, "#c084fc")}
                   <div className="monitor-gpu-meta">
-                    {g.vram_used_mb != null && g.vram_total_mb != null && (
-                      <span>VRAM {Math.round(g.vram_used_mb)}/{Math.round(g.vram_total_mb)} MB</span>
+                    {g.vram_total_mb != null && (
+                      <span>
+                        {g.unified_memory ? "Memory" : "VRAM"}{" "}
+                        {Math.round(g.vram_used_mb ?? 0)}/{Math.round(g.vram_total_mb)} MB
+                      </span>
                     )}
                     {g.temperature_c != null && <span>{g.temperature_c}°C</span>}
                   </div>
