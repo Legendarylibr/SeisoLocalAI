@@ -84,7 +84,16 @@ class TrainingOrchestrator(Orchestrator):
         config = TrainConfig.model_validate(payload["config"])
         user_id = str(payload.get("user_id") or "")
         if "output_dir" in payload and payload["output_dir"]:
-            config.output_dir = Path(payload["output_dir"])
+            from seiso.security import assert_user_scoped_path, assert_within
+
+            out = Path(payload["output_dir"])
+            if user_id:
+                # Re-check even when the HTTP route set the path (defense in depth).
+                config.output_dir = assert_user_scoped_path(
+                    self.sandbox_root, user_id, out
+                )
+            else:
+                config.output_dir = assert_within(self.sandbox_root, out)
         elif user_id:
             from seiso.security import safe_join
 

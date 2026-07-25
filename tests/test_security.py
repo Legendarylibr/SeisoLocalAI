@@ -70,6 +70,19 @@ def test_safe_join_embedded_traversal_blocked(tmp_path: Path):
         safe_join(base, "alice/../bob")
 
 
+def test_safe_join_rejects_symlink_segment(tmp_path: Path):
+    """Planted tenant symlink must not redirect safe_join write sinks."""
+    base = tmp_path / "sandbox"
+    bob = base / "knowledge" / "bob" / "kb1"
+    bob.mkdir(parents=True)
+    (bob / "index.jsonl").write_text("bob\n", encoding="utf-8")
+    alice_link = base / "knowledge" / "alice"
+    alice_link.parent.mkdir(parents=True, exist_ok=True)
+    alice_link.symlink_to(base / "knowledge" / "bob")
+    with pytest.raises(SecurityError, match="Symlink rejected"):
+        safe_join(base, "knowledge", "alice", "kb1")
+
+
 def test_sanitize_filename():
     assert "evil" in sanitize_filename("../../evil")
     assert sanitize_filename("") == "unnamed"

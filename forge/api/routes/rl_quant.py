@@ -6,10 +6,11 @@ import json
 import uuid
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends
-from pydantic import BaseModel, ConfigDict, Field
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from forge.api.deps import get_db, get_rl_quant_orchestrator
+from forge.api.http_errors import raise_forbidden
 from forge.api.routes._jobs import (
     format_rl_quant_job,
     resolve_linked_training_job,
@@ -28,12 +29,15 @@ from forge.security.audit import audit_event
 from forge.security.auth import get_current_user_id
 from forge.services.job_runtime import run_orchestrated_job
 from forge.services.model_registry import register_export_outputs
+from forge.services.user_paths import assert_rl_quant_input_paths
 from seiso.bundled.config_builder import validate_stages
+from seiso.rl_quant.config_builder import peek_rl_quant_input_paths
 from seiso.rl_quant.presets import STAGE_ORDER, rl_quant_presets_response
 from seiso.rl_quant.recommendation import (
     recommendation_evidence,
     recommendation_to_gguf_quants,
 )
+from seiso.security import SecurityError
 
 router = APIRouter(prefix="/rl-quant", tags=["rl-quant"])
 
@@ -93,6 +97,39 @@ class RLQuantStartRequest(BaseModel):
     )
 
 
+def _prepare_rl_quant_config(
+    body: RLQuantStartRequest,
+    user_id: str,
+    settings: ForgeSettings,
+    *,
+    config: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate body paths, then re-check paths after config_file/preset merge."""
+    payload = dict(config or body.model_dump())
+    validate_pipeline_paths(
+        settings.data_dir,
+        user_id,
+        payload,
+        config_file=body.config_file,
+        path_keys=("checkpoint_path", "gguf_path"),
+        llama_cpp_binary=True,
+    )
+    # Merge config_file/preset so tenants cannot smuggle cross-user model paths.
+    try:
+        merged_paths = peek_rl_quant_input_paths(payload)
+        assert_rl_quant_input_paths(settings.data_dir, user_id, merged_paths)
+    except SecurityError as exc:
+        raise_forbidden(exc)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid RL-quant configuration: {exc}",
+        ) from exc
+    return payload
+
+
 @router.post("/jobs", response_model=PipelineJobResponse)
 async def start_rl_quant(
     body: RLQuantStartRequest,
@@ -111,14 +148,7 @@ async def start_rl_quant(
             db, user_id, body.link_training_job_id, config, path_key="checkpoint_path"
         )
 
-    validate_pipeline_paths(
-        settings.data_dir,
-        user_id,
-        config,
-        config_file=body.config_file,
-        path_keys=("checkpoint_path", "gguf_path"),
-        llama_cpp_binary=True,
-    )
+    config = _prepare_rl_quant_config(body, user_id, settings, config=config)
 
     await db.create_rl_quant_job(user_id, config, job_id=job_id)
     orchestrator.create_job(job_id=job_id, user_id=user_id)

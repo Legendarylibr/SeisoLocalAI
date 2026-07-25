@@ -9,6 +9,21 @@ from seiso.bundled.config_builder import job_output_root, resolve_config_file_pa
 from seiso.rl_quant.bootstrap import bundle_root, ensure_adaptive_quant_importable
 from seiso.rl_quant.presets import lookup_preset
 
+# User-influenced filesystem inputs (not job artifact dirs under outputs_dir).
+RL_QUANT_DATA_PATH_KEYS = (
+    "resume_from_checkpoint",
+    "llama_cpp_model",
+    "llama_cpp_gguf_export_source",
+    "external_quality_path",
+    "continuous_task_jsonl_path",
+    "frontier_local_reference_path",
+    "prompt_library_path",
+)
+RL_QUANT_BINARY_PATH_KEYS = (
+    "llama_cpp_binary",
+    "llama_cpp_gguf_quantize_binary",
+)
+
 
 def _artifact_paths(output_root: Path, run_name: str) -> dict[str, str]:
     root = str(output_root.resolve())
@@ -24,6 +39,78 @@ def _artifact_paths(output_root: Path, run_name: str) -> dict[str, str]:
     }
 
 
+def _load_base_config(payload: dict[str, Any]) -> Any:
+    """Load FrameworkConfig from config_file or named/product preset."""
+    from seiso.adaptive_quant.easy_config import load_config, named_preset
+
+    product = lookup_preset(payload.get("preset"))
+    if config_file := payload.get("config_file"):
+        path = resolve_config_file_path(config_file, bundle_root=bundle_root())
+        if path is None:
+            raise ValueError(f"Config file not found: {config_file}")
+        return load_config(path), product
+
+    named = (
+        product.resolve_named_preset()
+        if product is not None
+        else str(payload.get("preset", "reproducible"))
+    )
+    return named_preset(named), product
+
+
+def _path_overrides(payload: dict[str, Any], product: Any) -> dict[str, Any]:
+    """Payload/product overrides for user-influenced filesystem fields."""
+    overrides: dict[str, Any] = {}
+    if product is not None and product.prompt_library:
+        overrides["prompt_library_path"] = str(bundle_root() / product.prompt_library)
+    elif payload.get("prompt_library"):
+        overrides["prompt_library_path"] = str(payload["prompt_library"])
+
+    if resume := payload.get("resume_from_checkpoint") or payload.get(
+        "policy_checkpoint"
+    ):
+        overrides["resume_from_checkpoint"] = str(resume)
+    # Product/CLI "Fine-tune checkpoint" and Forge link_training_job_id feed
+    # checkpoint_path — that is a quality sidecar / HF train artifact, not an
+    # adaptive_quant policy JSON resume path.
+    if quality := (
+        payload.get("external_quality_path")
+        or payload.get("quality_sidecar")
+        or payload.get("checkpoint_path")
+    ):
+        overrides["external_quality_path"] = str(quality)
+
+    if gguf := payload.get("gguf_path"):
+        overrides["llama_cpp_model"] = str(gguf)
+        overrides["backend"] = "llama_cpp"
+        if payload.get("gguf_export"):
+            overrides["llama_cpp_gguf_export_source"] = str(gguf)
+
+    if binary := payload.get("llama_cpp_binary"):
+        overrides["llama_cpp_binary"] = str(binary)
+    return overrides
+
+
+def peek_rl_quant_input_paths(payload: dict[str, Any]) -> dict[str, str]:
+    """Return merged user-influenced input paths after config_file/preset load.
+
+    Used by Forge to re-validate paths so a tenant-owned config cannot smuggle
+    cross-user ``llama_cpp_model`` / ``prompt_library_path`` / etc.
+    """
+    ensure_adaptive_quant_importable()
+    from seiso.adaptive_quant.configuration import config_to_flat_dict
+
+    base, product = _load_base_config(payload)
+    flat = config_to_flat_dict(base)
+    flat.update(_path_overrides(payload, product))
+    out: dict[str, str] = {}
+    for key in (*RL_QUANT_DATA_PATH_KEYS, *RL_QUANT_BINARY_PATH_KEYS):
+        value = flat.get(key)
+        if value:
+            out[key] = str(value)
+    return out
+
+
 def build_framework_config(
     *,
     job_id: str,
@@ -34,28 +121,11 @@ def build_framework_config(
     """Return seiso.adaptive_quant.configuration.FrameworkConfig for a Forge job."""
     ensure_adaptive_quant_importable()
     from seiso.adaptive_quant.configuration import config_to_flat_dict
-    from seiso.adaptive_quant.easy_config import (
-        config_from_dict,
-        load_config,
-        named_preset,
-    )
+    from seiso.adaptive_quant.easy_config import config_from_dict
 
     run_name = str(payload.get("run_name") or f"seiso_{job_id[:8]}")
     output_root = job_output_root(data_dir, "rl_quant", user_id, job_id)
-    product = lookup_preset(payload.get("preset"))
-
-    if config_file := payload.get("config_file"):
-        path = resolve_config_file_path(config_file, bundle_root=bundle_root())
-        if path is None:
-            raise ValueError(f"Config file not found: {config_file}")
-        base = load_config(path)
-    else:
-        named = (
-            product.resolve_named_preset()
-            if product is not None
-            else str(payload.get("preset", "reproducible"))
-        )
-        base = named_preset(named)
+    base, product = _load_base_config(payload)
 
     # Product registry owns Seiso defaults (simulator/python). Research named_preset
     # may still supply continuous/router knobs for post_train under those backends.
@@ -78,36 +148,8 @@ def build_framework_config(
             payload.get("training_backend", default_training_backend)
         ),
         "llama_cpp_gguf_export_enabled": bool(payload.get("gguf_export", False)),
+        **_path_overrides(payload, product),
     }
-
-    if product is not None and product.prompt_library:
-        overrides["prompt_library_path"] = str(bundle_root() / product.prompt_library)
-    elif payload.get("prompt_library"):
-        overrides["prompt_library_path"] = str(payload["prompt_library"])
-
-    if reward := payload.get("reward_weights"):
-        overrides["reward_weights"] = reward
-
-    if resume := payload.get("resume_from_checkpoint") or payload.get("policy_checkpoint"):
-        overrides["resume_from_checkpoint"] = str(resume)
-    # Product/CLI "Fine-tune checkpoint" and Forge link_training_job_id feed
-    # checkpoint_path — that is a quality sidecar / HF train artifact, not an
-    # adaptive_quant policy JSON resume path.
-    if quality := (
-        payload.get("external_quality_path")
-        or payload.get("quality_sidecar")
-        or payload.get("checkpoint_path")
-    ):
-        overrides["external_quality_path"] = str(quality)
-
-    if gguf := payload.get("gguf_path"):
-        overrides["llama_cpp_model"] = str(gguf)
-        overrides["backend"] = "llama_cpp"
-        if payload.get("gguf_export"):
-            overrides["llama_cpp_gguf_export_source"] = str(gguf)
-
-    if binary := payload.get("llama_cpp_binary"):
-        overrides["llama_cpp_binary"] = str(binary)
 
     if payload.get("moe_enabled") is True:
         overrides["moe_enabled"] = True
@@ -162,6 +204,9 @@ def build_framework_config(
     ):
         if bound_key in payload and payload[bound_key] is not None:
             overrides[bound_key] = payload[bound_key]
+
+    if reward := payload.get("reward_weights"):
+        overrides["reward_weights"] = reward
 
     flat = config_to_flat_dict(base)
     flat.update(overrides)

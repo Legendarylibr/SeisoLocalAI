@@ -40,7 +40,11 @@ def _is_within(base: Path, target: Path) -> bool:
 
 
 def safe_join(base: Path, *parts: str) -> Path:
-    """Join paths ensuring the result stays within base (no traversal)."""
+    """Join paths ensuring the result stays within base (no traversal).
+
+    Existing symlink segments are rejected so write sinks cannot follow a
+    planted link into another tenant tree under the same data dir.
+    """
     base = base.resolve()
     candidate = base
     for part in parts:
@@ -52,7 +56,11 @@ def safe_join(base: Path, *parts: str) -> Path:
             raise SecurityError(f"Unsafe characters in segment: {part!r}")
         if ".." in Path(part).parts:
             raise SecurityError(f"Invalid path segment: {part!r}")
-        candidate = (candidate / part).resolve()
+        next_path = candidate / part
+        # Do not descend through symlinks (cross-tenant write escape).
+        if next_path.is_symlink():
+            raise SecurityError(f"Symlink rejected in path segment: {part!r}")
+        candidate = next_path.resolve()
         if not _is_within(base, candidate):
             raise SecurityError("Path traversal detected")
     return candidate

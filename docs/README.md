@@ -183,7 +183,7 @@ seiso distill-rl run --preset smoke
 # Quant regression study (CLI → study output_dir in YAML)
 seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml
 
-# LLM compression (CLI → $SEISO_DATA_DIR/compress/local/cli/runs/<run_id>/)
+# LLM compression (CLI → $SEISO_DATA_DIR/compress/local/cli-<job_id>/runs/<run_id>/)
 seiso compress run --preset smoke
 
 # Diagnose install
