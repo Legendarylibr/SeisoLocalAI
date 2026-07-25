@@ -37,9 +37,7 @@ def _is_apple_unified_gpu(gpu: dict[str, Any]) -> bool:
     if "apple gpu" in name:
         return True
     # MLX device_info names look like "Apple M4 Pro (MLX)".
-    if "apple" in name and "mlx" in name:
-        return True
-    return False
+    return "apple" in name and "mlx" in name
 
 
 def _discrete_gpu_entries(gpus: list[dict[str, Any]]) -> list[dict[str, Any]]:

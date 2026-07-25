@@ -10,7 +10,7 @@ from seiso.hardware.probes.common import sanitize_hardware_label
 
 def _mlx_device_info() -> dict[str, Any]:
     """Return MLX device_info dict (new API preferred, metal fallback)."""
-    import mlx.core as mx  # type: ignore
+    import mlx.core as mx
 
     info_fn = getattr(mx, "device_info", None)
     if callable(info_fn):
@@ -27,7 +27,7 @@ def _mlx_device_info() -> dict[str, Any]:
 
 
 def _mlx_active_memory_bytes() -> int | None:
-    import mlx.core as mx  # type: ignore
+    import mlx.core as mx
 
     for owner in (mx, getattr(mx, "metal", None)):
         if owner is None:
