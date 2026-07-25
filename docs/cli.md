@@ -170,12 +170,12 @@ seiso compress run --preset distill_only \
   --student-model meta-llama/Llama-2-7b-hf
 seiso compress run --preset prune_recover --model-dir ~/.seiso/checkpoints/<user>/<job>/
 
-# Verify hash-chained manifest (run_dir is under …/runs/<run_id>/)
-seiso compress manifest-verify --run-dir "$HOME/.seiso/compress/local/cli/runs/<run_id>"
+# Verify hash-chained manifest (run_dir is under …/cli-<job_id>/runs/<run_id>/)
+seiso compress manifest-verify --run-dir "$HOME/.seiso/compress/local/cli-<job_id>/runs/<run_id>"
 seiso compress speculative --target-model ./finetuned --draft-model ./distilled --prompt "def fib(n):"
 ```
 
-CLI output: `{SEISO_DATA_DIR}/compress/local/cli/runs/<run_id>/`.
+CLI output: `{SEISO_DATA_DIR}/compress/local/cli-<job_id>/runs/<run_id>/`.
 
 Requires `.[train]` for GPU stages. Optional `.[compress-quant]` for GPTQ/AWQ, `.[compress-eval]` for lm-eval.
 

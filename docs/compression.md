@@ -94,7 +94,7 @@ Default training data is `bigcode/starcoderdata` (Python code). Override via `co
 └── …
 ```
 
-Forge jobs use your session `user_id` and a UUID `job_id`. CLI `seiso compress run` writes under `{SEISO_DATA_DIR}/compress/local/cli/runs/<run_id>/`.
+Forge jobs use your session `user_id` and a UUID `job_id`. CLI `seiso compress run` writes under `{SEISO_DATA_DIR}/compress/local/cli-<job_id>/runs/<run_id>/` (e.g. `…/compress/local/cli-a1b2c3d4/runs/<run_id>/`).
 
 ### Forge
 
@@ -114,7 +114,7 @@ seiso compress run --preset distill_only \
   --student-model mistralai/Mistral-7B-v0.1
 seiso compress run --preset prune_recover --model-dir ~/.seiso/checkpoints/<user>/<job>/
 
-seiso compress manifest-verify --run-dir ~/.seiso/compress/local/cli/runs/<run_id>
+seiso compress manifest-verify --run-dir ~/.seiso/compress/local/cli-<job_id>/runs/<run_id>
 seiso compress speculative --target-model ./finetuned --draft-model ./distilled
 ```
 
