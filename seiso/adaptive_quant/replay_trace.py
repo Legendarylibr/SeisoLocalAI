@@ -552,6 +552,14 @@ def finalize_replay_artifacts(
         )
         report["replay_verify"] = replay_manifest_steps(config, manifest)
         assert_replay_verified(report, config)
+    try:
+        from seiso.research.nostr import maybe_auto_attest
+
+        nostr_report = maybe_auto_attest(manifest_path)
+        if nostr_report is not None:
+            report["nostr"] = nostr_report
+    except Exception as exc:  # pragma: no cover - defensive
+        report["nostr"] = {"ok": False, "error": str(exc)}
     return report
 
 

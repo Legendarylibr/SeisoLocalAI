@@ -145,3 +145,132 @@ def directory_checksum_manifest(
             manifest[rel] = "error"
         count += 1
     return manifest
+
+
+ATTESTATION_SCHEMA_V1 = "seiso.provenance.attestation/v1"
+
+
+def strip_nostr_receipt(manifest: dict[str, Any]) -> dict[str, Any]:
+    """Return a shallow copy of manifest without the mutable ``nostr`` receipt."""
+    return {k: v for k, v in manifest.items() if k != "nostr"}
+
+
+def manifest_sha256_excluding_nostr(manifest: dict[str, Any]) -> str:
+    """SHA-256 of the local manifest with the nostr receipt excluded."""
+    return content_fingerprint(strip_nostr_receipt(manifest))
+
+
+def infer_pipeline_and_run_id(
+    manifest: dict[str, Any], *, manifest_path: Path | None = None
+) -> tuple[str, str]:
+    """Best-effort pipeline/run_id for attestation ``d`` tags."""
+    pipeline = str(
+        manifest.get("pipeline")
+        or manifest.get("method")
+        or manifest.get("schema")
+        or "seiso"
+    )
+    if pipeline.startswith("seiso.adaptive_quant"):
+        pipeline = "adaptive_quant"
+    elif pipeline in {"lora", "qlora", "full", "slime", "nemo_rl"}:
+        pipeline = "training"
+    elif "format" in manifest and "file_checksums_sha256" in manifest:
+        pipeline = "export"
+
+    run_id = str(
+        manifest.get("run_id")
+        or manifest.get("job_id")
+        or manifest.get("run_name")
+        or ""
+    )
+    if not run_id and manifest_path is not None:
+        run_id = manifest_path.parent.name
+    if not run_id:
+        run_id = manifest_sha256_excluding_nostr(manifest)[:16]
+    # Keep tag-safe (no whitespace).
+    run_id = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in run_id)[:128]
+    pipeline = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in pipeline)[
+        :64
+    ]
+    return pipeline, run_id
+
+
+def _chain_or_root_sha256(manifest: dict[str, Any]) -> str | None:
+    for key in (
+        "chain_head_sha256",
+        "integrity_sha256",
+        "pipeline_fingerprint",
+        "config_sha256",
+    ):
+        value = manifest.get(key)
+        if isinstance(value, str) and value.strip():
+            return value.strip()
+        if isinstance(value, dict) and value:
+            return content_fingerprint(value)
+    stages = manifest.get("stages")
+    if isinstance(stages, list) and stages:
+        digests = [
+            str(s.get("sha256"))
+            for s in stages
+            if isinstance(s, dict) and s.get("sha256")
+        ]
+        if digests:
+            return content_fingerprint(digests)
+    checksums = manifest.get("file_checksums_sha256")
+    if isinstance(checksums, dict) and checksums:
+        return content_fingerprint(checksums)
+    return None
+
+
+def build_attestation_v1(
+    manifest: dict[str, Any],
+    *,
+    manifest_path: Path | None = None,
+    seiso_version: str | None = None,
+) -> dict[str, Any]:
+    """Build a digests-only Nostr attestation payload from a local manifest."""
+    from seiso import __version__ as pkg_version
+
+    pipeline, run_id = infer_pipeline_and_run_id(manifest, manifest_path=manifest_path)
+    body = strip_nostr_receipt(manifest)
+    attestation: dict[str, Any] = {
+        "schema": ATTESTATION_SCHEMA_V1,
+        "pipeline": pipeline,
+        "run_id": run_id,
+        "manifest_sha256": content_fingerprint(body),
+        "config_fingerprint": (
+            str(manifest.get("config_fingerprint") or manifest.get("config_sha256") or "")
+            or None
+        ),
+        "chain_or_root_sha256": _chain_or_root_sha256(manifest),
+        "git_commit": manifest.get("git_commit"),
+        "created_at": manifest.get("created_at")
+        or manifest.get("exported_at")
+        or manifest.get("completed_at"),
+        "seiso_version": seiso_version or pkg_version,
+    }
+    # Drop nulls for stable compact content.
+    return {k: v for k, v in attestation.items() if v is not None and v != ""}
+
+
+def attestation_content_json(attestation: dict[str, Any]) -> str:
+    return json.dumps(
+        _jsonable(attestation),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        default=str,
+    )
+
+
+def merge_nostr_receipt(
+    manifest: dict[str, Any], receipt: dict[str, Any]
+) -> dict[str, Any]:
+    """Return manifest copy with ``nostr`` receipt merged in."""
+    out = dict(manifest)
+    out["nostr"] = dict(receipt)
+    return out
+
+
+def write_manifest_with_nostr_receipt(path: Path, manifest: dict[str, Any]) -> None:
+    write_json(path, manifest)

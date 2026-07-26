@@ -39,6 +39,7 @@ def test_data_dir_layout_matches_docs(tmp_path: Path, monkeypatch):
         "distill_rl",
         "hf_cache",
         "hf_tokens",
+        "nostr_keys",
     )
     for name in expected_subdirs:
         assert (settings.data_dir / name).is_dir(), name

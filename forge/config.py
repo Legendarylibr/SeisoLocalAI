@@ -178,6 +178,7 @@ class ForgeSettings(BaseSettings):
             "distill_rl",
             "hf_cache",
             "hf_tokens",
+            "nostr_keys",
         ):
             (self.data_dir / name).mkdir(parents=True, exist_ok=True)
 

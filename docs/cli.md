@@ -284,6 +284,21 @@ Requires `.[train]` and `llama.cpp` (`LLAMA_CPP_DIR` or system `convert_hf_to_gg
 
 Config reference: `configs/examples/quant_regression_study.yaml`.
 
+## `seiso provenance`
+
+Opt-in Nostr attestation of local run-manifest digests (not weights). Requires
+`pip install 'seiso[nostr]'`, `SEISO_ALLOW_NOSTR=1`, and allowlisted relays.
+
+```bash
+seiso provenance keygen
+seiso provenance attest path/to/manifest.json --relay wss://relay.example.com
+seiso provenance verify path/to/manifest.json
+seiso provenance show path/to/manifest.json
+```
+
+See [provenance-nostr.md](provenance-nostr.md) for Forge UI settings, auto-attest
+(`SEISO_NOSTR_ATTEST=1`), and how this relates to `seiso compress manifest-verify`.
+
 ## External Smart Router
 
 The router backend service now lives in [Legendarylibr/SeisoModelRouter](https://github.com/Legendarylibr/SeisoModelRouter). Run that service separately when you want multi-specialist routing.

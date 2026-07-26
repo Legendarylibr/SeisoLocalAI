@@ -524,6 +524,7 @@ All user data lives under **`SEISO_DATA_DIR`** (default below):
 ├── hf_home/          # HF_HOME mirror (created on first Hub configure)
 ├── hf_xet_cache/     # hf-xet transfer cache (created on first Hub configure)
 ├── hf_tokens/        # Encrypted Hugging Face tokens (per user)
+├── nostr_keys/       # Encrypted Nostr keys for opt-in provenance attest
 ├── models/           # Per-user inventory links to cached weights
 ├── checkpoints/      # Training outputs (per user)
 ├── exports/          # Merged / GGUF / LoRA exports

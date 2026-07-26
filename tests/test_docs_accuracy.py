@@ -153,6 +153,18 @@ def test_cli_docs_cover_experiment_command():
     assert "seiso experiment" in readme and "quant-regression" in readme
 
 
+def test_cli_docs_cover_provenance_nostr():
+    """Opt-in Nostr provenance CLI must be documented and registered."""
+    cli_doc = _read("docs/cli.md")
+    assert "seiso provenance" in cli_doc
+    assert (REPO_ROOT / "docs/provenance-nostr.md").is_file()
+    assert "seiso provenance" in _read("docs/provenance-nostr.md")
+    from seiso_cli.main import app
+
+    group_names = {g.name for g in app.registered_groups}
+    assert "provenance" in group_names
+
+
 def test_cli_docs_cover_compress_run():
     """docs/cli.md must document the real `seiso compress run` subcommand."""
     cli_doc = _read("docs/cli.md")

@@ -97,6 +97,11 @@ compress-eval = [
 data-designer = [
   "data-designer>=0.8.0",
 ]
+# Opt-in Nostr provenance attestation (NIP-01 relays; BIP-340 is pure-Python in-tree).
+nostr = [
+  "websockets>=12",
+  "cryptography>=42",
+]
 dev = [
   # Floor for MANIFEST.in exclusion bypass (CVE-2026-59890); also in [build-system].
   "setuptools>=83",
@@ -113,6 +118,7 @@ dev = [
   "pre-commit>=3.7",
   "httpx>=0.27",
   "datasets>=5.0",
+  "websockets>=12",
 ]
 
 [project.scripts]

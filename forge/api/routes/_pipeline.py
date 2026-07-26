@@ -203,6 +203,22 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
                         job_id,
                         job.status.value,
                     )
+            if job.status.value == "completed":
+                try:
+                    from forge.services.nostr_settings import forge_maybe_attest
+
+                    forge_maybe_attest(
+                        data_dir=settings.data_dir,
+                        user_id=user_id,
+                        result=result if isinstance(result, dict) else None,
+                        output_dir=result.get("output_root") or result.get("run_dir"),
+                    )
+                except Exception:
+                    import logging
+
+                    logging.getLogger(__name__).exception(
+                        "Nostr auto-attest failed for pipeline job %s", job_id
+                    )
 
         async def _failed(message: str) -> None:
             await config.update_status(

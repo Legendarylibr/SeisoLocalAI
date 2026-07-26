@@ -182,3 +182,88 @@ async def hf_hub_status(
         settings_token=settings.hf_token or None,
         probe=True,
     )
+
+
+class NostrPrefsUpdate(BaseModel):
+    auto_attest: bool = False
+    relays: list[str] = Field(default_factory=list)
+    allow_loopback: bool = False
+
+
+class NostrKeyImport(BaseModel):
+    secret: str = Field(min_length=8, max_length=256)
+
+
+@router.get("/settings/nostr")
+async def get_nostr_settings(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict:
+    from forge.services.nostr_settings import nostr_status
+
+    return nostr_status(settings.data_dir, user_id)
+
+
+@router.put("/settings/nostr")
+async def update_nostr_settings(
+    body: NostrPrefsUpdate,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict:
+    from forge.services.nostr_settings import NostrPrefs, save_nostr_prefs
+    from seiso.security import SecurityError
+
+    try:
+        prefs = save_nostr_prefs(
+            settings.data_dir,
+            user_id,
+            NostrPrefs(
+                auto_attest=body.auto_attest,
+                relays=list(body.relays),
+                allow_loopback=body.allow_loopback,
+            ),
+        )
+    except SecurityError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    from forge.services.nostr_settings import nostr_status
+
+    status = nostr_status(settings.data_dir, user_id)
+    status.update(prefs.to_dict())
+    return status
+
+
+@router.post("/settings/nostr/keygen")
+async def nostr_keygen(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict[str, str]:
+    from forge.services.nostr_settings import generate_user_nostr_key
+
+    try:
+        return generate_user_nostr_key(settings.data_dir, user_id)
+    except ImportError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.put("/settings/nostr/key")
+async def nostr_import_key(
+    body: NostrKeyImport,
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict[str, str]:
+    from forge.services.nostr_settings import import_user_nostr_key
+
+    try:
+        return import_user_nostr_key(settings.data_dir, user_id, body.secret)
+    except (ImportError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.delete("/settings/nostr/key")
+async def nostr_clear_key(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+    settings: Annotated[ForgeSettings, Depends(get_settings)],
+) -> dict[str, str]:
+    from forge.services.nostr_settings import clear_user_nostr_key
+
+    return clear_user_nostr_key(settings.data_dir, user_id)
