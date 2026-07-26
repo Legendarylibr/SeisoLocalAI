@@ -103,17 +103,6 @@ class UsersMixin:
             row = await cur.fetchone()
             return dict(row) if row else None
 
-    async def get_user_by_nostr_pubkey(self, pubkey_hex: str) -> dict | None:
-        key = (pubkey_hex or "").strip().lower()
-        if not key:
-            return None
-        async with (
-            self._conn() as conn,
-            conn.execute("SELECT * FROM users WHERE lower(nostr_pubkey) = ?", (key,)) as cur,
-        ):
-            row = await cur.fetchone()
-            return dict(row) if row else None
-
     async def get_user_by_email(self, email: str) -> dict | None:
         async with (
             self._conn() as conn,

@@ -13,7 +13,8 @@ from seiso.research.nostr.keys import (
 )
 
 # Sentinel stored in password_hash so legacy NOT NULL column stays valid.
-NOSTR_PASSWORD_SENTINEL = "!nostr:v1"
+# Not a secret — marks Nostr-auth rows; real credentials are nsec proofs.
+NOSTR_PASSWORD_SENTINEL = "!nostr:v1"  # nosec B105
 
 
 @dataclass(frozen=True)
