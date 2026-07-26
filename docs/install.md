@@ -434,15 +434,25 @@ make ci-fast
 
 Dev dependencies: `pip install -r requirements-dev.txt` ([CI_LOCAL.md](CI_LOCAL.md))
 
+### Reproducible install (CI-equivalent)
+
+GitHub Actions and `run_ci_local.py` install the hashed forge+train+dev resolve from `locks/python.lock`:
+
+```bash
+python scripts/install_locked_deps.py --editable
+```
+
+Platform extras (`cuda`, `mlx`, `llamacpp`, …) are not in that lock — add them after the locked install when needed, for example `pip install -e ".[cuda]"`.
+
 ### Refresh dependency locks
 
-Python dependencies are declared in `pyproject.toml` and locked in `locks/python.lock` with hashes. The updater prefers `uv pip compile --upgrade` when `uv` is installed, falls back to `pip-compile`, and refreshes `locks/digests.json`:
+Python dependencies are declared in `pyproject.toml` and locked in `locks/python.lock` with hashes (universal resolve for Linux/macOS markers). The updater prefers `uv pip compile --upgrade --universal` when `uv` is installed, falls back to `pip-compile`, and refreshes `locks/digests.json`:
 
 ```bash
 python scripts/update_dep_locks.py
 ```
 
-Forge UI dependencies are declared in `forge-ui/package.json`; keep both npm and Bun locks in sync after changing frontend dependencies:
+CI fails if the lock is stale vs `pyproject.toml` (`scripts/check_python_lock_freshness.py`). Forge UI dependencies are declared in `forge-ui/package.json`; keep both npm and Bun locks in sync after changing frontend dependencies:
 
 ```bash
 cd forge-ui && npm install && bun install && cd ..

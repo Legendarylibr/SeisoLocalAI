@@ -1,4 +1,5 @@
 [build-system]
+# setuptools>=83: CVE-2026-59890 (MANIFEST.in exclusion bypass via Unicode normalization).
 requires = ["setuptools>=83", "wheel", "pybind11>=2.13"]
 build-backend = "setuptools.build_meta"
 
@@ -70,6 +71,8 @@ forge = [
   "uvicorn[standard]>=0.29",
   "python-multipart>=0.0.9",
   "python-jose[cryptography]>=3.3",
+  # Transitive via python-jose → rsa; floor for REAL/OID DoS (CVE-2026-59885/59886).
+  "pyasn1>=0.6.4",
   "bcrypt>=4.1",
   "email-validator>=2.1",
   "aiosqlite>=0.20",
@@ -95,10 +98,8 @@ data-designer = [
   "data-designer>=0.8.0",
 ]
 dev = [
-  # Keep setuptools on a fixed release for pip-audit (PYSEC-2026-3447).
+  # Floor for MANIFEST.in exclusion bypass (CVE-2026-59890); also in [build-system].
   "setuptools>=83",
-  # Transitive via rsa; pin for GHSA pyasn1 REAL/OID DoS (CVE class, >=0.6.4).
-  "pyasn1>=0.6.4",
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
   "pytest-xdist>=3.6",
@@ -212,6 +213,8 @@ ignored-modules = [
 
 [tool.pip-audit]
 ignore-vulns = [
+  # Historical pip advisory noise still referenced by some audit DBs.
+  "PYSEC-2025-194",
   # llama-cpp-python depends on diskcache, but Seiso attaches LlamaRAMCache
   # instead of diskcache's pickle-backed persistent cache. No fixed diskcache
   # release is advertised by pip-audit for this CVE yet.

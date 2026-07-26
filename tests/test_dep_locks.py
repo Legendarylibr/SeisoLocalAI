@@ -10,9 +10,12 @@ import pytest
 from seiso.security.deps import (
     LockDigestError,
     build_digest_manifest,
+    locked_package_versions,
     sha256_file,
+    verify_lock_covers_pyproject,
     verify_lock_digests,
     verify_python_lock_has_hashes,
+    verify_security_floors,
     write_digest_manifest,
 )
 
@@ -74,3 +77,73 @@ def test_sha256_file_matches_known_value(tmp_path: Path):
         sha256_file(sample)
         == "e9140ca2669aba95a6ff302815ebb84ef0137acab886757e64e0eb9266e8cfc7"
     )
+
+
+def test_security_floors_pass_for_repo():
+    verified = verify_security_floors(repo_root=REPO_ROOT)
+    assert any(item.startswith("pyasn1>=") and "forge" in item for item in verified)
+    assert any(
+        item.startswith("setuptools>=") and "build-system" in item for item in verified
+    )
+
+
+def test_lock_covers_pyproject_for_repo():
+    covered = verify_lock_covers_pyproject(repo_root=REPO_ROOT)
+    assert any("pyasn1==" in item and "forge" in item for item in covered)
+    assert any("fastapi==" in item for item in covered)
+
+
+def test_locked_package_versions_reads_pins():
+    versions = locked_package_versions(REPO_ROOT / "locks" / "python.lock")
+    assert versions["pyasn1"] == "0.6.4"
+    assert versions["setuptools"] == "83.0.0"
+
+
+def test_security_floors_reject_weak_forge_pin(tmp_path: Path):
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        """
+[build-system]
+requires = ["setuptools>=83"]
+
+[project]
+name = "demo"
+version = "0"
+
+[project.optional-dependencies]
+forge = ["pyasn1>=0.6.0"]
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    lock = tmp_path / "python.lock"
+    lock.write_text("pyasn1==0.6.4 \\\nsetuptools==83.0.0 \\\n", encoding="utf-8")
+    with pytest.raises(LockDigestError, match="pyasn1 floor"):
+        verify_security_floors(
+            repo_root=tmp_path, pyproject_path=pyproject, lock_path=lock
+        )
+
+
+def test_security_floors_reject_stale_lock(tmp_path: Path):
+    pyproject = tmp_path / "pyproject.toml"
+    pyproject.write_text(
+        """
+[build-system]
+requires = ["setuptools>=83"]
+
+[project]
+name = "demo"
+version = "0"
+
+[project.optional-dependencies]
+forge = ["pyasn1>=0.6.4"]
+""".strip()
+        + "\n",
+        encoding="utf-8",
+    )
+    lock = tmp_path / "python.lock"
+    lock.write_text("pyasn1==0.6.3 \\\nsetuptools==83.0.0 \\\n", encoding="utf-8")
+    with pytest.raises(LockDigestError, match="below floor"):
+        verify_security_floors(
+            repo_root=tmp_path, pyproject_path=pyproject, lock_path=lock
+        )

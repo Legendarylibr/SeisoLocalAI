@@ -7,7 +7,7 @@ Run the full local quality gate before opening PRs or cutting releases.
 ```bash
 python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip
-pip install -e ".[forge,train,dev]"
+python scripts/install_locked_deps.py --editable   # hashed locks/python.lock
 
 make ci-fast      # daily loop: lint + types + test + security
 make ci           # full gate (+ frontend build + optional import smokes)
@@ -16,6 +16,8 @@ make test-parallel # CPU tests with two pytest-xdist workers
 make test-hardware # opt-in tests that require a working GPU/toolkit
 make ci-list      # show jobs and recommended matrix
 ```
+
+`run_ci_local.py` installs from the lock by default. Use `--unlocked-install` only when you intentionally want a fresh PyPI resolve of `.[forge,train,dev]`.
 
 Or use the shell wrapper:
 
@@ -27,7 +29,7 @@ Or use the shell wrapper:
 
 | Job | What it runs | Skipped by `--fast` |
 |-----|--------------|---------------------|
-| **deps** | dependency lockfile digest verification | no |
+| **deps** | lock digests/hashes + CVE floors + pyproject coverage + freshness recompile | no |
 | **lint** | `ruff check`, `ruff format --check`, `pylint` (E/F only) | no |
 | **types** | `mypy seiso forge seiso_cli` | no |
 | **test** | smoke imports + `pytest -m "not slow"` | no |
@@ -79,7 +81,7 @@ Presets under `configs/` for agent/CI loops (not all run in default `ci-fast`):
 
 ### Test detail
 
-- Installs `.[forge,train,dev]` once unless `--skip-install`
+- Installs hashed `locks/python.lock` (+ editable project) once unless `--skip-install`
 - `tests/test_docs_accuracy.py` — doc links, example configs, and training API references stay aligned with the codebase
 - Runs CPU unit/integration tests excluding `@pytest.mark.slow` and `@pytest.mark.gpu`
 - `--pytest-workers N|auto|logical` enables pytest-xdist; GitHub CI uses `auto` with `--pytest-dist worksteal`
@@ -95,7 +97,7 @@ Presets under `configs/` for agent/CI loops (not all run in default `ci-fast`):
 | **Bandit** | Python SAST (`-l` medium+, skips for known ML/subprocess patterns) |
 | **detect-secrets** | committed secret scan vs `.secrets.baseline` |
 | **pip check** | dependency consistency |
-| **pip-audit** | known CVEs in installed packages |
+| **pip-audit** | known CVEs in installed packages (`[tool.pip-audit].ignore-vulns` in `pyproject.toml`) |
 
 Update the secrets baseline after reviewing new findings:
 

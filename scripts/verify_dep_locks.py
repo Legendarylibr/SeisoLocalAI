@@ -15,8 +15,10 @@ if str(REPO_ROOT) not in sys.path:
 from seiso.security.deps import (  # noqa: E402
     DEFAULT_DIGESTS_REL,
     LockDigestError,
+    verify_lock_covers_pyproject,
     verify_lock_digests,
     verify_python_lock_has_hashes,
+    verify_security_floors,
 )
 
 
@@ -42,6 +44,8 @@ def main() -> int:
         )
         python_lock = args.repo_root / "locks" / "python.lock"
         verify_python_lock_has_hashes(python_lock)
+        floors = verify_security_floors(repo_root=args.repo_root)
+        covered = verify_lock_covers_pyproject(repo_root=args.repo_root)
     except LockDigestError as exc:
         print(f"dependency lock verification failed: {exc}", file=sys.stderr)
         return 1
@@ -49,6 +53,9 @@ def main() -> int:
     for rel_path in verified:
         print(f"ok {rel_path}")
     print("ok locks/python.lock package hashes")
+    for floor in floors:
+        print(f"ok security floor {floor}")
+    print(f"ok locks/python.lock covers pyproject ({len(covered)} requirements)")
     return 0
 
 
