@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { NavLink, useLocation } from "react-router-dom";
+import { NavLink, useLocation } from "react-router";
 import { SystemMonitor } from "@/components/SystemMonitor";
 import { IconMenu, NavIcon, type NavIconName } from "@/components/Icons";
 import { SeisoLogoMark } from "@/components/SeisoLogo";
