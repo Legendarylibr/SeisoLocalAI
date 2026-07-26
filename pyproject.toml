@@ -44,7 +44,7 @@ train = [
   "accelerate>=1.13",
   "bitsandbytes>=0.43; platform_system != 'Darwin'",
   "trl>=0.8",
-  "kernels>=0.12.0,<0.13",
+  "kernels>=0.12.0,<0.17",
   "sentence-transformers>=3.0",
   "sentencepiece>=0.2",
 ]
