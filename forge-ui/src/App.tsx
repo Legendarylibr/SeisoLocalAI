@@ -1,5 +1,5 @@
 import { lazy, Suspense, useState } from "react";
-import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
+import { BrowserRouter, Navigate, Route, Routes } from "react-router";
 import { AuthProvider, useAuth } from "@/hooks/useAuth";
 import { HardwareProfileProvider } from "@/context/HardwareProfileContext";
 import { MetricsProvider } from "@/context/MetricsContext";

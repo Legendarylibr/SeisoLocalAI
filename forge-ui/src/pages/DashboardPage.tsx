@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "react-router-dom";
+import { Link } from "react-router";
 import { api, GuideStep } from "@/lib/api";
 import { useLiveMetrics } from "@/context/MetricsContext";
 import { useHardwareProfile } from "@/hooks/useHardware";
