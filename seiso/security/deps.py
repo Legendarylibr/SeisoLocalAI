@@ -7,15 +7,44 @@ import hmac
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from seiso.security import SecurityError
 
 DEFAULT_DIGESTS_REL = Path("locks/digests.json")
 DEFAULT_REPO_ROOT = Path(__file__).resolve().parents[2]
+DEFAULT_PYPROJECT_REL = Path("pyproject.toml")
+DEFAULT_PYTHON_LOCK_REL = Path("locks/python.lock")
 
 _HASH_LINE = re.compile(r"^\s+--hash=sha256:")
 _PACKAGE_LINE = re.compile(r"^[a-zA-Z0-9][\w.\-]*==")
+_LOCKED_VERSION = re.compile(
+    r"^(?P<name>[a-zA-Z0-9][\w.\-]*)==(?P<version>[^\s\\]+)",
+    re.MULTILINE,
+)
+
+# Declared floors for CVEs that must stay aligned across pyproject + lock.
+# (package, minimum version, where the floor must be declared)
+SECURITY_FLOOR_CHECKS: tuple[tuple[str, str, str], ...] = (
+    # CVE-2026-59885 / CVE-2026-59886 — pyasn1 REAL/OID DoS
+    ("pyasn1", "0.6.4", "forge"),
+    # CVE-2026-59890 — setuptools MANIFEST.in exclusion bypass
+    ("setuptools", "83.0.0", "build-system"),
+)
+
+# Extras compiled into locks/python.lock (see scripts/update_dep_locks.py).
+LOCKED_EXTRAS: tuple[str, ...] = ("forge", "train", "dev")
+
+# Marker environment for lock coverage (matches GitHub Actions ubuntu runners).
+_LOCK_MARKER_ENV: dict[str, str] = {
+    "os_name": "posix",
+    "sys_platform": "linux",
+    "platform_system": "Linux",
+    "platform_machine": "x86_64",
+    "python_version": "3.10",
+    "python_full_version": "3.10.0",
+    "implementation_name": "cpython",
+}
 
 
 class LockDigestError(SecurityError):
@@ -128,6 +157,181 @@ def verify_python_lock_has_hashes(lock_path: Path) -> None:
             f"{len(missing_hashes)} package(s) in {lock_path.name} lack sha256 hashes: "
             f"{sample}{suffix}"
         )
+
+
+def _load_toml(path: Path) -> dict[str, Any]:
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python < 3.11
+        try:
+            import tomli as tomllib
+        except ModuleNotFoundError as exc:
+            raise LockDigestError(
+                "tomllib/tomli required to verify security floors in pyproject.toml"
+            ) from exc
+    raw: object = tomllib.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise LockDigestError(f"TOML root must be a table: {path}")
+    return cast(dict[str, Any], raw)
+
+
+def _version_tuple(version: str) -> tuple[int, ...]:
+    parts: list[int] = []
+    for piece in version.split("."):
+        digits = ""
+        for char in piece:
+            if char.isdigit():
+                digits += char
+            else:
+                break
+        parts.append(int(digits or 0))
+    return tuple(parts)
+
+
+def _version_gte(left: tuple[int, ...], right: tuple[int, ...]) -> bool:
+    width = max(len(left), len(right))
+    left_p = left + (0,) * (width - len(left))
+    right_p = right + (0,) * (width - len(right))
+    return left_p >= right_p
+
+
+def locked_package_versions(lock_path: Path) -> dict[str, str]:
+    """Return ``{normalized_name: version}`` for ``name==version`` pins in a lockfile."""
+    if not lock_path.is_file():
+        raise LockDigestError(f"Python lockfile missing: {lock_path}")
+    text = lock_path.read_text(encoding="utf-8")
+    versions: dict[str, str] = {}
+    for match in _LOCKED_VERSION.finditer(text):
+        versions[match.group("name").lower()] = match.group("version")
+    return versions
+
+
+def _requirement_name(req: str) -> str:
+    return re.split(r"[<>=!~;\[]", req, maxsplit=1)[0].strip().lower()
+
+
+def _requirement_min_version(req: str) -> str | None:
+    """Best-effort minimum from a ``pkg>=X`` / ``pkg==X`` requirement string."""
+    match = re.search(r"(?:>=|==)\s*([0-9]+(?:\.[0-9]+)*)", req)
+    return match.group(1) if match else None
+
+
+def verify_security_floors(
+    *,
+    repo_root: Path | None = None,
+    pyproject_path: Path | None = None,
+    lock_path: Path | None = None,
+) -> list[str]:
+    """Ensure CVE floors are declared in pyproject and satisfied by the Python lock."""
+    root = (repo_root or DEFAULT_REPO_ROOT).resolve()
+    project_path = (pyproject_path or (root / DEFAULT_PYPROJECT_REL)).resolve()
+    python_lock = (lock_path or (root / DEFAULT_PYTHON_LOCK_REL)).resolve()
+    if not project_path.is_file():
+        raise LockDigestError(f"pyproject.toml missing: {project_path}")
+
+    cfg = _load_toml(project_path)
+    build_requires = list(cfg.get("build-system", {}).get("requires", []))
+    extras = dict(cfg.get("project", {}).get("optional-dependencies", {}))
+    locked = locked_package_versions(python_lock)
+    verified: list[str] = []
+
+    for package, minimum, location in SECURITY_FLOOR_CHECKS:
+        min_tuple = _version_tuple(minimum)
+        if location == "build-system":
+            declared = [r for r in build_requires if _requirement_name(r) == package]
+            if not declared:
+                raise LockDigestError(
+                    f"{package}>={minimum} missing from [build-system].requires"
+                )
+        else:
+            declared = [
+                r for r in extras.get(location, []) if _requirement_name(r) == package
+            ]
+            if not declared:
+                raise LockDigestError(
+                    f"{package}>={minimum} missing from optional-dependencies.{location}"
+                )
+
+        declared_mins = [_requirement_min_version(r) for r in declared]
+        if not any(
+            dm is not None and _version_gte(_version_tuple(dm), min_tuple)
+            for dm in declared_mins
+        ):
+            raise LockDigestError(
+                f"{package} floor in {location} must be >={minimum}; found {declared!r}"
+            )
+
+        locked_version = locked.get(package)
+        if locked_version is None:
+            raise LockDigestError(f"{package} missing from {python_lock.name}")
+        if not _version_gte(_version_tuple(locked_version), min_tuple):
+            raise LockDigestError(
+                f"{package}=={locked_version} in {python_lock.name} is below floor {minimum}"
+            )
+        verified.append(f"{package}>={minimum} ({location}, lock={locked_version})")
+
+    return verified
+
+
+def verify_lock_covers_pyproject(
+    *,
+    repo_root: Path | None = None,
+    pyproject_path: Path | None = None,
+    lock_path: Path | None = None,
+) -> list[str]:
+    """Ensure every locked extra / runtime requirement is pinned to a satisfying version."""
+    try:
+        from packaging.requirements import Requirement
+        from packaging.utils import canonicalize_name
+        from packaging.version import Version
+    except ModuleNotFoundError as exc:
+        raise LockDigestError(
+            "packaging required to verify pyproject coverage against the lock"
+        ) from exc
+
+    root = (repo_root or DEFAULT_REPO_ROOT).resolve()
+    project_path = (pyproject_path or (root / DEFAULT_PYPROJECT_REL)).resolve()
+    python_lock = (lock_path or (root / DEFAULT_PYTHON_LOCK_REL)).resolve()
+    if not project_path.is_file():
+        raise LockDigestError(f"pyproject.toml missing: {project_path}")
+
+    cfg = _load_toml(project_path)
+    extras = dict(cfg.get("project", {}).get("optional-dependencies", {}))
+    locked_raw = locked_package_versions(python_lock)
+    locked = {canonicalize_name(name): version for name, version in locked_raw.items()}
+    checked: list[str] = []
+
+    req_strings: list[tuple[str, str]] = [
+        ("dependencies", value)
+        for value in cfg.get("project", {}).get("dependencies", [])
+    ]
+    for extra in LOCKED_EXTRAS:
+        for value in extras.get(extra, []):
+            req_strings.append((f"optional-dependencies.{extra}", value))
+
+    for location, raw in req_strings:
+        req = Requirement(raw)
+        name = canonicalize_name(req.name)
+        locked_version = locked.get(name)
+        if locked_version is None:
+            # Platform-gated extras may be absent until a universal lock refresh.
+            if req.marker is not None:
+                continue
+            raise LockDigestError(
+                f"{req.name} from {location} missing from {python_lock.name}"
+            )
+        if req.marker is not None and not req.marker.evaluate(_LOCK_MARKER_ENV):
+            # Present in a universal lock but inactive on this platform — still OK.
+            checked.append(f"{req.name}=={locked_version} ({location}, inactive-marker)")
+            continue
+        if req.specifier and Version(locked_version) not in req.specifier:
+            raise LockDigestError(
+                f"{req.name}=={locked_version} in {python_lock.name} "
+                f"does not satisfy {req.specifier} ({location})"
+            )
+        checked.append(f"{req.name}=={locked_version} ({location})")
+
+    return checked
 
 
 def build_digest_manifest(

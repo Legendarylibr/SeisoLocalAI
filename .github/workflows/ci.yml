@@ -91,11 +91,22 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v5
         with:
           python-version: "3.10"
+          enable-cache: true
+          activate-environment: true
+          cache-dependency-glob: |
+            pyproject.toml
+            locks/python.lock
+      - name: Install lock verification helpers
+        run: uv pip install tomli packaging
       - name: Verify dependency locks
         run: python scripts/verify_dep_locks.py
+      - name: Verify Python lock freshness
+        # Constrained recompile (no --upgrade): fails if pyproject needs pins
+        # outside locks/python.lock. Refresh with scripts/update_dep_locks.py.
+        run: python scripts/check_python_lock_freshness.py
 
   lint:
     name: Lint
@@ -113,8 +124,10 @@ jobs:
             pyproject.toml
             requirements-dev.txt
             locks/python.lock
-      - name: Install dependencies
-        run: uv pip install -e ".[forge,dev]"
+      - name: Install locked dependencies
+        # UV_TORCH_BACKEND=cpu skips CUDA wheels that GitHub runners cannot use.
+        # Use uv pip (venv may not ship the pip module).
+        run: python scripts/install_locked_deps.py --editable
       - name: Run lint
         run: python scripts/run_ci_local.py --job lint --skip-install
 
@@ -140,8 +153,8 @@ jobs:
           key: mypy-${{ runner.os }}-py310-${{ hashFiles('pyproject.toml', 'scripts/mypy-baseline.txt') }}
           restore-keys: |
             mypy-${{ runner.os }}-py310-
-      - name: Install dependencies
-        run: uv pip install -e ".[forge,train,dev]"
+      - name: Install locked dependencies
+        run: python scripts/install_locked_deps.py --editable
       - name: Run Mypy
         run: python scripts/run_ci_local.py --job types --skip-install
 
@@ -161,8 +174,8 @@ jobs:
             pyproject.toml
             requirements-dev.txt
             locks/python.lock
-      - name: Install dependencies
-        run: uv pip install -e ".[forge,train,dev]"
+      - name: Install locked dependencies
+        run: python scripts/install_locked_deps.py --editable
       - name: Run CPU tests
         run: >
           python scripts/run_ci_local.py
@@ -187,10 +200,10 @@ jobs:
             pyproject.toml
             requirements-dev.txt
             locks/python.lock
-      - name: Install dependencies
-        # Train extras included for pip-audit coverage; UV_TORCH_BACKEND=cpu
-        # skips CUDA wheels that GitHub runners cannot use.
-        run: uv pip install -e ".[forge,train,dev]"
+      - name: Install locked dependencies
+        # Hashed lock resolve (forge+train+dev), not a fresh PyPI solve.
+        # UV_TORCH_BACKEND=cpu skips CUDA wheels that GitHub runners cannot use.
+        run: python scripts/install_locked_deps.py --editable
       - name: Run security checks
         run: python scripts/run_ci_local.py --job security --skip-install
 
@@ -273,8 +286,8 @@ jobs:
             pyproject.toml
             requirements-dev.txt
             locks/python.lock
-      - name: Install dependencies
-        run: uv pip install -e ".[forge,train,dev]"
+      - name: Install locked dependencies
+        run: python scripts/install_locked_deps.py --editable
       - name: Run slow tests
         run: python -m pytest tests/ -q -m "slow and not gpu" -n auto --dist worksteal
 
@@ -293,8 +306,8 @@ jobs:
             pyproject.toml
             requirements-dev.txt
             locks/python.lock
-      - name: Install dependencies
-        run: uv pip install -e ".[forge,train,dev]"
+      - name: Install locked dependencies
+        run: python scripts/install_locked_deps.py --editable
       - name: Start Forge and run live-check
         env:
           SEISO_DATA_DIR: ${{ runner.temp }}/seiso-live

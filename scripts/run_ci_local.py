@@ -192,11 +192,21 @@ def _ensure_dev_tools(root: Path, python: str, env: dict[str, str]) -> None:
         )
 
 
-def _install_project(
+def _install_project_locked(root: Path, python: str, env: dict[str, str]) -> None:
+    """Install hashed locks/python.lock, then the editable project without resolving deps."""
+    _step(
+        "Install locked dependencies",
+        [python, "scripts/install_locked_deps.py", "--editable"],
+        cwd=root,
+        env=env,
+    )
+
+
+def _install_project_unlocked(
     root: Path, python: str, env: dict[str, str], *, extra: str = "forge,train,dev"
 ) -> None:
     _step(
-        "Install project",
+        "Install project (unlocked PyPI resolve)",
         [python, "-m", "pip", "install", "-e", f".[{extra}]"],
         cwd=root,
         env=env,
@@ -466,6 +476,20 @@ def job_test(
     )
 
 
+def _pip_audit_ignore_vulns(root: Path) -> list[str]:
+    """Load ``[tool.pip-audit].ignore-vulns`` from pyproject.toml (single source of truth)."""
+    try:
+        import tomllib
+    except ModuleNotFoundError:  # Python < 3.11
+        import tomli as tomllib  # type: ignore[no-redef]
+
+    cfg = tomllib.loads((root / "pyproject.toml").read_text(encoding="utf-8"))
+    ignores = cfg.get("tool", {}).get("pip-audit", {}).get("ignore-vulns", [])
+    if not isinstance(ignores, list):
+        raise SystemExit("pyproject.toml [tool.pip-audit].ignore-vulns must be a list")
+    return [str(item) for item in ignores]
+
+
 def job_security(root: Path, python: str, env: dict[str, str]) -> None:
     _banner("Job: security (Bandit, secrets, pip-audit)")
 
@@ -490,25 +514,17 @@ def job_security(root: Path, python: str, env: dict[str, str]) -> None:
     secret_env["DETECT_SECRETS_CMD"] = f"{python} -m detect_secrets"
     _shell_step("Secret scan (detect-secrets)", SECRET_SCAN_SHELL, cwd=root, env=secret_env)
     _step("pip check", [python, "-m", "pip", "check"], cwd=root, env=env)
-    _step(
-        "Dependency vulnerability audit",
-        [
-            python,
-            "-m",
-            "pip_audit",
-            "--cache-dir",
-            str(root / ".cache" / "pip-audit"),
-            "--progress-spinner=off",
-            "--ignore-vuln",
-            "PYSEC-2025-194",
-            "--ignore-vuln",
-            "CVE-2025-69872",
-            "--ignore-vuln",
-            "PYSEC-2026-1325",
-        ],
-        cwd=root,
-        env=env,
-    )
+    audit_cmd = [
+        python,
+        "-m",
+        "pip_audit",
+        "--cache-dir",
+        str(root / ".cache" / "pip-audit"),
+        "--progress-spinner=off",
+    ]
+    for vuln_id in _pip_audit_ignore_vulns(root):
+        audit_cmd.extend(["--ignore-vuln", vuln_id])
+    _step("Dependency vulnerability audit", audit_cmd, cwd=root, env=env)
 
 
 def _ui_pkg_manager(env: dict[str, str]) -> tuple[str, list[str]]:
@@ -649,6 +665,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Skip pip install steps (assume deps already installed).",
     )
     parser.add_argument(
+        "--unlocked-install",
+        action="store_true",
+        help="Resolve deps from PyPI via pyproject extras instead of locks/python.lock.",
+    )
+    parser.add_argument(
         "--changed",
         action="store_true",
         help="Run lint and directly changed test modules instead of the full local gate.",
@@ -713,7 +734,10 @@ def main(argv: list[str] | None = None) -> int:
         if not args.skip_install:
             _banner("Setup")
             _step("Upgrade pip", _pip_upgrade(python_bin), cwd=root, env=env)
-            _install_project(root, python_bin, env)
+            if args.unlocked_install:
+                _install_project_unlocked(root, python_bin, env)
+            else:
+                _install_project_locked(root, python_bin, env)
         else:
             _ensure_dev_tools(root, python_bin, env)
 

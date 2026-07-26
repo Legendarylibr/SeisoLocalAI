@@ -21,6 +21,7 @@ Key commands:
 
 - **Always activate the project venv** (`.venv/bin/activate` or let `start` manage) before running Python/CLI commands. The base system python will not have the right extras or pinned deps.
 - Prefer the documented entry points (`start`, `seiso`, `scripts/doctor.sh`) over raw `python ...`. They set up paths, HF cache, and runtime config.
+- For a CI-equivalent Python env: `python scripts/install_locked_deps.py --editable` (hashed `locks/python.lock`). Refresh with `python scripts/update_dep_locks.py` after pyproject changes.
 - **Smoke first**: Use `configs/*_smoke.*` presets for fast iteration. They exist precisely for CI + agent loops.
 - **Never delete** `~/.seiso` or its subdirs (user data, caches, checkpoints). Use `SEISO_DATA_DIR` overrides for throwaway experiments.
 - Memory-sensitive work: the platform applies guards (`seiso/memory/protection/`, `forge/services/memory_release.py`). Call `prepare_for_gpu_task` patterns when adding new heavy GPU jobs.

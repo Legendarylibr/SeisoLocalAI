@@ -1,0 +1,22 @@
+# Dependabot tracks declared deps in pyproject.toml / forge-ui.
+# CI and local quality installs use hashed locks/python.lock — after merging
+# dependency PRs, refresh locks with: python scripts/update_dep_locks.py
+version: 2
+updates:
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+
+  - package-ecosystem: npm
+    directory: /forge-ui
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies

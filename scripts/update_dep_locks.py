@@ -26,6 +26,7 @@ PIP_COMPILE_DISPLAY_CMD = (
     "pip-compile --allow-unsafe --extra=dev --extra=forge --extra=train "
     "--generate-hashes --output-file=locks/python.lock --strip-extras pyproject.toml"
 )
+# Shared extras resolution for CI (Linux) and local (macOS/Windows).
 PIP_COMPILE_ARGS = [
     "pyproject.toml",
     "--extra",
@@ -46,6 +47,9 @@ UV_COMPILE_CMD = [
     "pip",
     "compile",
     *PIP_COMPILE_ARGS,
+    "--universal",
+    "--python-version",
+    "3.10",
     "--custom-compile-command",
     PIP_COMPILE_DISPLAY_CMD,
 ]
