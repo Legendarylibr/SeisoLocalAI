@@ -57,7 +57,7 @@ cd "$env:USERPROFILE\Seiso"
 seiso forge
 ```
 
-Open **http://127.0.0.1:8765** in your browser. On first run, create your local admin password.
+Open **http://127.0.0.1:8765** in your browser. On first run, create or import a Nostr key (npub identity).
 
 If the UI is blank, rebuild the frontend:
 

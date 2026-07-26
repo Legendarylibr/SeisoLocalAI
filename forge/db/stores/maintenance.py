@@ -7,7 +7,7 @@ from forge.db.stores.constants import _JOB_ERROR_TABLES, now_iso
 
 class MaintenanceMixin:
     async def reset_local_session(self) -> dict[str, int]:
-        """Clear local users and user-owned workspace rows for forgotten-password reset."""
+        """Clear local users and user-owned workspace rows for forgotten-key reset."""
         async with self._conn() as conn:
             await conn.execute("BEGIN IMMEDIATE")
             counts: dict[str, int] = {}

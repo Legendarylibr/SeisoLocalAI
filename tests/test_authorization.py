@@ -12,7 +12,7 @@ async def test_thread_cross_user_idor(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
         token_a = reg.json()["access_token"]
         headers_a = {"Authorization": f"Bearer {token_a}"}
@@ -42,7 +42,7 @@ async def test_export_job_cross_user(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
 
         from forge.api.deps import get_db

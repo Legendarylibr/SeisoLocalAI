@@ -50,7 +50,7 @@ function Guard({
   dismissedHfOnboardingUserId: string | null;
   onDismissHfOnboarding: (userId: string) => void;
 }) {
-  const { user, loading, needsOnboarding } = useAuth();
+  const { user, loading, needsOnboarding, keyBackup } = useAuth();
   const { hfStatus, loading: platformLoading } = usePlatformSettings();
 
   const dismissHfOnboarding = () => {
@@ -62,6 +62,8 @@ function Guard({
   if (loading) {
     return <PageLoading />;
   }
+  // Fresh keygen: stay on AuthPage until the user confirms they wrote the npub down.
+  if (keyBackup) return <AuthPage />;
   if (!user && !needsOnboarding) return <AuthPage />;
   if (needsOnboarding && !user) return <AuthPage />;
   if (platformLoading && user) return <PageLoading />;

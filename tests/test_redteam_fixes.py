@@ -699,9 +699,9 @@ async def test_registration_rejects_second_user(app):
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        first = await client.post("/api/auth/register", json={"password": "securepass1"})
+        first = await client.post("/api/auth/register", json={"generate": True})
         assert first.status_code == 201
-        second = await client.post("/api/auth/register", json={"password": "securepass2"})
+        second = await client.post("/api/auth/register", json={"generate": True})
         assert second.status_code == 403
 
 

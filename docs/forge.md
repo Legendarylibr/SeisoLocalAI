@@ -36,7 +36,7 @@ seiso forge
 
 On later sessions, skip the UI build unless `forge-ui/dist` is missing or you changed frontend code.
 
-Open **http://127.0.0.1:8765**. On first run, complete onboarding to create your local admin password.
+Open **http://127.0.0.1:8765**. On first run, complete onboarding to create or import a Nostr key (npub identity).
 
 ### UI development (hot reload)
 

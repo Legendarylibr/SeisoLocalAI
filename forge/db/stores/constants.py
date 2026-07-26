@@ -13,6 +13,7 @@ CREATE TABLE IF NOT EXISTS users (
     email TEXT UNIQUE NOT NULL,
     password_hash TEXT NOT NULL,
     display_name TEXT,
+    nostr_pubkey TEXT UNIQUE,
     created_at TEXT NOT NULL
 );
 

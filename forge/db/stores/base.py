@@ -83,6 +83,14 @@ class DatabaseCore:
         # Drop schema-only leftovers that never had writers (F4-03/04/05).
         for dead_table in ("recipe_jobs", "knowledge_bases", "projects"):
             await conn.execute(f"DROP TABLE IF EXISTS {dead_table}")  # nosec B608
+        async with conn.execute("PRAGMA table_info(users)") as cur:
+            user_cols = {row[1] for row in await cur.fetchall()}
+        if "nostr_pubkey" not in user_cols:
+            await conn.execute("ALTER TABLE users ADD COLUMN nostr_pubkey TEXT")
+        await conn.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_users_nostr_pubkey "
+            "ON users(nostr_pubkey) WHERE nostr_pubkey IS NOT NULL"
+        )
         for table in _JOB_ERROR_TABLES:
             async with conn.execute(f"PRAGMA table_info({table})") as cur:
                 cols = {row[1] for row in await cur.fetchall()}

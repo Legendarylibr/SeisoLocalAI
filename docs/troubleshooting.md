@@ -235,7 +235,7 @@ See [training/quickstart.md § NeMo RL](training/quickstart.md#nemo-rl) (include
 
 ## Compat `/v1` returns 401
 
-Use the inference-scoped key (not your admin password):
+Use the inference-scoped key (not your Nostr nsec):
 
 ```bash
 # Linux / macOS / WSL
