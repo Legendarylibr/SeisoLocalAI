@@ -284,6 +284,16 @@ def run_compress_job(
 
     manifest_report = verify_manifest(run_dir)
     _log(f"Manifest verify: ok={manifest_report.get('ok')}")
+    try:
+        from seiso.research.nostr import maybe_auto_attest
+
+        nostr_report = maybe_auto_attest(run_dir / "manifest.json")
+        if nostr_report and nostr_report.get("ok"):
+            _log(f"Nostr attestation: event_id={nostr_report.get('event_id')}")
+        elif nostr_report and nostr_report.get("error"):
+            _log(f"Nostr attestation skipped: {nostr_report.get('error')}")
+    except Exception as exc:  # pragma: no cover - defensive
+        _log(f"Nostr attestation skipped: {exc}")
     _log("Compression pipeline complete")
 
     return {

@@ -277,9 +277,14 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
     training_manifest = read_json_file(manifest, default=None)
     if training_manifest is not None:
         payload["training_manifest"] = training_manifest
-    (dest / "seiso_export_metadata.json").write_text(
-        json.dumps(payload, indent=2), encoding="utf-8"
-    )
+    sidecar = dest / "seiso_export_metadata.json"
+    sidecar.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    try:
+        from seiso.research.nostr import maybe_auto_attest
+
+        maybe_auto_attest(sidecar)
+    except Exception:
+        pass
 
 
 def _select_hub_folder(out_root: Path, formats: list[ExportFormat]) -> Path:

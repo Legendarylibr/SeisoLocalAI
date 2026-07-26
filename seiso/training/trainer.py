@@ -1160,4 +1160,11 @@ class SeisoTrainer:
             "world_size": layout.world_size,
             "kernels": self._kernel_meta,
         }
-        write_json(out / "seiso_manifest.json", manifest)
+        manifest_path = out / "seiso_manifest.json"
+        write_json(manifest_path, manifest)
+        try:
+            from seiso.research.nostr import maybe_auto_attest
+
+            maybe_auto_attest(manifest_path)
+        except Exception:
+            pass

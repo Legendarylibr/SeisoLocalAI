@@ -116,9 +116,15 @@ seiso compress run --preset prune_recover --model-dir ~/.seiso/checkpoints/<user
 
 seiso compress manifest-verify --run-dir ~/.seiso/compress/local/cli-<job_id>/runs/<run_id>
 seiso compress speculative --target-model ./finetuned --draft-model ./distilled
+
+# Optional: seal manifest digests to Nostr (see docs/provenance-nostr.md)
+# SEISO_ALLOW_NOSTR=1 seiso provenance attest ~/.seiso/compress/.../manifest.json
 ```
 
 Config reference: `configs/example_compress.json`.
+
+Optional external attestation of the hash-chained compress manifest: see
+[provenance-nostr.md](provenance-nostr.md).
 
 Requires `.[train]` for GPU distillation/finetune stages. Optional `.[compress-quant]` for GPTQ/AWQ, `.[compress-eval]` for lm-eval.
 

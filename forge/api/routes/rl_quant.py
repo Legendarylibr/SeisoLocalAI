@@ -196,6 +196,22 @@ async def start_rl_quant(
                     "(job remains completed)",
                     job_id,
                 )
+        if job.status.value == "completed":
+            try:
+                from forge.services.nostr_settings import forge_maybe_attest
+
+                forge_maybe_attest(
+                    data_dir=settings.data_dir,
+                    user_id=user_id,
+                    result=job.result if isinstance(job.result, dict) else None,
+                    output_dir=(job.result or {}).get("output_dir"),
+                )
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).exception(
+                    "Nostr auto-attest failed for rl-quant job %s", job_id
+                )
 
     async def _failed(message: str) -> None:
         await db.update_rl_quant_job_status(

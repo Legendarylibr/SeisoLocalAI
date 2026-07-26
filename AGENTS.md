@@ -15,6 +15,7 @@ Key commands:
 - `seiso forge` (then open browser)
 - `seiso train --config configs/example_lora.yaml`
 - `seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml` (research)
+- `seiso provenance attest|verify` (opt-in Nostr digest attestation; see [docs/provenance-nostr.md](docs/provenance-nostr.md))
 - `make ci-fast` (or `python3 scripts/run_ci_local.py --fast`)
 
 ## Rules of thumb
@@ -44,6 +45,7 @@ Do not relax sandbox or crypto defaults without a very strong documented reason 
 ## Extending common areas (pointers)
 
 - **New training preset / recs**: `seiso/training/recommendations.py`, `seiso/training/dataset_analysis.py`, `seiso/training/practices.py`, `platform_caps.py`, example YAML in `configs/`. Update TrainPage + `docs/training/quickstart.md` if new knobs appear. Run `pytest tests/test_docs_accuracy.py`.
+- **Nostr provenance**: Opt-in only (`SEISO_ALLOW_NOSTR`). Digests-only events via `seiso/research/nostr/`; keys under `nostr_keys/` (HF-token style). Do not add DMs, agent tools, or always-on clients without a new design review. See [docs/provenance-nostr.md](docs/provenance-nostr.md).
 - **New kernel op**: Add to `seiso/kernels/cuda/` + `cuda_ops.py` + dispatch + hooks + tests. Update low-VRAM profile logic.
 - **New pipeline stage (compress/distill/rl)**: Update the stage router / config builder + manifest + the corresponding orchestrator + page.
 - **NeMo RL** (`method: nemo_rl`): external launcher in `seiso/nemo_rl/` — requires `SEISO_NEMO_RL_ROOT` pointing at a [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL) checkout + `uv`. Do not vendor NeMo RL into this repo.
@@ -82,7 +84,7 @@ forge-ui/              # React sources + built dist/
 seiso/codellama_compress/    # bundled LLM compression (research)
 seiso/adaptive_quant/        # bundled adaptive RL quant (research)
 seiso/analysis/        # bundled RL quant analysis CLI/helpers (research)
-seiso/research/        # provenance / determinism helpers
+seiso/research/        # provenance / determinism helpers (+ optional Nostr attest under seiso/research/nostr/)
 configs/               # example + smoke YAML/JSON
 scripts/               # install, doctor, run_ci_local, ...
 tests/                 # broad pytest coverage

@@ -209,3 +209,17 @@ def resolve_pinned_endpoint(
     return PinnedEndpoint(
         base_url=base, host=host, port=port, scheme=scheme, pinned_ip=addrs[0]
     )
+
+
+def validate_nostr_relay_url(
+    url: str,
+    *,
+    allowlist: list[str] | None = None,
+    allow_loopback: bool = False,
+) -> str:
+    """Validate a Nostr relay URL (wss / loopback ws) against SSRF policy."""
+    from seiso.research.nostr.policy import validate_relay_url
+
+    return validate_relay_url(
+        url, allowlist=allowlist, allow_loopback=allow_loopback
+    )

@@ -1,0 +1,213 @@
+"""Per-user Nostr provenance settings and Forge-side auto-attest."""
+
+from __future__ import annotations
+
+import json
+import logging
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Any
+
+from forge.security.audit import audit_event
+from forge.security.url_policy import validate_nostr_relay_url
+from seiso.research.nostr.keys import (
+    clear_keypair,
+    generate_keypair,
+    keypair_from_secret,
+    load_keypair,
+    load_npub,
+    save_keypair,
+)
+from seiso.research.nostr.policy import nostr_allowed
+from seiso.security import SecurityError, safe_join
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class NostrPrefs:
+    auto_attest: bool = False
+    relays: list[str] | None = None
+    allow_loopback: bool = False
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "auto_attest": self.auto_attest,
+            "relays": list(self.relays or []),
+            "allow_loopback": self.allow_loopback,
+        }
+
+
+def _prefs_path(data_dir: Path, user_id: str) -> Path:
+    return safe_join(data_dir, "nostr_keys", f"{user_id}.prefs.json")
+
+
+def load_nostr_prefs(data_dir: Path, user_id: str) -> NostrPrefs:
+    path = _prefs_path(data_dir, user_id)
+    if not path.is_file():
+        return NostrPrefs()
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return NostrPrefs()
+    if not isinstance(raw, dict):
+        return NostrPrefs()
+    relays = raw.get("relays") or []
+    if not isinstance(relays, list):
+        relays = []
+    return NostrPrefs(
+        auto_attest=bool(raw.get("auto_attest")),
+        relays=[str(r) for r in relays if str(r).strip()],
+        allow_loopback=bool(raw.get("allow_loopback")),
+    )
+
+
+def save_nostr_prefs(data_dir: Path, user_id: str, prefs: NostrPrefs) -> NostrPrefs:
+    validated: list[str] = []
+    for relay in prefs.relays or []:
+        validated.append(
+            validate_nostr_relay_url(
+                str(relay), allow_loopback=prefs.allow_loopback
+            )
+        )
+    prefs = NostrPrefs(
+        auto_attest=bool(prefs.auto_attest),
+        relays=validated,
+        allow_loopback=bool(prefs.allow_loopback),
+    )
+    path = _prefs_path(data_dir, user_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(prefs.to_dict(), indent=2), encoding="utf-8")
+    path.chmod(0o600)
+    return prefs
+
+
+def nostr_status(data_dir: Path, user_id: str) -> dict[str, Any]:
+    prefs = load_nostr_prefs(data_dir, user_id)
+    npub = load_npub(identity=user_id, data_dir=data_dir)
+    return {
+        "server_allow_nostr": nostr_allowed(),
+        "key_saved": npub is not None,
+        "npub": npub,
+        "auto_attest": prefs.auto_attest,
+        "relays": list(prefs.relays or []),
+        "allow_loopback": prefs.allow_loopback,
+    }
+
+
+def generate_user_nostr_key(data_dir: Path, user_id: str) -> dict[str, str]:
+    pair = generate_keypair()
+    save_keypair(pair, identity=user_id, data_dir=data_dir)
+    audit_event("nostr_keygen", user_id=user_id, npub=pair.npub)
+    return {"status": "saved", "npub": pair.npub}
+
+
+def import_user_nostr_key(data_dir: Path, user_id: str, secret: str) -> dict[str, str]:
+    pair = keypair_from_secret(secret)
+    save_keypair(pair, identity=user_id, data_dir=data_dir)
+    audit_event("nostr_key_import", user_id=user_id, npub=pair.npub)
+    return {"status": "saved", "npub": pair.npub}
+
+
+def clear_user_nostr_key(data_dir: Path, user_id: str) -> dict[str, str]:
+    clear_keypair(identity=user_id, data_dir=data_dir)
+    audit_event("nostr_key_clear", user_id=user_id)
+    return {"status": "cleared"}
+
+
+def _candidate_manifests(result: dict[str, Any] | None, output_dir: str | None) -> list[Path]:
+    candidates: list[Path] = []
+    roots: list[Path] = []
+    if isinstance(result, dict):
+        for key in ("run_dir", "output_root", "output_dir", "manifest_path"):
+            value = result.get(key)
+            if value:
+                roots.append(Path(str(value)))
+        nested = result.get("nostr") or result.get("manifest")
+        if isinstance(nested, dict) and nested.get("manifest_path"):
+            candidates.append(Path(str(nested["manifest_path"])))
+    if output_dir:
+        roots.append(Path(output_dir))
+    for root in roots:
+        if root.is_file() and root.suffix == ".json":
+            candidates.append(root)
+            continue
+        for name in (
+            "manifest.json",
+            "seiso_manifest.json",
+            "seiso_export_metadata.json",
+        ):
+            path = root / name
+            if path.is_file():
+                candidates.append(path)
+        # adaptive_quant replay manifests are often named *_replay_manifest.json
+        if root.is_dir():
+            candidates.extend(sorted(root.glob("*replay_manifest.json")))
+    # Deduplicate while preserving order.
+    seen: set[str] = set()
+    out: list[Path] = []
+    for path in candidates:
+        key = str(path.resolve()) if path.exists() else str(path)
+        if key not in seen:
+            seen.add(key)
+            out.append(path)
+    return out
+
+
+def forge_maybe_attest(
+    *,
+    data_dir: Path,
+    user_id: str,
+    result: dict[str, Any] | None = None,
+    output_dir: str | None = None,
+) -> dict[str, Any] | None:
+    """Attest job manifests when user prefs + server gate allow it."""
+    if not nostr_allowed():
+        return None
+    prefs = load_nostr_prefs(data_dir, user_id)
+    if not prefs.auto_attest:
+        return None
+    if not prefs.relays:
+        logger.warning("Nostr auto-attest enabled but no relays configured for %s", user_id)
+        return {"ok": False, "error": "no relays configured"}
+    pair = load_keypair(identity=user_id, data_dir=data_dir)
+    if pair is None:
+        logger.warning("Nostr auto-attest enabled but no key for %s", user_id)
+        return {"ok": False, "error": "no nostr key"}
+
+    from seiso.research.nostr.attest import attest_manifest
+
+    reports: list[dict[str, Any]] = []
+    for manifest_path in _candidate_manifests(result, output_dir):
+        if not manifest_path.is_file():
+            continue
+        try:
+            report = attest_manifest(
+                manifest_path,
+                relays=list(prefs.relays or []),
+                pair=pair,
+                identity=user_id,
+                data_dir=data_dir,
+                allow_loopback=prefs.allow_loopback,
+                require_allow=True,
+            )
+            audit_event(
+                "nostr_attest",
+                user_id=user_id,
+                event_id=report.get("event_id"),
+                attestation_sha256=(report.get("receipt") or {}).get(
+                    "attestation_sha256"
+                ),
+                manifest_path=str(manifest_path),
+            )
+            reports.append(report)
+        except (SecurityError, Exception) as exc:
+            logger.warning(
+                "Nostr attest failed for %s (%s): %s", user_id, manifest_path, exc
+            )
+            reports.append(
+                {"ok": False, "error": str(exc), "manifest_path": str(manifest_path)}
+            )
+    if not reports:
+        return None
+    return {"ok": all(r.get("ok") for r in reports), "reports": reports}
