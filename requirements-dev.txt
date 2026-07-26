@@ -6,7 +6,7 @@ setuptools>=83
 # Also pinned under [project.optional-dependencies].forge in pyproject.toml.
 pyasn1>=0.6.4
 ruff>=0.4
-mypy==1.10.1
+mypy==2.3.0
 types-PyYAML>=6.0
 pylint>=3.2
 bandit[toml]>=1.7
