@@ -7,7 +7,7 @@ import hmac
 import json
 import re
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from seiso.security import SecurityError
 
@@ -169,7 +169,10 @@ def _load_toml(path: Path) -> dict[str, Any]:
             raise LockDigestError(
                 "tomllib/tomli required to verify security floors in pyproject.toml"
             ) from exc
-    return tomllib.loads(path.read_text(encoding="utf-8"))
+    raw: object = tomllib.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise LockDigestError(f"TOML root must be a table: {path}")
+    return cast(dict[str, Any], raw)
 
 
 def _version_tuple(version: str) -> tuple[int, ...]:
