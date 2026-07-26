@@ -28,20 +28,36 @@ async def test_onboarding_flow(app):
 
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
         assert reg.status_code == 201
-        token = reg.json()["access_token"]
+        body = reg.json()
+        token = body["access_token"]
+        assert body.get("nsec", "").startswith("nsec1")
+        assert body["user"].get("npub", "").startswith("npub1")
 
         me = await client.get(
             "/api/auth/me", headers={"Authorization": f"Bearer {token}"}
         )
         assert me.status_code == 200
         assert me.json()["display_name"] == "Admin"
+        assert me.json().get("npub", "").startswith("npub1")
+
+        # Login with the generated nsec (CSRF required for cookie-session POSTs).
+        csrf = client.cookies.get("seiso_csrf")
+        assert csrf
+        logged_out = await client.post(
+            "/api/auth/logout",
+            headers={"Authorization": f"Bearer {token}", "X-CSRF-Token": csrf},
+        )
+        assert logged_out.status_code == 200
+        login = await client.post("/api/auth/login", json={"nsec": body["nsec"]})
+        assert login.status_code == 200
+        assert login.json()["user"]["npub"] == body["user"]["npub"]
 
         reg2 = await client.post(
             "/api/auth/register",
-            json={"password": "securepass2"},
+            json={"generate": True},
         )
         assert reg2.status_code == 403
 
@@ -65,13 +81,13 @@ async def test_onboarding_requires_storage_choice_when_unconfigured(
         assert status.json()["storage_mode_configured"] is False
 
         missing = await client.post(
-            "/api/auth/register", json={"password": "securepass1"}
+            "/api/auth/register", json={"generate": True}
         )
         assert missing.status_code == 400
 
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1", "storage_mode": "persistent"},
+            json={"generate": True, "storage_mode": "persistent"},
         )
         assert reg.status_code == 201
         assert (tmp_path / ".storage_mode").read_text(
@@ -86,7 +102,7 @@ async def test_reset_session_returns_instance_to_onboarding(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
         assert reg.status_code == 201
         token = reg.json()["access_token"]
@@ -138,7 +154,7 @@ async def test_reset_session_returns_instance_to_onboarding(app):
 
         reg2 = await client.post(
             "/api/auth/register",
-            json={"password": "securepass2"},
+            json={"generate": True},
         )
         assert reg2.status_code == 201
 
@@ -159,7 +175,7 @@ async def test_ephemeral_onboarding_preserves_existing_forge_db(monkeypatch, tmp
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1", "storage_mode": "ephemeral"},
+            json={"generate": True, "storage_mode": "ephemeral"},
         )
         assert reg.status_code == 201
     assert legacy.read_text(encoding="utf-8") == "do-not-delete"

@@ -16,16 +16,20 @@ describe("API payloads", () => {
 
   it("sends onboarding storage mode when registering", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
-      mockJsonResponse({ access_token: "token", user: { id: "u1", display_name: "Admin" } }),
+      mockJsonResponse({
+        access_token: "token",
+        user: { id: "u1", display_name: "Admin", npub: "npub1test" },
+        nsec: "nsec1test",
+      }),
     );
 
-    await authApi.register("securepass1", "persistent");
+    await authApi.register({ generate: true }, "persistent");
 
     expect(fetchMock).toHaveBeenCalledWith(
       "/api/auth/register",
       expect.objectContaining({
         method: "POST",
-        body: JSON.stringify({ password: "securepass1", storage_mode: "persistent" }),
+        body: JSON.stringify({ generate: true, storage_mode: "persistent" }),
       }),
     );
   });

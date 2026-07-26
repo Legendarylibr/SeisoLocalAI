@@ -244,6 +244,11 @@ main() {
     export PATH="$root/.venv/bin:${PATH}"
   fi
 
+  # Default path: Nostr provenance gate on + public digests-only relays.
+  # Override with SEISO_ALLOW_NOSTR=0 or SEISO_NOSTR_RELAYS=... Auto-attest stays off.
+  export SEISO_ALLOW_NOSTR="${SEISO_ALLOW_NOSTR:-1}"
+  export SEISO_NOSTR_RELAYS="${SEISO_NOSTR_RELAYS:-wss://nos.lol,wss://relay.damus.io}"
+
   seiso_bin="$(seiso_require_cli "$root")"
   ensure_inference_sidecars
   if declare -F seiso_verify_sidecar_stack >/dev/null 2>&1; then

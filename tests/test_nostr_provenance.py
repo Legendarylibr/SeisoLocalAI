@@ -206,9 +206,30 @@ def test_attest_and_verify_with_mocked_relay(tmp_path: Path, monkeypatch):
 def test_maybe_auto_attest_respects_env(tmp_path: Path, monkeypatch):
     from seiso.research.nostr.attest import maybe_auto_attest
 
+    # Gate on by default; auto-attest still requires SEISO_NOSTR_ATTEST.
     monkeypatch.delenv("SEISO_ALLOW_NOSTR", raising=False)
     monkeypatch.delenv("SEISO_NOSTR_ATTEST", raising=False)
     assert maybe_auto_attest(tmp_path / "missing.json") is None
+
+    monkeypatch.setenv("SEISO_ALLOW_NOSTR", "0")
+    monkeypatch.setenv("SEISO_NOSTR_ATTEST", "1")
+    assert maybe_auto_attest(tmp_path / "missing.json") is None
+
+
+def test_nostr_allowed_default_on(monkeypatch):
+    from seiso.research.nostr.policy import nostr_allowed, relay_allowlist_from_env
+
+    monkeypatch.delenv("SEISO_ALLOW_NOSTR", raising=False)
+    monkeypatch.delenv("SEISO_NOSTR_RELAYS", raising=False)
+    assert nostr_allowed() is True
+    assert relay_allowlist_from_env() == [
+        "wss://nos.lol",
+        "wss://relay.damus.io",
+    ]
+
+    monkeypatch.setenv("SEISO_ALLOW_NOSTR", "0")
+    assert nostr_allowed() is False
+    assert relay_allowlist_from_env() == []
 
 
 def test_content_fingerprint_stable_for_attestation_body():

@@ -93,7 +93,7 @@ See [install.md](install.md) for AMD ROCm, pip extras, and upgrade steps.
 ## Step 2 — Onboarding
 
 1. Open **http://127.0.0.1:8765**
-2. Create your local admin username and password
+2. Generate a Nostr key (default) or import an nsec — your npub is the local identity
 3. Optionally paste a [Hugging Face token](https://huggingface.co/settings/tokens) in **Settings** for gated models and faster downloads
 
 Seiso binds to `127.0.0.1` by default. Your credentials stay on your machine.

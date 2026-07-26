@@ -190,7 +190,7 @@ All three changes are **correct and minimal**:
 ## Security & Privacy Notes
 
 - **Default posture**: Bind localhost, encrypted sensitive DB columns (chat content, provider configs, tokens), per-user isolation.
-- Auth: Local JWT + first-run onboarding (username/password stored hashed).
+- Auth: Local JWT + first-run onboarding (Nostr npub identity; nsec proves ownership).
 - CSRF + rate limiting middleware (configurable).
 - Path sandbox + `assert_within` / shared `USER_SCOPED_DATA_ROOTS` for artifact paths.
 - HF tokens: stored encrypted; CLI `hf` also visible.

@@ -1,4 +1,10 @@
-export type AuthUser = { id: string; email: string; display_name: string | null };
+export type AuthUser = {
+  id: string;
+  email: string;
+  display_name: string | null;
+  npub?: string | null;
+  nostr_pubkey?: string | null;
+};
 
 export type SecurityPosture = {
   allow_tools: boolean;

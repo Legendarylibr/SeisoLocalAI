@@ -31,7 +31,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Compress / distill / quantize models | [compression.md](compression.md) |
 | Teacher distill + DPO alignment | [cli.md § seiso distill-rl](cli.md#seiso-distill-rl) · [compression.md](compression.md) |
 | Quant regression study (train → export → eval) | [cli.md § seiso experiment](cli.md#seiso-experiment) |
-| Attest run digests to Nostr (opt-in) | [provenance-nostr.md](provenance-nostr.md) · `seiso provenance` |
+| Attest run digests to Nostr | [provenance-nostr.md](provenance-nostr.md) · `seiso provenance` |
 | Build a local RAG corpus | [forge.md](forge.md) · `/knowledge` |
 | Enable fused GPU kernels | [training/kernels.md](training/kernels.md) |
 | Read kernel shape / intensity estimates | [training/kernel-shape.md](training/kernel-shape.md) · `seiso-bench-kernels --roofline-only` |
@@ -64,7 +64,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | **CLI training** | `seiso train --config configs/example_lora.yaml` | `seiso train --config configs\example_lora.yaml` |
 | **Compat API** | `seiso forge` then POST `/v1/chat/completions` | Same |
 
-First launch opens onboarding — create your local admin password. Copy `.env.example` to `.env` to override host, port, or data directory.
+First launch opens onboarding — create or import a Nostr key (npub identity). Copy `.env.example` to `.env` to override host, port, or data directory.
 
 On native Linux + NVIDIA, `start` also prepares the isolated GGUF chat sidecar:
 healthy Ollama first, otherwise llama-swap's `llamacpp` engine. See

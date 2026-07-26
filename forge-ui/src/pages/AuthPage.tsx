@@ -21,25 +21,56 @@ const STORAGE_OPTIONS = [
 ];
 
 export function AuthPage() {
-  const { needsOnboarding, storageModeConfigured, login, register, resetSession } = useAuth();
-  const [password, setPassword] = useState("");
+  const {
+    needsOnboarding,
+    storageModeConfigured,
+    keyBackup,
+    login,
+    register,
+    confirmKeyBackup,
+    resetSession,
+  } = useAuth();
+  const [nsec, setNsec] = useState("");
   const [storageMode, setStorageMode] = useState<"persistent" | "ephemeral">("persistent");
   const [error, setError] = useState("");
   const [resetting, setResetting] = useState(false);
+  const [busy, setBusy] = useState(false);
   const mode = needsOnboarding ? "register" : "login";
+
+  const finishRegister = async (body: { generate: true } | { nsec: string }) => {
+    setBusy(true);
+    setError("");
+    try {
+      await register(body, storageModeConfigured ? undefined : storageMode);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Auth failed");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
+    setBusy(true);
     try {
-      if (mode === "register") await register(password, storageModeConfigured ? undefined : storageMode);
-      else await login(password);
+      if (mode === "register") {
+        await finishRegister({ nsec: nsec.trim() });
+      } else {
+        await login(nsec.trim());
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Auth failed");
+    } finally {
+      setBusy(false);
     }
   };
 
-  const resetForgottenPassword = async () => {
+  const generateAndContinue = async () => {
+    await finishRegister({ generate: true });
+  };
+
+  const resetForgottenKey = async () => {
     setError("");
     const confirmed = window.confirm(
       "Start a new local Seiso session? This clears the current local account, chats, jobs, providers, and model registry entries. Downloaded model files remain on disk.",
@@ -48,7 +79,7 @@ export function AuthPage() {
     setResetting(true);
     try {
       await resetSession();
-      setPassword("");
+      setNsec("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Reset failed");
     } finally {
@@ -73,96 +104,147 @@ export function AuthPage() {
             <h1 className="auth-aside-title">Seiso Local AI</h1>
           </div>
           <p className="auth-aside-copy">
-            A local-first AI workspace. Models, training, and chat stay on your machine — encrypted, private, and under your control.
+            A local-first AI workspace. Sign in with a Nostr key — your npub is your identity; models and chat stay on this machine.
           </p>
           <ul className="auth-feature-list">
+            <li>
+              <IconLock size={15} />
+              <span>Nostr npub identity (nsec never leaves encrypted storage)</span>
+            </li>
             <li>
               <IconLock size={15} />
               <span>HttpOnly sessions with CSRF protection</span>
             </li>
             <li>
               <IconLock size={15} />
-              <span>Encrypted storage for chat and API keys</span>
-            </li>
-            <li>
-              <IconLock size={15} />
-              <span>No telemetry — nothing leaves this device</span>
+              <span>No telemetry — nothing leaves this device unless you attest</span>
             </li>
           </ul>
         </div>
 
         <div className="card auth-card matte-glow">
-          <div className="auth-card-header">
-            <h2 className="auth-card-title">
-              {mode === "register" ? "Create your password" : "Welcome back"}
-            </h2>
-            <p className="auth-card-sub">
-              {needsOnboarding
-                ? "One account per machine. Set a password to secure this instance."
-                : "Enter your password to unlock the workspace."}
-            </p>
-          </div>
-          <form onSubmit={submit} className="auth-form">
-            <label htmlFor="auth-password">
-              {mode === "register" ? "Password (min 8 characters)" : "Password"}
-            </label>
-            <input
-              id="auth-password"
-              type="password"
-              required
-              minLength={mode === "register" ? 8 : 1}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete={mode === "register" ? "new-password" : "current-password"}
-              autoFocus
-              placeholder="Enter password"
-            />
-            {mode === "register" && !storageModeConfigured && (
-              <div className="auth-storage-section">
-                <div className="auth-storage-header">
-                  <span className="auth-storage-label">How should we store your data?</span>
-                  <span className="auth-storage-hint muted-text">Choose once — applies to this machine</span>
-                </div>
-                <div className="auth-storage-cards" role="radiogroup" aria-label="Storage mode">
-                  {STORAGE_OPTIONS.map((opt) => {
-                    const selected = storageMode === opt.id;
-                    return (
-                      <button
-                        key={opt.id}
-                        type="button"
-                        role="radio"
-                        aria-checked={selected}
-                        className={`auth-storage-card${selected ? " auth-storage-card-selected" : ""}`}
-                        onClick={() => setStorageMode(opt.id)}
-                      >
-                        <div className="auth-storage-card-top">
-                          <span className="auth-storage-card-title">{opt.title}</span>
-                          {opt.badge && <span className="auth-storage-card-badge">{opt.badge}</span>}
-                        </div>
-                        <span className="auth-storage-card-sub">{opt.subtitle}</span>
-                        <p className="auth-storage-card-detail">{opt.detail}</p>
-                        <span className="auth-storage-card-check" aria-hidden>{selected ? "✓" : ""}</span>
-                      </button>
-                    );
-                  })}
-                </div>
+          {keyBackup ? (
+            <>
+              <div className="auth-card-header">
+                <h2 className="auth-card-title">Write down your npub</h2>
+                <p className="auth-card-sub">
+                  This is the public key that was just generated for this Seiso instance.
+                  Write it down and keep it somewhere safe, then continue.
+                </p>
               </div>
-            )}
-            {error && <p className="auth-error" role="alert">{error}</p>}
-            <button type="submit" className="btn btn-primary auth-submit">
-              {mode === "register" ? "Set password and continue" : "Sign in"}
-            </button>
-            {mode === "login" && (
-              <button
-                type="button"
-                className="auth-reset-link"
-                onClick={resetForgottenPassword}
-                disabled={resetting}
-              >
-                {resetting ? "Starting a new session..." : "Forgot password? Start a new session"}
-              </button>
-            )}
-          </form>
+              <div className="auth-key-backup" role="status">
+                <pre id="auth-npub-reveal" className="auth-key-backup-value mono" aria-label="Your npub">
+                  {keyBackup.npub}
+                </pre>
+                <p className="auth-key-backup-prompt">
+                  Write this npub down now. You will not see it again on this screen.
+                </p>
+                <button
+                  type="button"
+                  className="btn btn-primary auth-submit"
+                  onClick={() => void confirmKeyBackup()}
+                >
+                  Continue
+                </button>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="auth-card-header">
+                <h2 className="auth-card-title">
+                  {mode === "register" ? "Create your Nostr identity" : "Welcome back"}
+                </h2>
+                <p className="auth-card-sub">
+                  {needsOnboarding
+                    ? "Default: generate a fresh Nostr key. Or import an existing nsec. Your public npub identifies this instance."
+                    : "Paste the nsec for this instance to unlock the workspace."}
+                </p>
+              </div>
+
+              <form onSubmit={submit} className="auth-form">
+                <label htmlFor="auth-nsec">
+                  {mode === "register" ? "nsec (import existing)" : "nsec"}
+                </label>
+                <input
+                  id="auth-nsec"
+                  type="password"
+                  required={mode === "login"}
+                  minLength={mode === "login" ? 8 : 0}
+                  value={nsec}
+                  onChange={(e) => setNsec(e.target.value)}
+                  autoComplete="off"
+                  autoFocus={mode === "login"}
+                  placeholder="nsec1…"
+                  spellCheck={false}
+                />
+                {mode === "register" && !storageModeConfigured && (
+                  <div className="auth-storage-section">
+                    <div className="auth-storage-header">
+                      <span className="auth-storage-label">How should we store your data?</span>
+                      <span className="auth-storage-hint muted-text">Choose once — applies to this machine</span>
+                    </div>
+                    <div className="auth-storage-cards" role="radiogroup" aria-label="Storage mode">
+                      {STORAGE_OPTIONS.map((opt) => {
+                        const selected = storageMode === opt.id;
+                        return (
+                          <button
+                            key={opt.id}
+                            type="button"
+                            role="radio"
+                            aria-checked={selected}
+                            className={`auth-storage-card${selected ? " auth-storage-card-selected" : ""}`}
+                            onClick={() => setStorageMode(opt.id)}
+                          >
+                            <div className="auth-storage-card-top">
+                              <span className="auth-storage-card-title">{opt.title}</span>
+                              {opt.badge && <span className="auth-storage-card-badge">{opt.badge}</span>}
+                            </div>
+                            <span className="auth-storage-card-sub">{opt.subtitle}</span>
+                            <p className="auth-storage-card-detail">{opt.detail}</p>
+                            <span className="auth-storage-card-check" aria-hidden>{selected ? "✓" : ""}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+                {error && <p className="auth-error" role="alert">{error}</p>}
+                {mode === "register" ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
+                    <button
+                      type="button"
+                      className="btn btn-primary auth-submit"
+                      disabled={busy}
+                      onClick={() => void generateAndContinue()}
+                    >
+                      {busy ? "Working…" : "Generate npub and continue"}
+                    </button>
+                    <button
+                      type="submit"
+                      className="btn auth-submit"
+                      disabled={busy || !nsec.trim()}
+                    >
+                      Import nsec and continue
+                    </button>
+                  </div>
+                ) : (
+                  <button type="submit" className="btn btn-primary auth-submit" disabled={busy || !nsec.trim()}>
+                    {busy ? "Signing in…" : "Sign in with nsec"}
+                  </button>
+                )}
+                {mode === "login" && (
+                  <button
+                    type="button"
+                    className="auth-reset-link"
+                    onClick={resetForgottenKey}
+                    disabled={resetting}
+                  >
+                    {resetting ? "Starting a new session..." : "Lost your nsec? Start a new session"}
+                  </button>
+                )}
+              </form>
+            </>
+          )}
         </div>
       </div>
     </div>
