@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Annotated
 
 import typer
 
@@ -44,10 +45,7 @@ def provenance_keygen(
 
     data_dir = _data_dir()
     (data_dir / "nostr_keys").mkdir(parents=True, exist_ok=True)
-    if import_nsec:
-        pair = keypair_from_secret(import_nsec)
-    else:
-        pair = generate_keypair()
+    pair = keypair_from_secret(import_nsec) if import_nsec else generate_keypair()
     path = save_keypair(pair, identity=identity, data_dir=data_dir)
     console.print(f"Saved encrypted key → {path}")
     console.print(f"npub: {pair.npub}")
@@ -58,14 +56,15 @@ def provenance_keygen(
 
 @provenance_app.command("attest")
 def provenance_attest(
-    manifest: str = typer.Argument(..., help="Path to local manifest JSON"),
-    relay: list[str] = typer.Option(
-        None, "--relay", "-r", help="Relay URL (repeatable); else SEISO_NOSTR_RELAYS"
-    ),
-    identity: str = typer.Option("cli", help="Key identity slot"),
-    allow_loopback: bool = typer.Option(
-        False, help="Allow ws://127.0.0.1 relays (dev/mock only)"
-    ),
+    manifest: Annotated[str, typer.Argument(help="Path to local manifest JSON")],
+    relay: Annotated[
+        list[str] | None,
+        typer.Option("--relay", "-r", help="Relay URL (repeatable); else SEISO_NOSTR_RELAYS"),
+    ] = None,
+    identity: Annotated[str, typer.Option(help="Key identity slot")] = "cli",
+    allow_loopback: Annotated[
+        bool, typer.Option(help="Allow ws://127.0.0.1 relays (dev/mock only)")
+    ] = False,
 ) -> None:
     """Seal a manifest to allowlisted Nostr relays and write a receipt."""
     os.environ.setdefault("SEISO_ALLOW_NOSTR", "1")
@@ -84,16 +83,22 @@ def provenance_attest(
 
 @provenance_app.command("verify")
 def provenance_verify(
-    manifest: str = typer.Argument(..., help="Path to local manifest JSON"),
-    relay: list[str] = typer.Option(
-        None, "--relay", "-r", help="Relay URL (repeatable); else receipt/env relays"
-    ),
-    allow_loopback: bool = typer.Option(
-        False, help="Allow ws://127.0.0.1 relays (dev/mock only)"
-    ),
-    local_only: bool = typer.Option(
-        False, "--local-only", help="Skip relay fetch; check local receipt digests only"
-    ),
+    manifest: Annotated[str, typer.Argument(help="Path to local manifest JSON")],
+    relay: Annotated[
+        list[str] | None,
+        typer.Option(
+            "--relay", "-r", help="Relay URL (repeatable); else receipt/env relays"
+        ),
+    ] = None,
+    allow_loopback: Annotated[
+        bool, typer.Option(help="Allow ws://127.0.0.1 relays (dev/mock only)")
+    ] = False,
+    local_only: Annotated[
+        bool,
+        typer.Option(
+            "--local-only", help="Skip relay fetch; check local receipt digests only"
+        ),
+    ] = False,
 ) -> None:
     """Recompute digests and verify the Nostr event commitment."""
     if not local_only:

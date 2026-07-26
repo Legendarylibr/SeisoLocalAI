@@ -162,6 +162,6 @@ def verify_schnorr(pubkey_xonly: bytes, message: bytes, signature: bytes) -> boo
     # Negate ep
     ep_neg = (ep[0], _P - ep[1]) if ep[1] != 0 else ep
     r_point = _point_add(sg, ep_neg)
-    if r_point is None or not _has_even_y(r_point) or r_point[0] != r:
-        return False
-    return True
+    return (
+        r_point is not None and _has_even_y(r_point) and r_point[0] == r
+    )

@@ -74,7 +74,7 @@ def _resolve_host(host: str) -> list[str]:
         return [host]
     try:
         infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
-        addrs = list({info[4][0] for info in infos})
+        addrs = list(dict.fromkeys(str(info[4][0]) for info in infos))
         if not addrs:
             raise SecurityError(f"relay host did not resolve: {host}")
         return addrs

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import json
 import logging
 import uuid
@@ -94,10 +95,8 @@ def fetch_event_by_id(
                     if msg[0] == "EVENT" and len(msg) >= 3 and msg[1] == sub_id:
                         event = msg[2]
                         if isinstance(event, dict) and str(event.get("id")) == eid:
-                            try:
+                            with contextlib.suppress(Exception):
                                 ws.send(json.dumps(["CLOSE", sub_id]))
-                            except Exception:
-                                pass
                             return event
                     if msg[0] == "EOSE" and len(msg) >= 2 and msg[1] == sub_id:
                         break
