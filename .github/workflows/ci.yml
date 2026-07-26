@@ -100,7 +100,7 @@ jobs:
             pyproject.toml
             locks/python.lock
       - name: Install lock verification helpers
-        run: python -m pip install --disable-pip-version-check tomli packaging
+        run: uv pip install tomli packaging
       - name: Verify dependency locks
         run: python scripts/verify_dep_locks.py
       - name: Verify Python lock freshness
@@ -126,9 +126,8 @@ jobs:
             locks/python.lock
       - name: Install locked dependencies
         # UV_TORCH_BACKEND=cpu skips CUDA wheels that GitHub runners cannot use.
-        run: |
-          python -m pip install --upgrade pip
-          python scripts/install_locked_deps.py --editable
+        # Use uv pip (venv may not ship the pip module).
+        run: python scripts/install_locked_deps.py --editable
       - name: Run lint
         run: python scripts/run_ci_local.py --job lint --skip-install
 
@@ -155,9 +154,7 @@ jobs:
           restore-keys: |
             mypy-${{ runner.os }}-py310-
       - name: Install locked dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python scripts/install_locked_deps.py --editable
+        run: python scripts/install_locked_deps.py --editable
       - name: Run Mypy
         run: python scripts/run_ci_local.py --job types --skip-install
 
@@ -178,9 +175,7 @@ jobs:
             requirements-dev.txt
             locks/python.lock
       - name: Install locked dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python scripts/install_locked_deps.py --editable
+        run: python scripts/install_locked_deps.py --editable
       - name: Run CPU tests
         run: >
           python scripts/run_ci_local.py
@@ -208,9 +203,7 @@ jobs:
       - name: Install locked dependencies
         # Hashed lock resolve (forge+train+dev), not a fresh PyPI solve.
         # UV_TORCH_BACKEND=cpu skips CUDA wheels that GitHub runners cannot use.
-        run: |
-          python -m pip install --upgrade pip
-          python scripts/install_locked_deps.py --editable
+        run: python scripts/install_locked_deps.py --editable
       - name: Run security checks
         run: python scripts/run_ci_local.py --job security --skip-install
 
@@ -294,9 +287,7 @@ jobs:
             requirements-dev.txt
             locks/python.lock
       - name: Install locked dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python scripts/install_locked_deps.py --editable
+        run: python scripts/install_locked_deps.py --editable
       - name: Run slow tests
         run: python -m pytest tests/ -q -m "slow and not gpu" -n auto --dist worksteal
 
@@ -316,9 +307,7 @@ jobs:
             requirements-dev.txt
             locks/python.lock
       - name: Install locked dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python scripts/install_locked_deps.py --editable
+        run: python scripts/install_locked_deps.py --editable
       - name: Start Forge and run live-check
         env:
           SEISO_DATA_DIR: ${{ runner.temp }}/seiso-live

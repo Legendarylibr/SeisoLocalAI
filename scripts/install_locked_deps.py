@@ -39,22 +39,10 @@ def main() -> int:
     args = parser.parse_args()
 
     # verify_dep_locks needs tomli (Py<3.11) and packaging for pyproject coverage.
-    helpers = subprocess.run(
-        [
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--disable-pip-version-check",
-            "-q",
-            "tomli",
-            "packaging",
-        ],
-        cwd=REPO_ROOT,
-        check=False,
-    )
-    if helpers.returncode != 0:
-        return helpers.returncode
+    # Prefer uv: GitHub Actions uv venvs often have no `pip` module.
+    helpers_rc = _pip_install(["-q", "tomli", "packaging"])
+    if helpers_rc != 0:
+        return helpers_rc
 
     verify = subprocess.run(
         [sys.executable, str(REPO_ROOT / "scripts" / "verify_dep_locks.py")],
