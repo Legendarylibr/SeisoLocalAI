@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { downloadKeyBackupTxt } from "@/lib/keyBackup";
 import { SeisoLogoMark } from "@/components/SeisoLogo";
 import { IconLock } from "@/components/Icons";
 
@@ -145,13 +146,22 @@ export function AuthPage() {
                     {keyBackup.npub}
                   </pre>
                 </div>
-                <button
-                  type="button"
-                  className="btn btn-primary auth-submit"
-                  onClick={() => void confirmKeyBackup()}
-                >
-                  Continue
-                </button>
+                <div className="auth-key-backup-actions">
+                  <button
+                    type="button"
+                    className="btn auth-submit"
+                    onClick={() => downloadKeyBackupTxt(keyBackup)}
+                  >
+                    Download .txt
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary auth-submit"
+                    onClick={() => void confirmKeyBackup()}
+                  >
+                    Continue
+                  </button>
+                </div>
               </div>
             </>
           ) : (

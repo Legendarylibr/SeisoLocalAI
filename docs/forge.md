@@ -125,7 +125,7 @@ Forge uses a single local account per instance (JWT + HttpOnly cookies + CSRF). 
 | Step | What happens |
 |------|----------------|
 | First launch | **Generate key** (default) or import `nsec` |
-| After generate | UI shows the new `nsec1…` once — write it down, then **Continue**. The matching `npub` is shown as public identity. |
+| After generate | UI shows the new `nsec1…` once — write it down or **Download .txt**, then **Continue**. The matching `npub` is shown as public identity. |
 | Later sessions | Paste the instance `nsec` to sign in (the npub alone cannot unlock) |
 | Lost nsec | **Start a new session** clears the local account (downloaded model files remain) |
 

@@ -950,6 +950,16 @@ label {
   opacity: 0.9;
   user-select: all;
 }
+
+.auth-key-backup-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.auth-key-backup-actions .auth-submit {
+  margin-top: 0;
+}
 .auth-reset-link {
   width: 100%;
   margin-top: 0.75rem;
