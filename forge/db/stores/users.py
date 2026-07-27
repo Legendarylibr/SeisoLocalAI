@@ -126,7 +126,7 @@ class UsersMixin:
         pubkey = (nostr_pubkey or "").strip().lower()
         if len(pubkey) != 64:
             raise ValueError("nostr_pubkey must be 64-char hex")
-        async with self._conn() as conn:
+        async with self._conn() as conn:  # type: ignore[attr-defined]
             cur = await conn.execute(
                 "UPDATE users SET nostr_pubkey = ? WHERE id = ?",
                 (pubkey, user_id),
