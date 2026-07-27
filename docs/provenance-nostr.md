@@ -40,39 +40,87 @@ to check the signature and digest match.
 
 ## Training-data membership (private examples)
 
-LoRA / QLoRA / full training can commit a **Merkle root** over the **final
-train-split** row fingerprints (after preprocess, `max_samples`, and
-train/eval split — before tokenization).
+### Why this exists
+
+A signed Nostr attestation proves “this run sealed these digests.” It does
+**not** by itself tell an auditor that *their* held example was in the training
+set. Publishing every row would leak private data.
+
+So training also commits a **Merkle root** over fingerprints of the **final
+train-split** rows. Relays see only the root. Anyone who already holds a
+specific row can build a short path proof and show it was in that committed
+corpus — without putting the row text on Nostr.
+
+### Plain picture
+
+1. Train finishes preprocess / `max_samples` / train–eval split (before tokenize).
+2. Seiso fingerprints each train row (canonical JSON → SHA-256), sorts unique
+   fingerprints, and builds a Merkle tree (domain-separated leaves/nodes).
+3. Local `dataset_merkle.json` keeps the fingerprint list (mode `0600`).
+4. `seiso_manifest.json` records `dataset_merkle_root`, leaf count, and alg.
+5. Nostr attestation **v2** seals those merkle fields with the other digests.
+6. Later: hold a row → `dataset-prove` → share `proof.json` →
+   `dataset-verify-proof` checks the path and (optionally) the sealed root.
 
 | On relays | Kept local |
 |-----------|------------|
-| `dataset_merkle_root`, leaf count, alg | `dataset_merkle.json` (sorted fingerprints + tree inputs) |
+| `dataset_merkle_root`, leaf count, alg | `dataset_merkle.json` (sorted fingerprints) |
 | Run metadata in the attestation | Row text / labels; membership proof files |
 
-Anyone who **holds a specific row** can prove it was in that committed corpus
-without publishing the row:
+### What it is / is not
+
+| Proves | Does **not** prove |
+|--------|--------------------|
+| A held row’s fingerprint was a leaf under the sealed root for that `run_id` | The sample appeared in a particular optimizer step (no ZKML / step logs) |
+| Attestation signature + digest match (when verifying via Nostr) | Model weights, gradients, or “fair” training |
+
+Corpus membership ≠ gradient provenance.
+
+### End-to-end CLI
 
 ```bash
-seiso provenance dataset-prove path/to/seiso_manifest.json --row row.json -o proof.json
-seiso provenance dataset-verify-proof proof.json --manifest path/to/seiso_manifest.json
-# or: --event-id <hex> --relay wss://nos.lol
+# After a train that wrote seiso_manifest.json + dataset_merkle.json:
+seiso provenance attest path/to/seiso_manifest.json
+
+# Auditor (or you) holds a candidate row as JSON object matching train columns:
+seiso provenance dataset-prove path/to/seiso_manifest.json \
+  --row row.json -o proof.json
+
+# Check merkle path + that root matches the Nostr attestation on the manifest:
+seiso provenance dataset-verify-proof proof.json \
+  --manifest path/to/seiso_manifest.json
+
+# Or fetch a known event id from relays:
+seiso provenance dataset-verify-proof proof.json \
+  --event-id <hex> --relay wss://nos.lol
+
+# Offline: only recompute path vs root embedded in the proof
 seiso provenance dataset-verify-proof proof.json --local-only
 ```
 
-**This is corpus membership, not gradient provenance.** It does not prove the
-sample appeared in a particular optimizer step (ZKML / step logs are out of scope).
+`dataset-prove` needs the local sidecar next to the manifest
+(`dataset_merkle.json`). Share proofs out-of-band; do not publish the sidecar.
 
-**Privacy notes**
+### Config and skip rules
+
+| Control | Effect |
+|---------|--------|
+| `dataset_merkle: true` (default) in train YAML | Commit merkle for the run |
+| `dataset_merkle: false` | Skip commit |
+| `SEISO_DATASET_MERKLE=0` | Env override off (also `1`/`true` to force on) |
+| `SEISO_DATASET_MERKLE_MAX_ROWS` (default `250000`) | Above this, set `dataset_merkle_skipped` on the manifest; train still succeeds |
+
+Fingerprint timing: **after** preprocess, dedupe, `max_samples`, and the
+train/eval split; **before** tokenization. Eval-only rows are not in the tree.
+
+### Privacy notes
 
 - Relays never receive row bodies or the fingerprint list.
 - Fingerprints are SHA-256 of canonical JSON; an attacker who already has a
   candidate row from a public corpus can test membership (dictionary attack).
   For confidential corpora, treat `dataset_merkle.json` like other local secrets
-  (mode `0600`) and share proofs out-of-band only with auditors.
-- Disable or skip: `dataset_merkle: false` in the train YAML, or
-  `SEISO_DATASET_MERKLE=0`. Large trains above
-  `SEISO_DATASET_MERKLE_MAX_ROWS` (default 250000) set
-  `dataset_merkle_skipped` on the manifest instead of failing the run.
+  and share proofs only with intended auditors.
+- Event content remains digests only — no dataset paths with secrets, no weights.
 
 ## CLI (default path)
 

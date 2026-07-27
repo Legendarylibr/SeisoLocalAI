@@ -33,6 +33,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Teacher distill + DPO alignment | [cli.md § seiso distill-rl](cli.md#seiso-distill-rl) · [compression.md](compression.md) |
 | Quant regression study (train → export → eval) | [cli.md § seiso experiment](cli.md#seiso-experiment) |
 | Attest run digests to Nostr | [provenance-nostr.md](provenance-nostr.md) · `seiso provenance` |
+| Prove a training row was in a sealed corpus | [provenance-nostr.md § Membership](provenance-nostr.md#training-data-membership-private-examples) · `dataset-prove` |
 | Build a local RAG corpus | [forge.md](forge.md) · `/knowledge` |
 | Enable fused GPU kernels | [training/kernels.md](training/kernels.md) |
 | Read kernel shape / intensity estimates | [training/kernel-shape.md](training/kernel-shape.md) · `seiso-bench-kernels --roofline-only` |

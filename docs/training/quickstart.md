@@ -553,9 +553,17 @@ Checkpoints land in `output_dir/checkpoint-<timestamp>/` with:
 
 - LoRA adapter weights (`adapter_model.safetensors`) or full weights for `method: full`
 - `seiso_manifest.json` — kernel metadata, quant settings, training config snapshot
+- `dataset_merkle.json` — local fingerprint list for corpus membership proofs (default on; mode `0600`)
 - `dataset_analysis.json` — corpus analysis used for the run (when preprocessing ran)
 - `train_config_snapshot.json` — resolved `TrainConfig` at job start
 - Tokenizer files
+
+Training seals a Merkle root over the final train-split row fingerprints
+(`dataset_merkle_root` on the manifest; digests-only Nostr attestation v2). That
+proves a held example was in the committed corpus without publishing row text —
+not that it appeared in a particular optimizer step. See
+[provenance-nostr.md § Training-data membership](../provenance-nostr.md#training-data-membership-private-examples)
+(`dataset_merkle: false` or `SEISO_DATASET_MERKLE=0` to skip).
 
 For `method: slime`, the final checkpoint lands in `output_dir` by default, or `output_dir/final_checkpoint_dir` when configured. Slime also writes:
 

@@ -290,6 +290,12 @@ Nostr attestation of local run-manifest digests (not weights). Requires
 `pip install 'seiso[nostr]'`. Outbound is on by default (`SEISO_ALLOW_NOSTR=0` to
 disable); relays default to public digests-only endpoints.
 
+Training runs (default) also write `dataset_merkle.json` and seal
+`dataset_merkle_root` in attestation **v2**. Use `dataset-prove` /
+`dataset-verify-proof` so a holder of a row can prove corpus membership without
+publishing the row — see
+[provenance-nostr.md § Membership](provenance-nostr.md#training-data-membership-private-examples).
+
 ```bash
 seiso provenance keygen
 seiso provenance attest path/to/manifest.json --relay wss://relay.example.com
@@ -300,8 +306,8 @@ seiso provenance dataset-verify-proof proof.json --manifest path/to/seiso_manife
 ```
 
 See [provenance-nostr.md](provenance-nostr.md) for Forge UI settings, auto-attest
-(`SEISO_NOSTR_ATTEST=1`), training-data merkle membership proofs, and how this
-relates to `seiso compress manifest-verify`.
+(`SEISO_NOSTR_ATTEST=1`), privacy limits / non-goals, and how this relates to
+`seiso compress manifest-verify`.
 
 ## External Smart Router
 
