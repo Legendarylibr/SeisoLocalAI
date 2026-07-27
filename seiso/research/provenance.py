@@ -148,6 +148,7 @@ def directory_checksum_manifest(
 
 
 ATTESTATION_SCHEMA_V1 = "seiso.provenance.attestation/v1"
+ATTESTATION_SCHEMA_V2 = "seiso.provenance.attestation/v2"
 
 
 def strip_nostr_receipt(manifest: dict[str, Any]) -> dict[str, Any]:
@@ -228,13 +229,21 @@ def build_attestation_v1(
     manifest_path: Path | None = None,
     seiso_version: str | None = None,
 ) -> dict[str, Any]:
-    """Build a digests-only Nostr attestation payload from a local manifest."""
+    """Build a digests-only Nostr attestation payload from a local manifest.
+
+    When the manifest includes dataset merkle fields, the schema is
+    ``seiso.provenance.attestation/v2`` and those digests are sealed too.
+    """
     from seiso import __version__ as pkg_version
 
     pipeline, run_id = infer_pipeline_and_run_id(manifest, manifest_path=manifest_path)
     body = strip_nostr_receipt(manifest)
+    merkle_root = str(manifest.get("dataset_merkle_root") or "").strip() or None
+    merkle_count = manifest.get("dataset_merkle_leaf_count")
+    merkle_alg = str(manifest.get("dataset_merkle_alg") or "").strip() or None
+    schema = ATTESTATION_SCHEMA_V2 if merkle_root else ATTESTATION_SCHEMA_V1
     attestation: dict[str, Any] = {
-        "schema": ATTESTATION_SCHEMA_V1,
+        "schema": schema,
         "pipeline": pipeline,
         "run_id": run_id,
         "manifest_sha256": content_fingerprint(body),
@@ -243,6 +252,11 @@ def build_attestation_v1(
             or None
         ),
         "chain_or_root_sha256": _chain_or_root_sha256(manifest),
+        "dataset_merkle_root": merkle_root,
+        "dataset_merkle_leaf_count": (
+            int(merkle_count) if merkle_root and merkle_count is not None else None
+        ),
+        "dataset_merkle_alg": merkle_alg if merkle_root else None,
         "git_commit": manifest.get("git_commit"),
         "created_at": manifest.get("created_at")
         or manifest.get("exported_at")
@@ -251,6 +265,10 @@ def build_attestation_v1(
     }
     # Drop nulls for stable compact content.
     return {k: v for k, v in attestation.items() if v is not None and v != ""}
+
+
+# Alias used by attest / CLI; v1 builder already emits v2 when merkle is present.
+build_attestation = build_attestation_v1
 
 
 def attestation_content_json(attestation: dict[str, Any]) -> str:

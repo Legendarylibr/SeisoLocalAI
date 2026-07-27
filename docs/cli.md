@@ -295,10 +295,13 @@ seiso provenance keygen
 seiso provenance attest path/to/manifest.json --relay wss://relay.example.com
 seiso provenance verify path/to/manifest.json
 seiso provenance show path/to/manifest.json
+seiso provenance dataset-prove path/to/seiso_manifest.json --row row.json -o proof.json
+seiso provenance dataset-verify-proof proof.json --manifest path/to/seiso_manifest.json
 ```
 
 See [provenance-nostr.md](provenance-nostr.md) for Forge UI settings, auto-attest
-(`SEISO_NOSTR_ATTEST=1`), and how this relates to `seiso compress manifest-verify`.
+(`SEISO_NOSTR_ATTEST=1`), training-data merkle membership proofs, and how this
+relates to `seiso compress manifest-verify`.
 
 ## External Smart Router
 

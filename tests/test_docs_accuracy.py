@@ -157,8 +157,11 @@ def test_cli_docs_cover_provenance_nostr():
     """Nostr provenance CLI must be documented and registered."""
     cli_doc = _read("docs/cli.md")
     assert "seiso provenance" in cli_doc
+    assert "dataset-prove" in cli_doc
     assert (REPO_ROOT / "docs/provenance-nostr.md").is_file()
-    assert "seiso provenance" in _read("docs/provenance-nostr.md")
+    prov = _read("docs/provenance-nostr.md")
+    assert "seiso provenance" in prov
+    assert "dataset_merkle_root" in prov
     from seiso_cli.main import app
 
     group_names = {g.name for g in app.registered_groups}

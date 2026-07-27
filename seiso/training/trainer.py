@@ -78,6 +78,9 @@ class PreparedTrainingDatasets:
     dataset_text_field: str | None
     preprocess_stats: dict[str, Any] | None
     use_packing: bool = False
+    #: Sorted content fingerprints of the final train split (pre-tokenize), if collected.
+    train_fingerprints: list[str] | None = None
+    dataset_merkle_skipped: str | None = None
 
 
 class SeisoTrainer:
@@ -310,6 +313,8 @@ class SeisoTrainer:
                 preprocess_stats=prepared.preprocess_stats,
                 train_samples=len(prepared.train_ds),
                 eval_samples=len(prepared.eval_ds) if prepared.eval_ds is not None else 0,
+                train_fingerprints=prepared.train_fingerprints,
+                dataset_merkle_skipped=prepared.dataset_merkle_skipped,
             )
             logger.info("Training complete: %s", out)
             return out
@@ -382,6 +387,7 @@ class SeisoTrainer:
 
         raw_ds = self._limit_training_samples(raw_ds)
         train_ds, eval_ds = self._split_train_eval(raw_ds)
+        train_fingerprints, merkle_skip = self._collect_train_fingerprints(train_ds)
         detected_fmt, train_ds, eval_ds, dataset_text_field, data_collator, use_packing = (
             self._format_or_tokenize_datasets(train_ds, eval_ds, tokenizer, ds_fmt)
         )
@@ -394,7 +400,46 @@ class SeisoTrainer:
             dataset_text_field=dataset_text_field,
             preprocess_stats=preprocess_stats,
             use_packing=use_packing,
+            train_fingerprints=train_fingerprints,
+            dataset_merkle_skipped=merkle_skip,
         )
+
+    def _dataset_merkle_wanted(self) -> bool:
+        from seiso.research.dataset_merkle import dataset_merkle_enabled_by_env
+
+        env = dataset_merkle_enabled_by_env()
+        if env is not None:
+            return env
+        return bool(getattr(self.config, "dataset_merkle", True))
+
+    def _collect_train_fingerprints(
+        self, train_ds: Any
+    ) -> tuple[list[str] | None, str | None]:
+        """Fingerprint final train rows before tokenization (for merkle commit)."""
+        if not self._dataset_merkle_wanted():
+            return None, "disabled"
+        from seiso.research.dataset_merkle import (
+            collect_fingerprints_from_hf_dataset,
+            dataset_merkle_max_rows,
+        )
+
+        max_rows = dataset_merkle_max_rows()
+        try:
+            n = len(train_ds)
+        except TypeError:
+            return None, "dataset_not_sized"
+        if n <= 0:
+            return None, "empty_train_split"
+        if n > max_rows:
+            msg = f"train_rows={n} exceeds cap={max_rows}"
+            self._log(f"dataset merkle skipped: {msg}")
+            return None, msg
+        try:
+            fps = collect_fingerprints_from_hf_dataset(train_ds, max_rows=max_rows)
+        except Exception as exc:
+            self._log(f"dataset merkle fingerprint failed: {exc}")
+            return None, f"fingerprint_error:{type(exc).__name__}"
+        return fps, None
 
     def _limit_training_samples(self, raw_ds):
         max_samples = self.config.extra.get("max_samples")
@@ -1076,6 +1121,8 @@ class SeisoTrainer:
         preprocess_stats: dict[str, Any] | None = None,
         train_samples: int = 0,
         eval_samples: int = 0,
+        train_fingerprints: list[str] | None = None,
+        dataset_merkle_skipped: str | None = None,
     ) -> None:
         cfg = self.config
         base_path = self._resolve_load_model_id()
@@ -1089,6 +1136,31 @@ class SeisoTrainer:
 
         from seiso.research.provenance import manifest_common_fields
 
+        run_id = out.name
+        merkle_fields: dict[str, Any] = {}
+        if train_fingerprints:
+            from seiso.research.dataset_merkle import (
+                build_dataset_merkle,
+                write_dataset_merkle_sidecar,
+            )
+
+            try:
+                commit = build_dataset_merkle(train_fingerprints, run_id=run_id)
+                write_dataset_merkle_sidecar(out / "dataset_merkle.json", commit)
+                merkle_fields = {
+                    "dataset_merkle_root": commit.root,
+                    "dataset_merkle_leaf_count": commit.leaf_count,
+                    "dataset_merkle_alg": commit.alg,
+                    "dataset_merkle_sidecar": "dataset_merkle.json",
+                }
+            except Exception as exc:
+                logger.warning("dataset merkle commit failed: %s", exc)
+                merkle_fields = {
+                    "dataset_merkle_skipped": f"commit_error:{type(exc).__name__}"
+                }
+        elif dataset_merkle_skipped:
+            merkle_fields = {"dataset_merkle_skipped": dataset_merkle_skipped}
+
         manifest = {
             **manifest_common_fields(
                 config_snapshot={
@@ -1099,6 +1171,7 @@ class SeisoTrainer:
                     "seed": cfg.seed,
                 }
             ),
+            "run_id": run_id,
             "model_id": original_id,
             "original_model_id": original_id,
             "base_model_path": base_path,
@@ -1159,6 +1232,7 @@ class SeisoTrainer:
             "cloud_gpu_credential_id": cfg.cloud_gpu_credential_id,
             "world_size": layout.world_size,
             "kernels": self._kernel_meta,
+            **merkle_fields,
         }
         manifest_path = out / "seiso_manifest.json"
         write_json(manifest_path, manifest)
