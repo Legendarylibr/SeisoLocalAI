@@ -1,10 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router";
-import { api, CatalogModel, HardwareSummary, LocalModel, VramStatus } from "@/lib/api";
+import { api, CatalogModel, HardwareSummary, LocalModel } from "@/lib/api";
 import { usePlatformSettings } from "@/context/PlatformSettingsContext";
 import { chatPath, chatPathForLocalModel, modelMemoryBlocked, modelMemoryBlockReason } from "@/lib/chatModel";
-import { formatLoadedModelLabel, hasLoadedInferenceMemory, hubRamTierHint } from "@/lib/hubHardware";
+import {
+  formatHeadroomGb,
+  formatLoadedModelLabel,
+  hasLoadedInferenceMemory,
+  hubRamTierHint,
+} from "@/lib/hubHardware";
 import { trainPath } from "@/lib/hubDownload";
+import { useLiveVramStatus } from "@/lib/useLiveVramStatus";
 import { HardwareFitBadge } from "@/components/HardwareFitBadge";
 import { ModelCardSkeleton } from "@/components/ModelCardSkeleton";
 import { PageHeader } from "@/components/PageHeader";
@@ -69,7 +75,7 @@ export function HubPage() {
   const [task, setTask] = useState("");
   const [fitsOnly, setFitsOnly] = useState(false);
   const [hwSummary, setHwSummary] = useState<HardwareSummary | null>(null);
-  const [vramStatus, setVramStatus] = useState<VramStatus | null>(null);
+  const { vramStatus, setVramStatus } = useLiveVramStatus(true);
   const [freeingMemory, setFreeingMemory] = useState(false);
   const [downloading, setDownloading] = useState<string | null>(null);
   const [downloadAction, setDownloadAction] = useState<"chat" | "train" | null>(null);
@@ -80,9 +86,6 @@ export function HubPage() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [catalogSearchError, setCatalogSearchError] = useState<string | null>(null);
   const PAGE_SIZE = 50;
-
-  const refreshVram = () =>
-    api.vramStatus().then(setVramStatus).catch(console.error);
 
   const refreshLocal = () => api.listModels().then(setLocal).catch(console.error);
 
@@ -148,12 +151,34 @@ export function HubPage() {
 
   useEffect(() => {
     refreshLocal();
-    refreshVram();
     return () => {
       setDownloading(null);
       setDownloadAction(null);
     };
   }, []);
+
+  // Keep strip + fit checks on the same live headroom (backend math unchanged).
+  useEffect(() => {
+    if (!vramStatus) return;
+    setHwSummary((prev) => {
+      if (!prev) return prev;
+      if (
+        prev.vram_headroom_mb === vramStatus.headroom_mb &&
+        prev.memory_headroom_label === vramStatus.memory_label &&
+        (vramStatus.ram_gb == null || prev.ram_gb === vramStatus.ram_gb)
+      ) {
+        return prev;
+      }
+      return {
+        ...prev,
+        vram_headroom_mb: vramStatus.headroom_mb,
+        memory_headroom_label: vramStatus.memory_label,
+        ...(vramStatus.ram_gb != null && vramStatus.ram_gb > 0
+          ? { ram_gb: vramStatus.ram_gb }
+          : {}),
+      };
+    });
+  }, [vramStatus]);
 
   useEffect(() => {
     const t = setTimeout(refreshCatalog, 180);
@@ -214,7 +239,7 @@ export function HubPage() {
               {hwSummary.ram_gb != null && hwSummary.ram_gb > 0
                 ? `${Math.round(hwSummary.ram_gb)} GB · `
                 : null}
-              ~{Math.round((vramStatus?.headroom_mb ?? hwSummary.vram_headroom_mb) / 1024)} GB{" "}
+              ~{formatHeadroomGb(vramStatus?.headroom_mb ?? hwSummary.vram_headroom_mb)} GB{" "}
               {vramStatus?.memory_label || hwSummary.memory_headroom_label || "memory"} free
               {" · "}
               loaded: {formatLoadedModelLabel(vramStatus)}

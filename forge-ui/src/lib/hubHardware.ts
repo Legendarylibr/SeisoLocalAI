@@ -1,5 +1,11 @@
 import type { HardwareSummary, VramStatus } from "@/lib/api";
 
+/** Format live headroom for the Hub strip (1 decimal so Apple RAM ticks are visible). */
+export function formatHeadroomGb(headroomMb: number | null | undefined): string {
+  if (headroomMb == null || !Number.isFinite(headroomMb)) return "—";
+  return (headroomMb / 1024).toFixed(1);
+}
+
 /** RAM-tier hint for Hub hardware strip (Mac + generic tiers). */
 export function hubRamTierHint(hw: HardwareSummary | null, vram: VramStatus | null): string | null {
   if (!hw) return null;
