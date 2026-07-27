@@ -72,12 +72,20 @@ class KernelPatchSession:
         if self._restored:
             return 0
         restored = 0
-        for module in reversed(self._modules):
-            if hasattr(module, "_seiso_orig_forward"):
-                module.forward = module._seiso_orig_forward  # type: ignore[method-assign]
-                restored += 1
-            _clear_patch_markers(module)
-            _unregister_module(module)
+        # LIFO restore; on failure keep remaining modules for retry (same contract
+        # as ``_restore_registry_key``).
+        pending = list(reversed(self._modules))
+        for idx, module in enumerate(pending):
+            try:
+                if hasattr(module, "_seiso_orig_forward"):
+                    module.forward = module._seiso_orig_forward  # type: ignore[method-assign]
+                    restored += 1
+                _clear_patch_markers(module)
+                _unregister_module(module)
+            except Exception:
+                # ``pending`` is LIFO; convert remaining back to registration order.
+                self._modules = list(reversed(pending[idx:]))
+                raise
         self._modules.clear()
         self._restored = True
         return restored

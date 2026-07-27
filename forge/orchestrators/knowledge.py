@@ -86,6 +86,8 @@ class KnowledgeOrchestrator(Orchestrator):
                         rec = json.loads(line)
                     except json.JSONDecodeError:
                         continue
+                    if not isinstance(rec, dict):
+                        continue
                     if (
                         rec.get("source_sha256") == source_hash
                         or rec.get("source_path") == str(source)
@@ -93,22 +95,28 @@ class KnowledgeOrchestrator(Orchestrator):
                     ):
                         continue
                     kept.append(rec)
-        with index_path.open("w", encoding="utf-8") as f:
-            for rec in kept:
-                f.write(json.dumps(rec) + "\n")
-            for i, chunk in enumerate(chunks):
-                record = {
-                    "id": hashlib.sha256(
-                        f"{kb_id}:{source_hash}:{i}:{chunk[:32]}".encode()
-                    ).hexdigest()[:16],
-                    "text": chunk,
-                    "source": str(source.name),
-                    "source_path": str(source),
-                    "source_sha256": source_hash,
-                    "chunk_index": i,
-                    "instruction_flagged": False,
-                }
-                f.write(json.dumps(record) + "\n")
+        # Atomic rewrite — a crash mid-write must not truncate the live index.
+        tmp_path = kb_dir / f".index-{job_id}.tmp"
+        try:
+            with tmp_path.open("w", encoding="utf-8") as f:
+                for rec in kept:
+                    f.write(json.dumps(rec) + "\n")
+                for i, chunk in enumerate(chunks):
+                    record = {
+                        "id": hashlib.sha256(
+                            f"{kb_id}:{source_hash}:{i}:{chunk[:32]}".encode()
+                        ).hexdigest()[:16],
+                        "text": chunk,
+                        "source": str(source.name),
+                        "source_path": str(source),
+                        "source_sha256": source_hash,
+                        "chunk_index": i,
+                        "instruction_flagged": False,
+                    }
+                    f.write(json.dumps(record) + "\n")
+            tmp_path.replace(index_path)
+        finally:
+            tmp_path.unlink(missing_ok=True)
 
         return {"chunk_count": len(chunks), "index_path": str(index_path)}
 

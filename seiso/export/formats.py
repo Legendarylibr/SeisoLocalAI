@@ -304,7 +304,7 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
 
         maybe_auto_attest(sidecar)
     except Exception:
-        pass
+        logger.exception("Nostr auto-attest failed for %s", sidecar)
 
 
 def _select_hub_folder(out_root: Path, formats: list[ExportFormat]) -> Path:

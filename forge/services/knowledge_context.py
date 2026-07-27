@@ -117,7 +117,13 @@ def _load_index_chunks(
             line = line.strip()
             if not line:
                 continue
-            chunk = json.loads(line)
+            try:
+                chunk = json.loads(line)
+            except json.JSONDecodeError:
+                # One corrupt row must not take down retrieve / chat injection.
+                continue
+            if not isinstance(chunk, dict):
+                continue
             text = str(chunk.get("text", ""))
             if chunk.get("instruction_flagged") or is_instruction_like(text):
                 continue
@@ -143,27 +149,24 @@ def count_knowledge_chunks(
     user_id: str,
     knowledge_base_id: str,
 ) -> int:
-    """Return chunk count without a full keyword scan (uses index cache when warm)."""
-    chunks, _ = _load_index_chunks(
-        data_dir, user_id=user_id, knowledge_base_id=knowledge_base_id
-    )
-    if chunks:
-        return len(chunks)
+    """Return usable chunk count (instruction-like / corrupt rows excluded)."""
     from forge.services.user_paths import assert_user_path
 
     kb_dir = safe_join(data_dir, "knowledge", user_id, knowledge_base_id)
     index_path = kb_dir / "index.jsonl"
     if not index_path.exists() and not index_path.is_symlink():
         return 0
-    index_path = assert_user_path(data_dir, user_id, index_path)
+    try:
+        index_path = assert_user_path(data_dir, user_id, index_path)
+    except Exception:
+        return 0
     if not index_path.is_file():
         return 0
-    count = 0
-    with index_path.open(encoding="utf-8") as handle:
-        for line in handle:
-            if line.strip():
-                count += 1
-    return count
+    # Prefer the filtered loader so quarantined / corrupt rows are not counted.
+    chunks, _ = _load_index_chunks(
+        data_dir, user_id=user_id, knowledge_base_id=knowledge_base_id
+    )
+    return len(chunks)
 
 
 def retrieve_knowledge_chunks(

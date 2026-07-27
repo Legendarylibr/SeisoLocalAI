@@ -483,11 +483,17 @@ async def download_export_output(
     if not job or job.get("status") != "completed":
         raise HTTPException(404, "Export job not found or not completed")
 
+    key = (key or "").strip()
+    if not key:
+        raise HTTPException(400, "Output key is required")
     outputs = loads_json_field(job.get("output_paths_json") or "{}", {})
     target_raw = outputs.get(key)
     if not target_raw:
+        # Case-insensitive exact match only — never substring (avoids key="" / "a"
+        # resolving to an unintended artifact).
+        lowered = key.lower()
         for k, v in outputs.items():
-            if key.lower() in k.lower():
+            if str(k).lower() == lowered:
                 target_raw = v
                 break
     if not target_raw:
