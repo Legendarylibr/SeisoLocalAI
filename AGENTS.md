@@ -70,6 +70,11 @@ python3 scripts/run_ci_local.py --job lint --skip-install
 python3 scripts/run_ci_local.py --job test --skip-install -k "not slow"
 ```
 
+**Buzz agents:** orchestrate Seiso from a [Buzz](https://github.com/block/buzz) room with
+[`.agents/skills/seiso-orchestrate/SKILL.md`](.agents/skills/seiso-orchestrate/SKILL.md)
+(`buzz-cli` for channel receipts + `seiso` / Forge for local jobs). Copy that skill into a
+Buzz checkout under `.agents/skills/` (or `.goose/skills/`) when needed.
+
 See also `docs/troubleshooting.md`, `docs/install.md`, and `docs/forge.md` (for dev mode with hot reload).
 
 ## Repository layout (abbrev.)
