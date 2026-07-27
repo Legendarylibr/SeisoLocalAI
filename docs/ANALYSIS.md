@@ -190,7 +190,7 @@ All three changes are **correct and minimal**:
 ## Security & Privacy Notes
 
 - **Default posture**: Bind localhost, encrypted sensitive DB columns (chat content, provider configs, tokens), per-user isolation.
-- Auth: Local JWT + first-run Nostr onboarding (generate npub by default → write-down screen → Continue; or import nsec; later login with nsec).
+- Auth: Local JWT + first-run Nostr onboarding (generate key by default → write down nsec once → Continue, with npub as public identity; or import nsec; later login with nsec).
 - CSRF + rate limiting middleware (configurable).
 - Path sandbox + `assert_within` / shared `USER_SCOPED_DATA_ROOTS` for artifact paths.
 - HF tokens: stored encrypted; CLI `hf` also visible.

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import contextlib
+import hashlib
 import json
 import os
 import warnings
@@ -185,7 +186,10 @@ def infer_pipeline_and_run_id(
         or ""
     )
     if not run_id and manifest_path is not None:
-        run_id = manifest_path.parent.name
+        # Hash directory names so attestation d-tags do not leak project path labels.
+        run_id = hashlib.sha256(
+            manifest_path.parent.name.encode("utf-8")
+        ).hexdigest()[:16]
     if not run_id:
         run_id = manifest_sha256_excluding_nostr(manifest)[:16]
     # Keep tag-safe (no whitespace).

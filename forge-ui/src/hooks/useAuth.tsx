@@ -1,9 +1,12 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import { api, AuthUser, clearLegacyToken } from "@/lib/api";
+import {
+  type KeyBackup,
+  persistKeyBackup,
+  readStoredKeyBackup,
+} from "@/lib/keyBackup";
 
-export type KeyBackup = {
-  npub: string;
-};
+export type { KeyBackup };
 
 type AuthState = {
   user: AuthUser | null;
@@ -11,7 +14,7 @@ type AuthState = {
   needsOnboarding: boolean;
   storageModeConfigured: boolean;
   storageMode: "persistent" | "ephemeral";
-  /** Fresh keygen — block the app until the user confirms they wrote the npub down. */
+  /** Fresh keygen — block the app until the user confirms they wrote the nsec down. */
   keyBackup: KeyBackup | null;
   login: (nsec: string) => Promise<void>;
   register: (
@@ -22,31 +25,6 @@ type AuthState = {
   resetSession: () => Promise<void>;
   logout: () => Promise<void>;
 };
-
-const KEY_BACKUP_STORAGE = "seiso_key_backup";
-
-function readStoredKeyBackup(): KeyBackup | null {
-  try {
-    const raw = sessionStorage.getItem(KEY_BACKUP_STORAGE);
-    if (!raw) return null;
-    const parsed = JSON.parse(raw) as KeyBackup;
-    return parsed?.npub ? { npub: parsed.npub } : null;
-  } catch {
-    return null;
-  }
-}
-
-function persistKeyBackup(backup: KeyBackup | null) {
-  try {
-    if (backup?.npub) {
-      sessionStorage.setItem(KEY_BACKUP_STORAGE, JSON.stringify(backup));
-    } else {
-      sessionStorage.removeItem(KEY_BACKUP_STORAGE);
-    }
-  } catch {
-    /* ignore quota / private mode */
-  }
-}
 
 const AuthContext = createContext<AuthState | null>(null);
 
@@ -73,8 +51,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setStorageModeConfigured(status.storage_mode_configured);
         setStorageMode(status.storage_mode);
         const pendingBackup = readStoredKeyBackup();
-        // Stay on the npub write-down screen across refresh until Continue.
-        if (pendingBackup?.npub) {
+        // Stay on the nsec write-down screen across refresh until Continue.
+        if (pendingBackup?.nsec && pendingBackup?.npub) {
           setKeyBackupState(pendingBackup);
           setUser(null);
           return;
@@ -116,10 +94,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setStorageModeConfigured(true);
       if (nextStorageMode) setStorageMode(nextStorageMode);
       const npub = res.user.npub || null;
-      // Generated keys: hold the session until the user writes down their npub.
+      // Generated keys: hold the session until the user writes down their nsec.
       if (res.nsec && npub) {
         setPendingUser(res.user);
-        setKeyBackup({ npub });
+        setKeyBackup({ nsec: res.nsec, npub });
         return { nsec: res.nsec, npub };
       }
       setUser(res.user);

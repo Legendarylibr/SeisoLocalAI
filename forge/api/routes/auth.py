@@ -157,7 +157,10 @@ async def register(
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
 
     persist_user_signing_key(
-        data_dir=settings.data_dir, user_id=user["id"], pair=identity.pair
+        data_dir=settings.data_dir,
+        user_id=user["id"],
+        pair=identity.pair,
+        persist=not settings.db_ephemeral,
     )
     token = create_access_token(user["id"], settings)
     _set_session_cookies(response, token, settings)
@@ -197,7 +200,10 @@ async def login(
 
     # Refresh encrypted signing key (same nsec) for provenance attest.
     persist_user_signing_key(
-        data_dir=settings.data_dir, user_id=user["id"], pair=identity.pair
+        data_dir=settings.data_dir,
+        user_id=user["id"],
+        pair=identity.pair,
+        persist=not settings.db_ephemeral,
     )
     token = create_access_token(user["id"], settings)
     _set_session_cookies(response, token, settings)
@@ -230,6 +236,9 @@ async def reset_session(
         )
 
     counts = await db.reset_local_session()
+    from forge.services.nostr_settings import wipe_nostr_identity_material
+
+    nostr_wipe = wipe_nostr_identity_material(settings.data_dir)
     sessions_rotated = False
     if "SEISO_SECRET_KEY" not in os.environ:
         key_file = settings.data_dir / ".secret_key"
@@ -240,7 +249,12 @@ async def reset_session(
 
     response.delete_cookie("seiso_token")
     clear_csrf_cookie(response)
-    audit_event("auth_reset_session", rows_deleted=sum(counts.values()))
+    audit_event(
+        "auth_reset_session",
+        rows_deleted=sum(counts.values()),
+        nostr_keys_removed=nostr_wipe.get("removed_files"),
+        nostr_encryption_key_rotated=nostr_wipe.get("encryption_key_rotated"),
+    )
     await close_dependency_caches()
     clear_dependency_caches()
     return {
@@ -248,6 +262,7 @@ async def reset_session(
         "needs_onboarding": True,
         "sessions_rotated": sessions_rotated,
         "rows_deleted": sum(counts.values()),
+        "nostr_identity_wiped": True,
     }
 
 

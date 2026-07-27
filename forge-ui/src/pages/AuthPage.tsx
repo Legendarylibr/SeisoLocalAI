@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
+import { downloadKeyBackupTxt } from "@/lib/keyBackup";
 import { SeisoLogoMark } from "@/components/SeisoLogo";
 import { IconLock } from "@/components/Icons";
 
@@ -109,7 +110,7 @@ export function AuthPage() {
           <ul className="auth-feature-list">
             <li>
               <IconLock size={15} />
-              <span>Nostr npub identity (nsec never leaves encrypted storage)</span>
+              <span>Nostr npub identity (nsec shown once on keygen, then encrypted at rest)</span>
             </li>
             <li>
               <IconLock size={15} />
@@ -126,26 +127,41 @@ export function AuthPage() {
           {keyBackup ? (
             <>
               <div className="auth-card-header">
-                <h2 className="auth-card-title">Write down your npub</h2>
+                <h2 className="auth-card-title">Write down your nsec</h2>
                 <p className="auth-card-sub">
-                  This is the public key that was just generated for this Seiso instance.
-                  Write it down and keep it somewhere safe, then continue.
+                  This private key unlocks this Seiso instance. You will need it to sign in again.
+                  Keep it secret and offline — anyone with it can control this workspace.
                 </p>
               </div>
               <div className="auth-key-backup" role="status">
-                <pre id="auth-npub-reveal" className="auth-key-backup-value mono" aria-label="Your npub">
-                  {keyBackup.npub}
+                <pre id="auth-nsec-reveal" className="auth-key-backup-value mono" aria-label="Your nsec">
+                  {keyBackup.nsec}
                 </pre>
                 <p className="auth-key-backup-prompt">
-                  Write this npub down now. You will not see it again on this screen.
+                  Write this nsec down now. You will not see it again on this screen.
                 </p>
-                <button
-                  type="button"
-                  className="btn btn-primary auth-submit"
-                  onClick={() => void confirmKeyBackup()}
-                >
-                  Continue
-                </button>
+                <div className="auth-key-backup-public">
+                  <span className="muted-text">Public identity (npub)</span>
+                  <pre id="auth-npub-reveal" className="auth-key-backup-npub mono" aria-label="Your npub">
+                    {keyBackup.npub}
+                  </pre>
+                </div>
+                <div className="auth-key-backup-actions">
+                  <button
+                    type="button"
+                    className="btn auth-submit"
+                    onClick={() => downloadKeyBackupTxt(keyBackup)}
+                  >
+                    Download .txt
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-primary auth-submit"
+                    onClick={() => void confirmKeyBackup()}
+                  >
+                    Continue
+                  </button>
+                </div>
               </div>
             </>
           ) : (
@@ -217,7 +233,7 @@ export function AuthPage() {
                       disabled={busy}
                       onClick={() => void generateAndContinue()}
                     >
-                      {busy ? "Working…" : "Generate npub and continue"}
+                      {busy ? "Working…" : "Generate key and continue"}
                     </button>
                     <button
                       type="submit"

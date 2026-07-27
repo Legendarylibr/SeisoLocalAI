@@ -95,7 +95,7 @@ curl -sf "$SEISO_FORGE_URL/api/auth/status"
 ```
 
 If onboarding is required, tell the human to open `$SEISO_FORGE_URL`, generate an
-npub, write it down, Continue — then continue orchestration.
+nsec (write it down), Continue — then continue orchestration. The npub is the public identity only.
 
 ### 5 · Run jobs
 

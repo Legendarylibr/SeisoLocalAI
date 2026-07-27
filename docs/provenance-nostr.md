@@ -149,13 +149,20 @@ export SEISO_NOSTR_ATTEST=1
 
 ## Forge UI
 
-1. First-run auth generates an npub (write it down → Continue) or imports an `nsec`.
+1. First-run auth generates a key (write down the one-time `nsec` → Continue; `npub`
+   is shown as the public identity) or imports an `nsec`.
    That key is also used for provenance signing when present.
 2. Open **Integrations → Nostr provenance** to confirm relays / enable auto-attest.
+   Relays are a per-user allowlist for the account’s **npub** (digests-only publish),
+   not stored on or derived from the `nsec`.
 3. Kill-switch: `SEISO_ALLOW_NOSTR=0` and restart Forge.
 
-Private keys are encrypted under `$SEISO_DATA_DIR/nostr_keys/`. Auth returns a
-one-time `nsec` only when Forge generated the key; settings APIs never echo `nsec`.
+Private keys are encrypted under `$SEISO_DATA_DIR/nostr_keys/` (skipped when
+`SEISO_DB_EPHEMERAL` is on). Auth returns a one-time `nsec` when Forge generated
+the key (onboarding write-down). Settings **keygen** also returns `nsec` once
+because it rotates the account `npub` and attest key together; login and key
+import never echo `nsec`. `reset-session` wipes `nostr_keys/` and rotates the
+Nostr field-encryption key.
 
 ## Replay vs attestation
 

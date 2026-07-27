@@ -38,7 +38,10 @@ async def test_register_keygen_default_and_login():
 
         ok = await client.post("/api/auth/login", json={"nsec": nsec})
         assert ok.status_code == 200
-        assert ok.json()["user"]["npub"] == npub
+        body = ok.json()
+        assert body["user"]["npub"] == npub
+        # Login never re-echoes the private key.
+        assert body.get("nsec") in (None, "")
 
 
 @pytest.mark.asyncio
@@ -117,6 +120,31 @@ async def test_user_public_view_never_includes_nsec():
     assert view["npub"] == pair.npub
     assert "nsec" not in view
     assert view["nostr_pubkey"] == pair.public_hex
+
+
+@pytest.mark.asyncio
+async def test_register_keygen_returns_nsec_once_for_backup():
+    """Product contract: generate returns nsec once; /me never echoes it."""
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post("/api/auth/register", json={"generate": True})
+        assert reg.status_code == 201, reg.text
+        data = reg.json()
+        nsec = data["nsec"]
+        assert nsec.startswith("nsec1")
+        assert data["user"]["npub"].startswith("npub1")
+        token = data["access_token"]
+
+        me = await client.get(
+            "/api/auth/me",
+            headers={"Authorization": f"Bearer {token}"},
+        )
+        assert me.status_code == 200
+        me_body = me.json()
+        assert me_body["npub"] == data["user"]["npub"]
+        assert "nsec" not in me_body
+        assert nsec not in me.text
 
 
 @pytest.mark.asyncio

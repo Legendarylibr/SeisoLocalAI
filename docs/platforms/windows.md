@@ -57,7 +57,7 @@ cd "$env:USERPROFILE\Seiso"
 seiso forge
 ```
 
-Open **http://127.0.0.1:8765** in your browser. On first run, **generate an npub** (write it down → Continue) or import an `nsec`.
+Open **http://127.0.0.1:8765** in your browser. On first run, **generate a key** (write down the one-time `nsec` → Continue; `npub` is your public identity) or import an `nsec`.
 
 If the UI is blank, rebuild the frontend:
 

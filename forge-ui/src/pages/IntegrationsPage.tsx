@@ -438,7 +438,11 @@ export function IntegrationsPage() {
               void api
                 .nostrKeygen()
                 .then((res) => {
-                  setNostrMsg(`Key created · ${res.npub}`);
+                  setNostrMsg(
+                    res.nsec
+                      ? `Rotated account key · ${res.npub} — write down this nsec now (shown once): ${res.nsec}`
+                      : `Key created · ${res.npub}`,
+                  );
                   return refresh();
                 })
                 .catch((e) => setNostrMsg(e instanceof Error ? e.message : String(e)));

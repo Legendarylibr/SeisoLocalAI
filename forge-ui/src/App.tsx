@@ -62,7 +62,7 @@ function Guard({
   if (loading) {
     return <PageLoading />;
   }
-  // Fresh keygen: stay on AuthPage until the user confirms they wrote the npub down.
+  // Fresh keygen: stay on AuthPage until the user confirms they wrote the nsec down.
   if (keyBackup) return <AuthPage />;
   if (!user && !needsOnboarding) return <AuthPage />;
   if (needsOnboarding && !user) return <AuthPage />;

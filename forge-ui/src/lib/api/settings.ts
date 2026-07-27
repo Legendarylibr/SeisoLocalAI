@@ -51,9 +51,12 @@ export const settingsApi = {
     return res;
   },
   nostrKeygen: async () => {
-    const res = await request<{ status: string; npub: string }>("/settings/nostr/keygen", {
-      method: "POST",
-    });
+    const res = await request<{ status: string; npub: string; nsec?: string }>(
+      "/settings/nostr/keygen",
+      {
+        method: "POST",
+      },
+    );
     invalidateApiCache("/settings/nostr");
     return res;
   },
