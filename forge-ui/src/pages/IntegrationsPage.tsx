@@ -7,11 +7,17 @@ import { IconIntegrations } from "@/components/Icons";
 type NostrStatus = {
   server_allow_nostr: boolean;
   key_saved: boolean;
+  key_persisted?: boolean;
   npub: string | null;
+  auth_pubkey?: string | null;
+  attest_pubkey?: string | null;
+  identity_match?: boolean;
   auto_attest: boolean;
   relays: string[];
   allow_loopback: boolean;
 };
+
+type RotatedKeyBackup = { npub: string; nsec: string };
 
 export function IntegrationsPage() {
   const [providers, setProviders] = useState<ProviderRow[]>([]);
@@ -35,6 +41,7 @@ export function IntegrationsPage() {
   const [nostrLoopback, setNostrLoopback] = useState(false);
   const [nostrImport, setNostrImport] = useState("");
   const [nostrMsg, setNostrMsg] = useState<string | null>(null);
+  const [rotatedKey, setRotatedKey] = useState<RotatedKeyBackup | null>(null);
 
   const refresh = async () => {
     const [plist, mstatus, nstatus] = await Promise.all([
@@ -380,6 +387,16 @@ export function IntegrationsPage() {
               <td>{nostr?.key_saved ? "Yes" : "No"}</td>
             </tr>
             <tr>
+              <td>Identity match</td>
+              <td>
+                {nostr?.identity_match === false
+                  ? "No — re-login or import account nsec to restore attest key"
+                  : nostr?.identity_match === true
+                    ? "Yes"
+                    : "—"}
+              </td>
+            </tr>
+            <tr>
               <td>npub</td>
               <td className="mono">{nostr?.npub || "—"}</td>
             </tr>
@@ -435,14 +452,18 @@ export function IntegrationsPage() {
             className="btn"
             onClick={() => {
               setNostrMsg(null);
+              setRotatedKey(null);
               void api
                 .nostrKeygen()
                 .then((res) => {
-                  setNostrMsg(
-                    res.nsec
-                      ? `Rotated account key · ${res.npub} — write down this nsec now (shown once): ${res.nsec}`
-                      : `Key created · ${res.npub}`,
-                  );
+                  if (res.nsec) {
+                    setRotatedKey({ npub: res.npub, nsec: res.nsec });
+                    setNostrMsg(
+                      `Rotated account key · ${res.npub}. Write down the nsec below — it is shown once.`,
+                    );
+                  } else {
+                    setNostrMsg(`Key created · ${res.npub}`);
+                  }
                   return refresh();
                 })
                 .catch((e) => setNostrMsg(e instanceof Error ? e.message : String(e)));
@@ -455,10 +476,13 @@ export function IntegrationsPage() {
               className="btn"
               onClick={() => {
                 setNostrMsg(null);
+                setRotatedKey(null);
                 void api
                   .clearNostrKey()
                   .then(() => {
-                    setNostrMsg("Key cleared");
+                    setNostrMsg(
+                      "Signing key cleared from disk. Account npub unchanged — login with your nsec restores attest material.",
+                    );
                     return refresh();
                   })
                   .catch((e) => setNostrMsg(e instanceof Error ? e.message : String(e)));
@@ -468,6 +492,24 @@ export function IntegrationsPage() {
             </button>
           )}
         </div>
+        {rotatedKey && (
+          <div className="auth-key-backup" style={{ marginTop: "0.75rem" }} data-testid="nostr-rotated-key">
+            <p className="muted-text">
+              New login secret for <span className="mono">{rotatedKey.npub}</span>
+            </p>
+            <pre className="auth-key-backup-value mono" aria-label="Rotated nsec">
+              {rotatedKey.nsec}
+            </pre>
+            <button
+              type="button"
+              className="btn btn-primary"
+              style={{ marginTop: "0.5rem" }}
+              onClick={() => setRotatedKey(null)}
+            >
+              I wrote it down
+            </button>
+          </div>
+        )}
         <label style={{ marginTop: "0.75rem" }}>Import nsec (optional)</label>
         <input
           type="password"
@@ -482,6 +524,7 @@ export function IntegrationsPage() {
             disabled={!nostrImport.trim()}
             onClick={() => {
               setNostrMsg(null);
+              setRotatedKey(null);
               void api
                 .importNostrKey(nostrImport.trim())
                 .then((res) => {
@@ -495,7 +538,11 @@ export function IntegrationsPage() {
             Import key
           </button>
         </div>
-        {nostrMsg && <p className="muted-text" style={{ marginTop: "0.5rem" }}>{nostrMsg}</p>}
+        {nostrMsg && (
+          <p className="muted-text" style={{ marginTop: "0.5rem" }} data-testid="nostr-status-msg">
+            {nostrMsg}
+          </p>
+        )}
       </div>
     </div>
   );

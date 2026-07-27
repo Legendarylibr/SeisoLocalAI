@@ -33,7 +33,11 @@ export const settingsApi = {
     cachedGet<{
       server_allow_nostr: boolean;
       key_saved: boolean;
+      key_persisted?: boolean;
       npub: string | null;
+      auth_pubkey?: string | null;
+      attest_pubkey?: string | null;
+      identity_match?: boolean;
       auto_attest: boolean;
       relays: string[];
       allow_loopback: boolean;

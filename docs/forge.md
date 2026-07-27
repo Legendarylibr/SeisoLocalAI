@@ -38,9 +38,9 @@ On later sessions, skip the UI build unless `forge-ui/dist` is missing or you ch
 
 Open **http://127.0.0.1:8765**. On first run:
 
-1. **Generate key** (default) or import an `nsec`
-2. Write down the shown `nsec1…`, then **Continue** (the `npub` is your public identity)
-3. Later: unlock with the instance `nsec`
+1. **Generate key** (default) or import an `nsec` / `ncryptsec`
+2. Write down the shown `nsec1…` (optional NIP-49 encrypted `.txt` download), then **Continue** (the `npub` is your public identity)
+3. Later: unlock with the instance `nsec`, or `ncryptsec` plus passphrase
 
 See [Auth (Nostr)](#auth-nostr) below.
 

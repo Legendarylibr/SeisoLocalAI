@@ -46,7 +46,7 @@ export function encryptNip49(
   if (logn < 1 || logn > 22) {
     throw new Error("log_n must be between 1 and 22");
   }
-  if (!password) {
+  if (!password || !password.trim()) {
     throw new Error("passphrase is required");
   }
   const salt = randomBytes(16);
@@ -90,6 +90,12 @@ export function decryptNip49(ncryptsec: string, password: string): Uint8Array {
     throw new Error(`invalid ncryptsec version ${b[0]}`);
   }
   const logn = b[1]!;
+  if (logn < 1 || logn > 22) {
+    throw new Error("log_n must be between 1 and 22");
+  }
+  if (!password.trim()) {
+    throw new Error("passphrase is required");
+  }
   const salt = b.slice(2, 18);
   const nonce = b.slice(18, 42);
   const ksb = b[42]!;
