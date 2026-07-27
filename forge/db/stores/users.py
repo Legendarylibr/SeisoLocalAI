@@ -120,3 +120,24 @@ class UsersMixin:
         ):
             row = await cur.fetchone()
             return dict(row) if row else None
+
+    async def update_user_nostr_pubkey(self, user_id: str, nostr_pubkey: str) -> dict:
+        """Bind account identity to a new npub (settings key rotate / import)."""
+        pubkey = (nostr_pubkey or "").strip().lower()
+        if len(pubkey) != 64:
+            raise ValueError("nostr_pubkey must be 64-char hex")
+        async with self._conn() as conn:
+            cur = await conn.execute(
+                "UPDATE users SET nostr_pubkey = ? WHERE id = ?",
+                (pubkey, user_id),
+            )
+            if cur.rowcount == 0:
+                raise ValueError("User not found")
+            await conn.commit()
+            async with conn.execute(
+                "SELECT * FROM users WHERE id = ?", (user_id,)
+            ) as fetch:
+                row = await fetch.fetchone()
+        if row is None:
+            raise ValueError("User not found")
+        return dict(row)

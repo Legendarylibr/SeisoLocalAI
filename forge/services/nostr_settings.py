@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+import shutil
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,7 @@ from forge.security.audit import audit_event
 from forge.security.url_policy import validate_nostr_relay_url
 from seiso.research.nostr.keys import (
     clear_keypair,
+    encryption_key_path,
     generate_keypair,
     keypair_from_secret,
     load_keypair,
@@ -19,7 +21,7 @@ from seiso.research.nostr.keys import (
     save_keypair,
 )
 from seiso.research.nostr.policy import nostr_allowed
-from seiso.security import SecurityError, safe_join
+from seiso.security import SecurityError, assert_user_scoped_path, safe_join
 
 logger = logging.getLogger(__name__)
 
@@ -82,37 +84,108 @@ def save_nostr_prefs(data_dir: Path, user_id: str, prefs: NostrPrefs) -> NostrPr
     return prefs
 
 
-def nostr_status(data_dir: Path, user_id: str) -> dict[str, Any]:
+def nostr_status(
+    data_dir: Path,
+    user_id: str,
+    *,
+    auth_pubkey: str | None = None,
+    persist_keys: bool = True,
+) -> dict[str, Any]:
     prefs = load_nostr_prefs(data_dir, user_id)
     npub = load_npub(identity=user_id, data_dir=data_dir)
+    pair = load_keypair(identity=user_id, data_dir=data_dir) if npub else None
+    attest_pubkey = pair.public_hex if pair else None
+    auth = (auth_pubkey or "").strip().lower() or None
+    identity_match = (
+        True if not auth or not attest_pubkey else auth == attest_pubkey
+    )
     return {
         "server_allow_nostr": nostr_allowed(),
         "key_saved": npub is not None,
+        "key_persisted": bool(persist_keys and npub is not None),
         "npub": npub,
+        "auth_pubkey": auth,
+        "attest_pubkey": attest_pubkey,
+        "identity_match": identity_match,
         "auto_attest": prefs.auto_attest,
         "relays": list(prefs.relays or []),
         "allow_loopback": prefs.allow_loopback,
     }
 
 
-def generate_user_nostr_key(data_dir: Path, user_id: str) -> dict[str, str]:
+def generate_user_nostr_key(
+    data_dir: Path,
+    user_id: str,
+    *,
+    persist: bool = True,
+) -> dict[str, str]:
+    """Generate a new signing key. Returns nsec once for offline backup on rotate."""
     pair = generate_keypair()
-    save_keypair(pair, identity=user_id, data_dir=data_dir)
-    audit_event("nostr_keygen", user_id=user_id, npub=pair.npub)
-    return {"status": "saved", "npub": pair.npub}
+    if persist:
+        save_keypair(pair, identity=user_id, data_dir=data_dir)
+    audit_event("nostr_keygen", user_id=user_id, npub=pair.npub, persisted=persist)
+    return {
+        "status": "saved" if persist else "ephemeral",
+        "npub": pair.npub,
+        "nsec": pair.nsec,
+        "pubkey_hex": pair.public_hex,
+    }
 
 
-def import_user_nostr_key(data_dir: Path, user_id: str, secret: str) -> dict[str, str]:
+def import_user_nostr_key(
+    data_dir: Path,
+    user_id: str,
+    secret: str,
+    *,
+    persist: bool = True,
+) -> dict[str, str]:
     pair = keypair_from_secret(secret)
-    save_keypair(pair, identity=user_id, data_dir=data_dir)
-    audit_event("nostr_key_import", user_id=user_id, npub=pair.npub)
-    return {"status": "saved", "npub": pair.npub}
+    if persist:
+        save_keypair(pair, identity=user_id, data_dir=data_dir)
+    audit_event("nostr_key_import", user_id=user_id, npub=pair.npub, persisted=persist)
+    return {
+        "status": "saved" if persist else "ephemeral",
+        "npub": pair.npub,
+        "pubkey_hex": pair.public_hex,
+    }
 
 
 def clear_user_nostr_key(data_dir: Path, user_id: str) -> dict[str, str]:
     clear_keypair(identity=user_id, data_dir=data_dir)
+    prefs = _prefs_path(data_dir, user_id)
+    if prefs.is_file():
+        prefs.unlink()
     audit_event("nostr_key_clear", user_id=user_id)
     return {"status": "cleared"}
+
+
+def wipe_nostr_identity_material(data_dir: Path) -> dict[str, Any]:
+    """Remove all Nostr keys/prefs and rotate the field-encryption key (reset-session)."""
+    root = Path(data_dir)
+    keys_dir = root / "nostr_keys"
+    removed_files = 0
+    if keys_dir.is_dir():
+        for child in keys_dir.iterdir():
+            if child.is_file() or child.is_symlink():
+                child.unlink(missing_ok=True)
+                removed_files += 1
+            elif child.is_dir():
+                shutil.rmtree(child, ignore_errors=True)
+                removed_files += 1
+    enc = encryption_key_path(root)
+    rotated = False
+    if enc.is_file():
+        enc.unlink(missing_ok=True)
+        rotated = True
+    audit_event(
+        "nostr_identity_wipe",
+        removed_files=removed_files,
+        encryption_key_rotated=rotated,
+    )
+    return {
+        "removed_files": removed_files,
+        "encryption_key_rotated": rotated,
+    }
 
 
 def _candidate_manifests(result: dict[str, Any] | None, output_dir: str | None) -> list[Path]:
@@ -140,10 +213,8 @@ def _candidate_manifests(result: dict[str, Any] | None, output_dir: str | None) 
             path = root / name
             if path.is_file():
                 candidates.append(path)
-        # adaptive_quant replay manifests are often named *_replay_manifest.json
         if root.is_dir():
             candidates.extend(sorted(root.glob("*replay_manifest.json")))
-    # Deduplicate while preserving order.
     seen: set[str] = set()
     out: list[Path] = []
     for path in candidates:
@@ -154,12 +225,27 @@ def _candidate_manifests(result: dict[str, Any] | None, output_dir: str | None) 
     return out
 
 
+def _scoped_manifest_path(data_dir: Path, user_id: str, path: Path) -> Path | None:
+    """Return path if it is under data_dir/<scoped>/<user_id>/; else None."""
+    try:
+        return assert_user_scoped_path(data_dir, user_id, path)
+    except SecurityError as exc:
+        logger.warning(
+            "Skipping Nostr attest for out-of-sandbox manifest %s (%s): %s",
+            path,
+            user_id,
+            exc,
+        )
+        return None
+
+
 def forge_maybe_attest(
     *,
     data_dir: Path,
     user_id: str,
     result: dict[str, Any] | None = None,
     output_dir: str | None = None,
+    expected_pubkey: str | None = None,
 ) -> dict[str, Any] | None:
     """Attest job manifests when user prefs + server gate allow it."""
     if not nostr_allowed():
@@ -174,6 +260,18 @@ def forge_maybe_attest(
     if pair is None:
         logger.warning("Nostr auto-attest enabled but no key for %s", user_id)
         return {"ok": False, "error": "no nostr key"}
+    expected = (expected_pubkey or "").strip().lower()
+    if expected and pair.public_hex != expected:
+        logger.warning(
+            "Nostr auto-attest blocked: signing key does not match auth npub for %s",
+            user_id,
+        )
+        return {
+            "ok": False,
+            "error": "signing key does not match account npub",
+            "auth_pubkey": expected,
+            "attest_pubkey": pair.public_hex,
+        }
 
     from seiso.research.nostr.attest import attest_manifest
 
@@ -181,9 +279,19 @@ def forge_maybe_attest(
     for manifest_path in _candidate_manifests(result, output_dir):
         if not manifest_path.is_file():
             continue
+        scoped = _scoped_manifest_path(data_dir, user_id, manifest_path)
+        if scoped is None:
+            reports.append(
+                {
+                    "ok": False,
+                    "error": "manifest path outside user sandbox",
+                    "manifest_path": str(manifest_path),
+                }
+            )
+            continue
         try:
             report = attest_manifest(
-                manifest_path,
+                scoped,
                 relays=list(prefs.relays or []),
                 pair=pair,
                 identity=user_id,
@@ -198,15 +306,15 @@ def forge_maybe_attest(
                 attestation_sha256=(report.get("receipt") or {}).get(
                     "attestation_sha256"
                 ),
-                manifest_path=str(manifest_path),
+                manifest_path=str(scoped),
             )
             reports.append(report)
         except (SecurityError, Exception) as exc:
             logger.warning(
-                "Nostr attest failed for %s (%s): %s", user_id, manifest_path, exc
+                "Nostr attest failed for %s (%s): %s", user_id, scoped, exc
             )
             reports.append(
-                {"ok": False, "error": str(exc), "manifest_path": str(manifest_path)}
+                {"ok": False, "error": str(exc), "manifest_path": str(scoped)}
             )
     if not reports:
         return None

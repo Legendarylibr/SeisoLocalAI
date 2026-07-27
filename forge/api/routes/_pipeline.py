@@ -207,11 +207,14 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
                 try:
                     from forge.services.nostr_settings import forge_maybe_attest
 
+                    user = await db.get_user_by_id(user_id)
                     forge_maybe_attest(
                         data_dir=settings.data_dir,
                         user_id=user_id,
                         result=result if isinstance(result, dict) else None,
                         output_dir=result.get("output_root") or result.get("run_dir"),
+                        expected_pubkey=str((user or {}).get("nostr_pubkey") or "")
+                        or None,
                     )
                 except Exception:
                     import logging

@@ -20,8 +20,9 @@ from forge.services.nostr_settings import (
     load_nostr_prefs,
     nostr_status,
     save_nostr_prefs,
+    wipe_nostr_identity_material,
 )
-from seiso.research.nostr.keys import generate_keypair, load_npub
+from seiso.research.nostr.keys import generate_keypair, load_keypair, load_npub
 from seiso.security import SecurityError
 
 
@@ -66,6 +67,7 @@ def test_keygen_import_clear_and_status(tmp_path: Path, monkeypatch):
     assert nostr_status(tmp_path, "u1")["key_saved"] is False
     gen = generate_user_nostr_key(tmp_path, "u1")
     assert gen["npub"].startswith("npub1")
+    assert gen["nsec"].startswith("nsec1")
     assert nostr_status(tmp_path, "u1")["key_saved"] is True
     assert load_npub(identity="u1", data_dir=tmp_path) == gen["npub"]
 
@@ -74,6 +76,16 @@ def test_keygen_import_clear_and_status(tmp_path: Path, monkeypatch):
     assert imported["npub"] == pair.npub
     clear_user_nostr_key(tmp_path, "u1")
     assert nostr_status(tmp_path, "u1")["key_saved"] is False
+
+
+def test_wipe_nostr_identity_material(tmp_path: Path):
+    gen = generate_user_nostr_key(tmp_path, "u1")
+    save_nostr_prefs(tmp_path, "u1", NostrPrefs(auto_attest=True))
+    assert load_npub(identity="u1", data_dir=tmp_path) == gen["npub"]
+    report = wipe_nostr_identity_material(tmp_path)
+    assert report["removed_files"] >= 1
+    assert load_npub(identity="u1", data_dir=tmp_path) is None
+    assert load_keypair(identity="u1", data_dir=tmp_path) is None
 
 
 def test_candidate_manifests_discovery(tmp_path: Path):
@@ -128,20 +140,44 @@ def test_forge_maybe_attest_gates_and_success(tmp_path: Path, monkeypatch, publi
         "error": "no nostr key",
     }
 
-    generate_user_nostr_key(tmp_path, "u1")
-    man = tmp_path / "out" / "manifest.json"
+    gen = generate_user_nostr_key(tmp_path, "u1")
+    outside = tmp_path / "out" / "manifest.json"
+    outside.parent.mkdir(parents=True)
+    payload = {
+        "pipeline": "compress",
+        "run_id": "r1",
+        "config_fingerprint": "aa" * 32,
+        "created_at": "2026-01-01T00:00:00+00:00",
+    }
+    outside.write_text(json.dumps(payload), encoding="utf-8")
+    with patch("seiso.research.nostr.attest.attest_manifest") as mocked:
+        blocked = forge_maybe_attest(
+            data_dir=tmp_path,
+            user_id="u1",
+            result={"output_dir": str(outside.parent)},
+            expected_pubkey=gen["pubkey_hex"],
+        )
+    assert blocked is not None
+    assert blocked["ok"] is False
+    assert "sandbox" in blocked["reports"][0]["error"]
+    mocked.assert_not_called()
+
+    man = tmp_path / "compress" / "u1" / "run" / "manifest.json"
     man.parent.mkdir(parents=True)
-    man.write_text(
-        json.dumps(
-            {
-                "pipeline": "compress",
-                "run_id": "r1",
-                "config_fingerprint": "aa" * 32,
-                "created_at": "2026-01-01T00:00:00+00:00",
-            }
-        ),
-        encoding="utf-8",
+    man.write_text(json.dumps(payload), encoding="utf-8")
+
+    mismatch = forge_maybe_attest(
+        data_dir=tmp_path,
+        user_id="u1",
+        result={"output_dir": str(man.parent)},
+        expected_pubkey="ab" * 32,
     )
+    assert mismatch == {
+        "ok": False,
+        "error": "signing key does not match account npub",
+        "auth_pubkey": "ab" * 32,
+        "attest_pubkey": gen["pubkey_hex"],
+    }
 
     def fake_attest(path, **kwargs):
         return {
@@ -158,6 +194,7 @@ def test_forge_maybe_attest_gates_and_success(tmp_path: Path, monkeypatch, publi
             data_dir=tmp_path,
             user_id="u1",
             result={"output_dir": str(man.parent)},
+            expected_pubkey=gen["pubkey_hex"],
         )
     assert report is not None
     assert report["ok"] is True
@@ -173,14 +210,16 @@ async def test_settings_nostr_api_roundtrip(tmp_path: Path, monkeypatch, public_
         reg = await client.post("/api/auth/register", json={"generate": True})
         assert reg.status_code == 201, reg.text
         headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+        auth_npub = reg.json()["user"]["npub"]
 
         status = await client.get("/api/settings/nostr", headers=headers)
         assert status.status_code == 200
         body = status.json()
         assert body["server_allow_nostr"] is True
-        assert body["key_saved"] is True  # register persists signing key
+        assert body["key_saved"] is True
         assert body["npub"]
-        # nsec must never appear in settings payloads.
+        assert body["identity_match"] is True
+        assert body["npub"] == auth_npub
         assert "nsec" not in json.dumps(body)
 
         bad = await client.put(
@@ -217,6 +256,10 @@ async def test_settings_nostr_api_roundtrip(tmp_path: Path, monkeypatch, public_
         assert imported.json()["npub"] == pair.npub
         assert "nsec" not in imported.json()
 
+        me = await client.get("/api/auth/me", headers=headers)
+        assert me.status_code == 200
+        assert me.json()["npub"] == pair.npub
+
         cleared = await client.delete("/api/settings/nostr/key", headers=headers)
         assert cleared.status_code == 200
         assert cleared.json()["status"] == "cleared"
@@ -224,7 +267,9 @@ async def test_settings_nostr_api_roundtrip(tmp_path: Path, monkeypatch, public_
         regen = await client.post("/api/settings/nostr/keygen", headers=headers)
         assert regen.status_code == 200
         assert regen.json()["npub"].startswith("npub1")
-        assert "nsec" not in regen.json()
+        assert regen.json()["nsec"].startswith("nsec1")
+        me2 = await client.get("/api/auth/me", headers=headers)
+        assert me2.json()["npub"] == regen.json()["npub"]
 
 
 @pytest.mark.asyncio
@@ -236,9 +281,46 @@ async def test_login_refreshes_signing_key(tmp_path: Path):
         reg = await client.post("/api/auth/register", json={"nsec": pair.nsec})
         assert reg.status_code == 201
         user_id = reg.json()["user"]["id"]
-        # Clear key then login should restore encrypted signing material.
         clear_user_nostr_key(tmp_path, user_id)
         assert load_npub(identity=user_id, data_dir=tmp_path) is None
         login = await client.post("/api/auth/login", json={"nsec": pair.nsec})
         assert login.status_code == 200
         assert load_npub(identity=user_id, data_dir=tmp_path) == pair.npub
+
+
+@pytest.mark.asyncio
+async def test_reset_session_wipes_nostr_keys(tmp_path: Path):
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post("/api/auth/register", json={"generate": True})
+        assert reg.status_code == 201
+        user_id = reg.json()["user"]["id"]
+        assert load_npub(identity=user_id, data_dir=tmp_path) is not None
+
+        csrf = client.cookies.get("seiso_csrf")
+        assert csrf
+        reset = await client.post(
+            "/api/auth/reset-session",
+            json={"confirmation": "RESET"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert reset.status_code == 200
+        assert reset.json()["nostr_identity_wiped"] is True
+        assert load_npub(identity=user_id, data_dir=tmp_path) is None
+        assert not (tmp_path / ".nostr_key_encryption_key").exists()
+
+
+@pytest.mark.asyncio
+async def test_ephemeral_mode_skips_nostr_key_persist(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("SEISO_DB_EPHEMERAL", "true")
+    from forge.api.deps import clear_dependency_caches
+
+    clear_dependency_caches()
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post("/api/auth/register", json={"generate": True})
+        assert reg.status_code == 201, reg.text
+        user_id = reg.json()["user"]["id"]
+        assert load_npub(identity=user_id, data_dir=tmp_path) is None

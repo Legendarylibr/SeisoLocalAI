@@ -57,8 +57,15 @@ def persist_user_signing_key(
     data_dir,
     user_id: str,
     pair: NostrKeyPair,
+    persist: bool = True,
 ) -> None:
-    """Store encrypted nsec for provenance attestation under the user id."""
+    """Store encrypted nsec for provenance attestation under the user id.
+
+    When ``persist`` is False (ephemeral DB mode), skip disk writes so a wiped
+    SQLite session does not leave durable Nostr identity material behind.
+    """
+    if not persist:
+        return
     save_keypair(pair, identity=user_id, data_dir=data_dir)
 
 
