@@ -338,6 +338,8 @@ class Orchestrator(ABC):
             # Cancel may win the race after execute returns (no await between
             # return and status write). Never overwrite a cancel with completed.
             if rec.cancel_requested or rec.status == JobStatus.CANCELLED:
+                # Keep result for debug/persistence but do not emit a success
+                # ``result`` SSE — clients must treat cancelled as non-success.
                 rec.result = result
                 rec.status = JobStatus.CANCELLED
                 self._emit_log(job_id, "Job cancelled")

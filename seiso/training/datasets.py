@@ -119,6 +119,11 @@ def should_disable_packing_for_response_mask(
 def format_sample(sample: dict, fmt: DatasetFormat, tokenizer) -> str:
     """Format a single sample into training text using chat template when available."""
     if fmt == DatasetFormat.TEXT:
+        from seiso.training.preprocess import text_body_from_sample
+
+        body = text_body_from_sample(sample)
+        if body:
+            return body
         return sample.get("text") or sample.get("content") or str(sample)
 
     messages = extract_messages(sample, fmt)
@@ -499,7 +504,14 @@ def _tokenize_text_row(
     tokenizer,
     max_seq_length: int,
 ) -> dict[str, list[int]]:
-    text = sample.get("text") or sample.get("content") or str(sample)
+    from seiso.training.preprocess import text_body_from_sample
+
+    text = (
+        text_body_from_sample(sample)
+        or sample.get("text")
+        or sample.get("content")
+        or str(sample)
+    )
     return _tokenize_string_row(text, tokenizer, max_seq_length, keep_end=False)
 
 

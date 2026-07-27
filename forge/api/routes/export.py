@@ -391,12 +391,12 @@ async def stream_publish_to_hub(
             if row and row.get("error_text"):
                 yield {"event": "error", "data": row["error_text"]}
             result = loads_json_field(row.get("result_json") if row else None, {})
-            if result:
+            if result and (not row or row.get("status") == "completed"):
                 yield {"event": "result", "data": json.dumps(result, default=str)}
             return
         if j.error:
             yield {"event": "error", "data": j.error}
-        if j.result:
+        if j.result and j.status.value == "completed":
             yield {"event": "result", "data": json.dumps(j.result, default=str)}
 
     return EventSourceResponse(event_gen())
@@ -546,12 +546,12 @@ async def stream_export(
             if row and row.get("error_text"):
                 yield {"event": "error", "data": row["error_text"]}
             outputs = loads_json_field(row.get("output_paths_json") if row else None, {})
-            if outputs:
+            if outputs and (not row or row.get("status") == "completed"):
                 yield {"event": "result", "data": json.dumps({"outputs": outputs})}
             return
         if j.error:
             yield {"event": "error", "data": j.error}
-        if j.result:
+        if j.result and j.status.value == "completed":
             yield {"event": "result", "data": json.dumps(j.result, default=str)}
 
     return EventSourceResponse(event_gen())

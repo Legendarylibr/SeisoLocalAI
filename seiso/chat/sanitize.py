@@ -32,9 +32,12 @@ _FUNCTION_JSON_PATTERN = re.compile(
     re.DOTALL,
 )
 _THINKING_CLOSE_RE = re.compile(r"</(?:redacted_thinking|think)>", re.IGNORECASE)
-_THINKING_OPEN_RE = re.compile(r"<(?:redacted_thinking|think)>", re.IGNORECASE)
+# Match attributed opens (e.g. <think channel="analysis">) like thinking.py.
+_THINKING_OPEN_RE = re.compile(
+    r"<(?:redacted_thinking|think)\b[^>]*>", re.IGNORECASE
+)
 _THINK_BLOCK_RE = re.compile(
-    r"<(?:redacted_thinking|think)>.*?</(?:redacted_thinking|think)>",
+    r"<(?:redacted_thinking|think)\b[^>]*>.*?</(?:redacted_thinking|think)>",
     flags=re.IGNORECASE | re.DOTALL,
 )
 

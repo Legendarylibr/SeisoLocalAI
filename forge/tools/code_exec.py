@@ -161,7 +161,7 @@ def execute_code(
     base.mkdir(parents=True, exist_ok=True)
 
     wrapped = textwrap.dedent(f"""
-        import json, sys, math, re, statistics, datetime, collections, itertools
+        import json, math, re, statistics, datetime, collections, itertools
         _SAFE_BUILTINS = {{
             "print": print, "len": len, "range": range, "enumerate": enumerate,
             "zip": zip, "map": map, "filter": filter, "sorted": sorted, "sum": sum,
@@ -173,12 +173,11 @@ def execute_code(
         def _print(*a, **k):
             _stdout.append(" ".join(str(x) for x in a))
         _SAFE_BUILTINS["print"] = _print
-        # Inject allowlisted modules — user ``import math`` has no __import__.
+        # Inject allowlisted modules only — never ``sys`` (exposes real builtins).
         _g = {{
             "__builtins__": _SAFE_BUILTINS,
             "json": json, "math": math, "re": re, "statistics": statistics,
             "datetime": datetime, "collections": collections, "itertools": itertools,
-            "sys": sys,
         }}
         try:
             exec({code!r}, _g, _g)

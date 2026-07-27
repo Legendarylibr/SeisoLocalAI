@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
+import uuid
 from pathlib import Path
 from typing import Annotated
 
@@ -114,7 +116,16 @@ async def upload_file(
         )
 
     dest = uploads / raw_name
-    dest.write_bytes(content)
+    # Refuse symlink / non-file destinations; write via temp + replace so we
+    # never follow a planted symlink into another user's tree.
+    if dest.exists() and (dest.is_symlink() or not dest.is_file()):
+        raise HTTPException(400, "Refusing to overwrite non-regular file")
+    tmp = uploads / f".upload-{uuid.uuid4().hex}.tmp"
+    try:
+        tmp.write_bytes(content)
+        os.replace(tmp, dest)
+    finally:
+        tmp.unlink(missing_ok=True)
     return {"path": str(dest), "filename": raw_name, "size": len(content)}
 
 

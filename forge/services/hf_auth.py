@@ -124,8 +124,15 @@ def resolve_hf_token(
     encryption_key: bytes | None = None,
     settings_token: str | None = None,
     prefer_cli: bool = False,
+    allow_host_fallback: bool | None = None,
 ) -> tuple[str | None, TokenSource]:
-    """Resolve an HF token. Returns (token, source)."""
+    """Resolve an HF token. Returns (token, source).
+
+    When ``user_id`` is set, host-global ``HF_TOKEN`` / CLI cache are not used
+    unless ``allow_host_fallback`` or ``SEISO_HF_ALLOW_HOST_TOKEN=1`` — so a
+    second Forge account cannot silently inherit the operator's credentials.
+    Operator ``SEISO_HF_TOKEN`` (``settings_token``) remains available.
+    """
     if prefer_cli:
         cli_token = _read_cli_token()
         if cli_token:
@@ -143,6 +150,16 @@ def resolve_hf_token(
     settings_token = _normalize_token(settings_token)
     if settings_token:
         return settings_token, "env_seiso"
+
+    host_ok = allow_host_fallback
+    if host_ok is None:
+        host_ok = os.environ.get("SEISO_HF_ALLOW_HOST_TOKEN", "").strip().lower() in {
+            "1",
+            "true",
+            "yes",
+        }
+    if user_id is not None and not host_ok:
+        return None, "none"
 
     env_hf = _normalize_token(os.environ.get("HF_TOKEN")) or _normalize_token(
         os.environ.get("HUGGING_FACE_HUB_TOKEN")

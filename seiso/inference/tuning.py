@@ -64,10 +64,14 @@ def prepare_torch_model(model: Any) -> Any:
     except Exception:
         # Load/setup failure after a partial patch must not leave monkey-patched
         # forwards pinning the model graph.
-        with contextlib.suppress(Exception):
-            from seiso.kernels.lifecycle import restore_kernel_patches
+        from seiso.kernels.lifecycle import restore_kernel_patches
 
+        try:
             restore_kernel_patches(model)
+        except Exception as restore_exc:
+            raise RuntimeError(
+                "Failed to restore kernel patches after inference load error"
+            ) from restore_exc
         raise
 
 

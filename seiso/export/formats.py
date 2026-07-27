@@ -266,22 +266,30 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
         git_commit_optional,
     )
 
+    # Always hash weight tensors; optional full tree when SEISO_EXPORT_FULL_CHECKSUMS.
+    full_checksums = os.environ.get("SEISO_EXPORT_FULL_CHECKSUMS", "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+    }
+    weight_suffixes = (".safetensors", ".bin", ".gguf", ".pt", ".pth", ".onnx")
+    checksums = directory_checksum_manifest(
+        dest,
+        max_files=None,
+        max_file_bytes=None if full_checksums else 8 * 1024 * 1024,
+        always_hash_suffixes=weight_suffixes,
+    )
+    incomplete = any(
+        value in {"skipped-large-file", "error"} for value in checksums.values()
+    )
     payload = {
         "format": fmt.value,
         "checkpoint_kind": kind,
         "source_checkpoint": str(ckpt),
         "exported_at": datetime.now(timezone.utc).isoformat(),
         "git_commit": git_commit_optional(),
-        "file_checksums_sha256": directory_checksum_manifest(
-            dest,
-            max_files=25,
-            max_file_bytes=(
-                None
-                if os.environ.get("SEISO_EXPORT_FULL_CHECKSUMS", "").strip().lower()
-                in {"1", "true", "yes"}
-                else 8 * 1024 * 1024
-            ),
-        ),
+        "file_checksums_sha256": checksums,
+        "checksum_coverage": "partial" if incomplete else "full",
     }
     manifest = ckpt / "seiso_manifest.json"
     training_manifest = read_json_file(manifest, default=None)
@@ -289,6 +297,8 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
         payload["training_manifest"] = training_manifest
     sidecar = dest / "seiso_export_metadata.json"
     sidecar.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    if incomplete:
+        return
     try:
         from seiso.research.nostr import maybe_auto_attest
 

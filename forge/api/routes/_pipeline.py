@@ -185,7 +185,9 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
                 stage_results=stage_results,
                 error_text=job.error if job.status.value == "failed" else None,
             )
-            if model_dir := result.get("model_dir"):
+            if job.status.value == "completed" and (
+                model_dir := result.get("model_dir")
+            ):
                 try:
                     await register_export_outputs(
                         db,

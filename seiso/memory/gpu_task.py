@@ -31,15 +31,19 @@ def gpu_task(task: str) -> Iterator[None]:
         release_cached_memory(sync=True)
         yield
     finally:
+        restore_exc: BaseException | None = None
         try:
             from seiso.kernels.lifecycle import restore_kernel_patches
 
             restore_kernel_patches()
-        except Exception:
-            logger.debug("Failed to restore kernels after %s", task, exc_info=True)
+        except Exception as exc:
+            logger.exception("Failed to restore kernels after %s", task)
+            restore_exc = exc
         try:
             from seiso.memory.protection import release_cached_memory
 
             release_cached_memory(sync=True)
         finally:
             release_gpu_resource_lock()
+        if restore_exc is not None:
+            raise restore_exc

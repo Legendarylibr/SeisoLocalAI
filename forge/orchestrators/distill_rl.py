@@ -14,5 +14,5 @@ DistillRLOrchestrator = bundled_orchestrator(
     start_message="Starting distill-RL pipeline (distill → rollout → DPO → evaluate)",
     runner=run_distill_rl_job,
     result_log=lambda result: f"Artifacts: {result.get('output_dir')}",
-    contract=BundledJobContract(),
+    contract=BundledJobContract(requires_manifest=True),
 )

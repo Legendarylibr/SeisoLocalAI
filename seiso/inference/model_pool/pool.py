@@ -276,7 +276,15 @@ class ModelPool:
                     model = handle[0] if isinstance(handle, tuple) and handle else handle
                     release_training_memory(model, sync=False)
             except Exception:
-                logger.debug("Failed to release torch handle for %s", key, exc_info=True)
+                logger.exception("Failed to release torch handle for %s", key)
+                try:
+                    from seiso.kernels.lifecycle import restore_kernel_patches
+
+                    restore_kernel_patches()
+                except Exception:
+                    logger.exception(
+                        "Global kernel restore also failed after torch unload error"
+                    )
             del handle
 
         elif backend == BackendKind.MLX:
@@ -953,6 +961,8 @@ class ModelPool:
                 "load_precision": (active.meta.get("load_precision") if active else None),
                 "load_policy": active.meta.get("load_policy") if active else None,
                 "release_notes": list(self._release_notes),
+                "inference_refs": self._inference_refs,
+                "unload_pending": self._unload_pending,
             }
 
 

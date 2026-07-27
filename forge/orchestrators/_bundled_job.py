@@ -61,8 +61,13 @@ def validate_bundled_result(
     contract: BundledJobContract,
 ) -> None:
     """Validate runner-returned artifact paths before routes persist them."""
-    if contract.requires_manifest and not result.get("manifest"):
-        raise RuntimeError("Bundled job did not return a manifest")
+    if contract.requires_manifest:
+        manifest = result.get("manifest")
+        if not manifest:
+            raise RuntimeError("Bundled job did not return a manifest")
+        if isinstance(manifest, dict) and manifest.get("ok") is False:
+            detail = manifest.get("error") or manifest.get("errors") or manifest
+            raise RuntimeError(f"Manifest verification failed: {detail}")
     for key in contract.artifact_keys:
         if key in result and result[key]:
             _validate_artifact_value(sandbox_root, user_id, key, result[key])
