@@ -163,7 +163,7 @@ start
 
 Install registers `start` on your PATH (`~/.local/bin`). Open a new terminal if the command is not found yet.
 
-First launch: open **http://127.0.0.1:8765** and create your local admin password.
+First launch: open **http://127.0.0.1:8765** and create or import a Nostr key (npub identity).
 
 On native Linux + NVIDIA, `start` also tries to start the isolated GGUF chat
 sidecar before Forge: Ollama when available/healthy, then `llama-swap`. If the
@@ -374,7 +374,7 @@ See [forge.md](forge.md) for pages, API routes, and environment variables.
    - Linux / macOS / WSL: `start` or `seiso forge` (with venv active)
    - Windows: activate venv → `seiso forge`
 2. Open **http://127.0.0.1:8765**
-3. Complete onboarding — create local admin password
+3. Complete onboarding — create or import a Nostr key
 4. (Optional) Add Hugging Face token in **Settings**
 5. Download a model from **Model Hub**
 6. Try **Chat** or **Training Studio**

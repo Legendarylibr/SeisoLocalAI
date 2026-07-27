@@ -361,15 +361,16 @@ export function IntegrationsPage() {
           <div className="card-head-text">
             <h3>Nostr provenance</h3>
             <p>
-              Opt-in external attestation of run manifest digests (not weights). Requires{" "}
-              <code>SEISO_ALLOW_NOSTR=1</code> on the server and optional deps{" "}
+              External attestation of run manifest digests (not weights). Default path is on;
+              disable with <code>SEISO_ALLOW_NOSTR=0</code>. Optional deps:{" "}
               <code>pip install &apos;seiso[nostr]&apos;</code>.
             </p>
           </div>
         </div>
         {nostr && !nostr.server_allow_nostr && (
           <p className="muted-text" style={{ marginBottom: "0.75rem" }}>
-            Server gate off — set <code>SEISO_ALLOW_NOSTR=1</code> and restart Forge to publish.
+            Server gate off — remove <code>SEISO_ALLOW_NOSTR=0</code> (or set{" "}
+            <code>SEISO_ALLOW_NOSTR=1</code>) and restart Forge to publish.
           </p>
         )}
         <table className="status-table" style={{ marginBottom: "0.75rem" }}>

@@ -11,9 +11,11 @@ from httpx import ASGITransport, AsyncClient
 
 from forge.api.deps import clear_dependency_caches, close_dependency_caches, get_db
 from forge.main import create_app
-from forge.security.auth import create_access_token, hash_password
+from forge.security.auth import create_access_token
 from forge.security.token_revocation import clear_revocations_for_tests
+from forge.services.nostr_auth import NOSTR_PASSWORD_SENTINEL
 from seiso.inference.runner import reset_inference_runtime
+from seiso.research.nostr.keys import generate_keypair
 
 pytest_plugins = ("gguf_fixtures",)
 
@@ -43,6 +45,10 @@ async def _reset_caches(request, monkeypatch, tmp_path):
     clear_revocations_for_tests()
     clear_dependency_caches()
     reset_inference_runtime(wait=False)
+    with contextlib.suppress(Exception):
+        from forge.api.routes.auth import _login_limiter
+
+        _login_limiter.reset()
     yield
     with contextlib.suppress(Exception):
         had_database = await close_dependency_caches()
@@ -83,9 +89,9 @@ async def auth_client(app, tmp_path):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
-        assert reg.status_code == 201
+        assert reg.status_code == 201, reg.text
         token = reg.json()["access_token"]
         headers = {"Authorization": f"Bearer {token}"}
         yield client, token, headers, tmp_path
@@ -98,6 +104,14 @@ async def make_second_user(
     from forge.config import get_settings
 
     db = get_db()
-    user = await db.create_user(hash_password(password), "User B", email=email)
+    pair = generate_keypair()
+    # password arg kept for call-site compat; auth is Nostr pubkey based.
+    _ = password
+    user = await db.create_user(
+        NOSTR_PASSWORD_SENTINEL,
+        "User B",
+        email=email,
+        nostr_pubkey=pair.public_hex,
+    )
     token = create_access_token(user["id"], get_settings())
     return user["id"], token

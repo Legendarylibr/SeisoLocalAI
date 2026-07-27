@@ -45,7 +45,7 @@ Do not relax sandbox or crypto defaults without a very strong documented reason 
 ## Extending common areas (pointers)
 
 - **New training preset / recs**: `seiso/training/recommendations.py`, `seiso/training/dataset_analysis.py`, `seiso/training/practices.py`, `platform_caps.py`, example YAML in `configs/`. Update TrainPage + `docs/training/quickstart.md` if new knobs appear. Run `pytest tests/test_docs_accuracy.py`.
-- **Nostr provenance**: Opt-in only (`SEISO_ALLOW_NOSTR`). Digests-only events via `seiso/research/nostr/`; keys under `nostr_keys/` (HF-token style). Do not add DMs, agent tools, or always-on clients without a new design review. See [docs/provenance-nostr.md](docs/provenance-nostr.md).
+- **Nostr provenance**: Default path on (`SEISO_ALLOW_NOSTR=1`, public digests-only relays). Kill with `SEISO_ALLOW_NOSTR=0`. Auto-attest still opt-in (`SEISO_NOSTR_ATTEST`). Digests-only events via `seiso/research/nostr/`; keys under `nostr_keys/` (HF-token style). Do not add DMs, agent tools, or always-on social clients without a new design review. See [docs/provenance-nostr.md](docs/provenance-nostr.md).
 - **New kernel op**: Add to `seiso/kernels/cuda/` + `cuda_ops.py` + dispatch + hooks + tests. Update low-VRAM profile logic.
 - **New pipeline stage (compress/distill/rl)**: Update the stage router / config builder + manifest + the corresponding orchestrator + page.
 - **NeMo RL** (`method: nemo_rl`): external launcher in `seiso/nemo_rl/` — requires `SEISO_NEMO_RL_ROOT` pointing at a [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL) checkout + `uv`. Do not vendor NeMo RL into this repo.

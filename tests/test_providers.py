@@ -15,7 +15,7 @@ async def authed_client(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
         token = reg.json()["access_token"]
         client.headers["Authorization"] = f"Bearer {token}"

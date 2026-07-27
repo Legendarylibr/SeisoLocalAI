@@ -1,4 +1,4 @@
-"""Authentication routes."""
+"""Authentication routes — Nostr nsec proves ownership of npub identity."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import os
 from typing import Annotated, cast
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from forge.api.deps import clear_dependency_caches, close_dependency_caches, get_db
 from forge.config import ForgeSettings, StorageMode, get_settings
@@ -16,9 +16,7 @@ from forge.security.auth import (
     LoginRateLimiter,
     create_access_token,
     get_current_user_id,
-    hash_password,
     revoke_access_token,
-    verify_password,
 )
 from forge.security.client_ip import client_ip
 from forge.security.csrf import (
@@ -26,6 +24,12 @@ from forge.security.csrf import (
     clear_csrf_cookie,
     generate_csrf_token,
     set_csrf_cookie,
+)
+from forge.services.nostr_auth import (
+    NOSTR_PASSWORD_SENTINEL,
+    persist_user_signing_key,
+    resolve_identity,
+    user_public_view,
 )
 from seiso.security import generate_secret_key
 
@@ -37,13 +41,35 @@ router = APIRouter(prefix="/auth", tags=["auth"])
 
 
 class RegisterRequest(BaseModel):
-    # bcrypt truncates / rejects above 72 bytes — keep schema aligned.
-    password: str = Field(min_length=8, max_length=72)
+    """First-time setup: generate a key (default) or import an nsec."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nsec: str | None = Field(default=None, max_length=256)
+    # None = default path (generate when nsec omitted; import when nsec set).
+    generate: bool | None = None
     storage_mode: str | None = Field(default=None, pattern="^(persistent|ephemeral)$")
+
+    @model_validator(mode="after")
+    def _require_key_source(self) -> RegisterRequest:
+        has_nsec = bool(self.nsec and self.nsec.strip())
+        generate = self.generate
+        if generate is None:
+            generate = not has_nsec
+        if generate and has_nsec:
+            raise ValueError("Pass either generate=true or nsec, not both")
+        if not generate and not has_nsec:
+            raise ValueError("Provide nsec or set generate=true")
+        self.generate = generate
+        return self
 
 
 class LoginRequest(BaseModel):
-    password: str = Field(min_length=1, max_length=72)
+    """Sign in by proving possession of the account nsec."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    nsec: str = Field(min_length=8, max_length=256)
 
 
 class ResetSessionRequest(BaseModel):
@@ -54,12 +80,30 @@ class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: dict
+    # Returned only when Forge generated a fresh key during register.
+    nsec: str | None = None
 
 
 class OnboardingStatus(BaseModel):
     needs_onboarding: bool
     storage_mode: str
     storage_mode_configured: bool
+    auth_method: str = "nostr"
+
+
+def _set_session_cookies(
+    response: Response, token: str, settings: ForgeSettings
+) -> None:
+    csrf = generate_csrf_token()
+    response.set_cookie(
+        "seiso_token",
+        token,
+        httponly=True,
+        samesite="strict",
+        secure=settings.cookie_secure,
+        max_age=settings.session_hours * 3600,
+    )
+    set_csrf_cookie(response, csrf, secure=settings.cookie_secure)
 
 
 @router.get("/status", response_model=OnboardingStatus)
@@ -77,6 +121,7 @@ async def onboarding_status(
         needs_onboarding=count == 0,
         storage_mode=settings.storage_mode,
         storage_mode_configured=settings.storage_mode_configured,
+        auth_method="nostr",
     )
 
 
@@ -97,31 +142,35 @@ async def register(
         clear_dependency_caches()
     db = get_db()
     settings = get_settings()
+    generate = bool(body.generate)
+    try:
+        identity = resolve_identity(nsec=body.nsec, generate=generate)
+    except ValueError as exc:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(exc)) from exc
     try:
         user = await db.create_first_user(
-            hash_password(body.password), DEFAULT_DISPLAY_NAME
+            NOSTR_PASSWORD_SENTINEL,
+            DEFAULT_DISPLAY_NAME,
+            nostr_pubkey=identity.pubkey_hex,
         )
     except ValueError as exc:
         raise HTTPException(status.HTTP_403_FORBIDDEN, str(exc)) from exc
-    token = create_access_token(user["id"], settings)
-    csrf = generate_csrf_token()
-    response.set_cookie(
-        "seiso_token",
-        token,
-        httponly=True,
-        samesite="strict",
-        secure=settings.cookie_secure,
-        max_age=settings.session_hours * 3600,
+
+    persist_user_signing_key(
+        data_dir=settings.data_dir, user_id=user["id"], pair=identity.pair
     )
-    set_csrf_cookie(response, csrf, secure=settings.cookie_secure)
-    audit_event("auth_register", user_id=user["id"])
+    token = create_access_token(user["id"], settings)
+    _set_session_cookies(response, token, settings)
+    audit_event(
+        "auth_register",
+        user_id=user["id"],
+        nostr_pubkey=identity.pubkey_hex,
+        generated=generate,
+    )
     return AuthResponse(
         access_token=token,
-        user={
-            "id": user["id"],
-            "email": user["email"],
-            "display_name": user["display_name"],
-        },
+        user=user_public_view(user),
+        nsec=identity.nsec if generate else None,
     )
 
 
@@ -134,30 +183,30 @@ async def login(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> AuthResponse:
     _login_limiter.check(client_ip(request))
+    try:
+        identity = resolve_identity(nsec=body.nsec, generate=False)
+    except ValueError:
+        audit_event("auth_login_failed")
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials") from None
+
     user = await db.get_sole_user()
-    if not user or not verify_password(body.password, user["password_hash"]):
+    stored = str((user or {}).get("nostr_pubkey") or "").strip().lower()
+    if not user or not stored or stored != identity.pubkey_hex:
         audit_event("auth_login_failed")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
 
-    token = create_access_token(user["id"], settings)
-    csrf = generate_csrf_token()
-    response.set_cookie(
-        "seiso_token",
-        token,
-        httponly=True,
-        samesite="strict",
-        secure=settings.cookie_secure,
-        max_age=settings.session_hours * 3600,
+    # Refresh encrypted signing key (same nsec) for provenance attest.
+    persist_user_signing_key(
+        data_dir=settings.data_dir, user_id=user["id"], pair=identity.pair
     )
-    set_csrf_cookie(response, csrf, secure=settings.cookie_secure)
-    audit_event("auth_login", user_id=user["id"])
+    token = create_access_token(user["id"], settings)
+    _set_session_cookies(response, token, settings)
+    audit_event(
+        "auth_login", user_id=user["id"], nostr_pubkey=identity.pubkey_hex
+    )
     return AuthResponse(
         access_token=token,
-        user={
-            "id": user["id"],
-            "email": user["email"],
-            "display_name": user["display_name"],
-        },
+        user=user_public_view(user),
     )
 
 
@@ -168,11 +217,11 @@ async def reset_session(
     db: Annotated[Database, Depends(get_db)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict:
-    """Reset a forgotten-password local instance back to onboarding."""
+    """Reset a forgotten-key local instance back to onboarding."""
     if settings.allow_remote:
         raise HTTPException(
             status.HTTP_403_FORBIDDEN,
-            "Password reset is only available on local-only Forge instances",
+            "Session reset is only available on local-only Forge instances",
         )
     if body.confirmation.strip().upper() != "RESET":
         raise HTTPException(
@@ -238,9 +287,4 @@ async def me(
     # Issue CSRF cookie for existing sessions (e.g. after upgrade) so POST/SSE calls work.
     if not request.cookies.get(CSRF_COOKIE):
         set_csrf_cookie(response, generate_csrf_token(), secure=settings.cookie_secure)
-    return {
-        "id": user["id"],
-        "email": user["email"],
-        "display_name": user["display_name"],
-        "created_at": user["created_at"],
-    }
+    return user_public_view(user)

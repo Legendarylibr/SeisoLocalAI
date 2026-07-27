@@ -22,12 +22,16 @@ class UsersMixin:
         display_name: str,
         *,
         email: str | None = None,
+        nostr_pubkey: str | None = None,
     ) -> dict:
         """Atomically create the sole local user (registration is single-tenant)."""
         uid = str(uuid.uuid4())
         now = now_iso()
         normalized_name = display_name.strip()
         resolved_email = (email or f"{uid}@local.seiso").lower()
+        pubkey = (nostr_pubkey or "").strip().lower() or None
+        if pubkey is not None and len(pubkey) != 64:
+            raise ValueError("nostr_pubkey must be 64-char hex")
         async with self._conn() as conn:
             await conn.execute("BEGIN IMMEDIATE")
             cur = await conn.execute("SELECT COUNT(*) AS c FROM users")
@@ -36,14 +40,16 @@ class UsersMixin:
                 await conn.execute("ROLLBACK")
                 raise ValueError("Registration closed — user already exists")
             await conn.execute(
-                "INSERT INTO users (id, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)",
-                (uid, resolved_email, password_hash, normalized_name, now),
+                "INSERT INTO users (id, email, password_hash, display_name, nostr_pubkey, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (uid, resolved_email, password_hash, normalized_name, pubkey, now),
             )
             await conn.commit()
         return {
             "id": uid,
             "email": resolved_email,
             "display_name": normalized_name,
+            "nostr_pubkey": pubkey,
             "created_at": now,
         }
 
@@ -53,21 +59,27 @@ class UsersMixin:
         display_name: str,
         *,
         email: str | None = None,
+        nostr_pubkey: str | None = None,
     ) -> dict:
         uid = str(uuid.uuid4())
         now = now_iso()
         normalized_name = display_name.strip()
         resolved_email = (email or f"{uid}@local.seiso").lower()
+        pubkey = (nostr_pubkey or "").strip().lower() or None
+        if pubkey is not None and len(pubkey) != 64:
+            raise ValueError("nostr_pubkey must be 64-char hex")
         async with self._conn() as conn:
             await conn.execute(
-                "INSERT INTO users (id, email, password_hash, display_name, created_at) VALUES (?, ?, ?, ?, ?)",
-                (uid, resolved_email, password_hash, normalized_name, now),
+                "INSERT INTO users (id, email, password_hash, display_name, nostr_pubkey, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (uid, resolved_email, password_hash, normalized_name, pubkey, now),
             )
             await conn.commit()
         return {
             "id": uid,
             "email": resolved_email,
             "display_name": normalized_name,
+            "nostr_pubkey": pubkey,
             "created_at": now,
         }
 

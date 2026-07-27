@@ -68,7 +68,7 @@ Runs on **Windows**, **Linux**, **WSL2**, and **macOS**. See [docs/platforms/](d
 ## Quick start
 
 **Forge URL (all platforms):** [http://127.0.0.1:8765](http://127.0.0.1:8765)  
-On first launch, create your local admin password in the browser tab that opens.
+On first launch, create your local Nostr key (npub identity) in the browser tab that opens.
 
 ### Paths on your system
 
@@ -203,7 +203,7 @@ seiso forge               # http://127.0.0.1:8765
 seiso forge --open        # same, and open the browser
 ```
 
-On first launch, create your local admin password in the browser. User data (models, checkpoints, exports) lives in `~/.seiso` unless you set `SEISO_DATA_DIR`.
+On first launch, create or import a Nostr key (npub identity) in the browser. User data (models, checkpoints, exports) lives in `~/.seiso` unless you set `SEISO_DATA_DIR`.
 
 **Later sessions:** `cd "$HOME/Seiso" && source .venv/bin/activate && seiso forge`, or use `start` from the repo root after `scripts/install.sh` has registered it.
 

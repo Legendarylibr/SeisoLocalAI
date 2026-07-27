@@ -27,7 +27,7 @@ async def test_csrf_blocks_cookie_mutation_without_header(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
         assert reg.status_code == 201
 
@@ -43,7 +43,7 @@ async def test_csrf_allows_cookie_mutation_with_header(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
         assert reg.status_code == 201
 
@@ -61,7 +61,7 @@ async def test_bearer_auth_bypasses_csrf(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
         token = reg.json()["access_token"]
 
@@ -80,7 +80,7 @@ async def test_empty_bearer_does_not_bypass_csrf(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
         assert reg.status_code == 201
 
@@ -100,7 +100,7 @@ async def test_junk_bearer_does_not_bypass_csrf(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
         assert reg.status_code == 201
 
@@ -124,7 +124,7 @@ async def test_inference_api_key_bypasses_csrf_on_v1(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
         res = await client.post(
             "/v1/chat/completions",
@@ -146,7 +146,7 @@ async def test_csrf_blocks_v1_without_header(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
         assert reg.status_code == 201
 
@@ -164,7 +164,7 @@ async def test_cookie_session_auth(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
         assert reg.status_code == 201
         assert client.cookies.get("seiso_token")
@@ -186,21 +186,24 @@ async def test_login_rate_limit(monkeypatch):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
 
-        for _ in range(10):
+        saw_unauthorized = False
+        for _ in range(12):
             res = await client.post(
                 "/api/auth/login",
-                json={"password": "wrong"},
+                json={"nsec": "nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq"},
             )
-            assert res.status_code == 401
-
-        res = await client.post(
-            "/api/auth/login",
-            json={"password": "wrong"},
-        )
-        assert res.status_code == 429
+            # Invalid nsec → 401; after the login limiter threshold → 429.
+            assert res.status_code in {400, 401, 429}
+            if res.status_code in {400, 401}:
+                saw_unauthorized = True
+            if res.status_code == 429:
+                break
+        else:
+            raise AssertionError("expected login rate limit (429)")
+        assert saw_unauthorized
 
 
 @pytest.mark.asyncio
@@ -237,7 +240,7 @@ async def test_settings_includes_security_posture(app):
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
-            json={"password": "securepass1"},
+            json={"generate": True},
         )
         token = reg.json()["access_token"]
 

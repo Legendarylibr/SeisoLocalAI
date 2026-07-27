@@ -18,24 +18,37 @@ _BLOCKED_HOSTS = frozenset(
 )
 _LOCAL_HTTP_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
+# Public relays used when SEISO_NOSTR_RELAYS is unset (digests-only attestations).
+_DEFAULT_RELAYS = ("wss://nos.lol", "wss://relay.damus.io")
 
-def _env_enabled(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in {"1", "true", "yes", "on"}
+
+def _env_enabled(name: str, *, default: bool = False) -> bool:
+    raw = os.environ.get(name)
+    if raw is None or not str(raw).strip():
+        return default
+    return str(raw).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _env_disabled(name: str) -> bool:
+    return os.environ.get(name, "").strip().lower() in {"0", "false", "no", "off"}
 
 
 def nostr_allowed() -> bool:
-    """Master kill-switch; default off."""
-    return _env_enabled("SEISO_ALLOW_NOSTR")
+    """Outbound Nostr gate; default on. Set SEISO_ALLOW_NOSTR=0 to disable."""
+    if _env_disabled("SEISO_ALLOW_NOSTR"):
+        return False
+    return _env_enabled("SEISO_ALLOW_NOSTR", default=True)
 
 
 def nostr_auto_attest_enabled() -> bool:
-    return nostr_allowed() and _env_enabled("SEISO_NOSTR_ATTEST")
+    """Auto-attest after pipelines; default off (still requires nostr_allowed)."""
+    return nostr_allowed() and _env_enabled("SEISO_NOSTR_ATTEST", default=False)
 
 
 def relay_allowlist_from_env() -> list[str]:
     raw = os.environ.get("SEISO_NOSTR_RELAYS", "").strip()
     if not raw:
-        return []
+        return list(_DEFAULT_RELAYS) if nostr_allowed() else []
     return [part.strip() for part in raw.split(",") if part.strip()]
 
 

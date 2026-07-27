@@ -135,6 +135,10 @@ class RateLimiter:
         pruned.append(now)
         self._hits[client_ip] = pruned
 
+    def reset(self) -> None:
+        """Clear recorded hits (tests / process-local reloads)."""
+        self._hits.clear()
+
 
 class LoginRateLimiter(RateLimiter):
     """Stricter limiter for authentication endpoints."""
