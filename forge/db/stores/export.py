@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import json
 import uuid
+from typing import TYPE_CHECKING, Any
 
 from forge.db.stores.constants import _EXPORT_LIST_COLUMNS, column_list, now_iso
 
 
 class ExportMixin:
+    if TYPE_CHECKING:
+        def _enc(self, value: str) -> str: ...
+
+        def _decrypt_row(self, table: str, row: dict[str, Any]) -> dict[str, Any]: ...
+
     async def create_export_job(
         self, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
@@ -19,7 +25,7 @@ class ExportMixin:
                 """INSERT INTO export_jobs
                    (id, user_id, status, config_json, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                (jid, user_id, "pending", json.dumps(config), now, now),
+                (jid, user_id, "pending", self._enc(json.dumps(config)), now, now),
             )
             await conn.commit()
         return {"id": jid, "status": "pending", "config": config, "created_at": now}
@@ -33,7 +39,7 @@ class ExportMixin:
             ) as cur,
         ):
             row = await cur.fetchone()
-            return dict(row) if row else None
+            return self._decrypt_row("export_jobs", dict(row)) if row else None
 
     async def update_export_job_status(
         self,

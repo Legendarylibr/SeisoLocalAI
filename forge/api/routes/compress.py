@@ -90,7 +90,7 @@ async def _prepare_compress_config(
         user_id,
         config,
         config_file=req.config_file,
-        path_keys=("model_dir",),
+        path_keys=("model_dir", "teacher_model", "student_model"),
     )
 
     return config

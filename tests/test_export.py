@@ -318,7 +318,10 @@ def test_export_base_refuses_lora_only_checkpoint(tmp_path: Path):
 
 @patch("seiso.export.formats._push_hub")
 @patch("seiso.export.formats.merge_lora_checkpoint")
-def test_export_skips_hub_precheck_when_disabled(mock_merge, mock_push, tmp_path: Path):
+def test_export_skip_hub_precheck_still_rechecks_before_push(
+    mock_merge, mock_push, tmp_path: Path
+):
+    """skip_hub_precheck skips the pre-export gate only; push always re-prechecks."""
     sandbox = tmp_path / "data"
     ckpt = sandbox / "checkpoints" / "run1"
     ckpt.mkdir(parents=True)
@@ -326,6 +329,9 @@ def test_export_skips_hub_precheck_when_disabled(mock_merge, mock_push, tmp_path
 
     out = sandbox / "exports" / "job1"
     with patch("seiso.export.formats.precheck_hub_export") as mock_precheck:
+        mock_precheck.return_value = HubPrecheckResult(
+            repo_id="alice/model", ok=True, token_valid=True
+        )
         export_checkpoint(
             ExportOptions(
                 checkpoint=ckpt,
@@ -338,7 +344,8 @@ def test_export_skips_hub_precheck_when_disabled(mock_merge, mock_push, tmp_path
                 skip_hub_precheck=True,
             )
         )
-        mock_precheck.assert_not_called()
+        # Only the push-time re-precheck (no early pre-export call).
+        mock_precheck.assert_called_once()
     mock_push.assert_called_once()
 
 
@@ -368,7 +375,8 @@ def test_export_runs_hub_precheck_first(
             sandbox_root=sandbox,
         )
     )
-    mock_precheck.assert_called_once()
+    # Pre-export gate + push-time re-precheck.
+    assert mock_precheck.call_count == 2
     mock_push.assert_called_once()
 
 

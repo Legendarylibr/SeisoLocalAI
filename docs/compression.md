@@ -61,7 +61,7 @@ Default training data is `bigcode/starcoderdata` (Python code). Override via `co
 
 ### Stages
 
-`distill` → `prune` → `finetune` → `evaluate` → `export` → `quantize_gptq` / `quantize_awq` (all configurable).
+`distill` → `prune` → `finetune` → `quantize_gptq` / `quantize_awq` → `evaluate` → `export` (all configurable; stages are sorted to this order).
 
 | Stage | Description |
 |-------|-------------|

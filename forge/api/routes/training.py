@@ -378,6 +378,8 @@ async def start_training(
             user_id=user_id,
             inventory=inventory,
         )
+    except SecurityError as exc:
+        raise_forbidden(exc)
     except ValueError as exc:
         raise HTTPException(400, str(exc)) from exc
     training_config = {**training_config, "model_id": resolved_model_id}
@@ -442,7 +444,10 @@ async def start_training(
                 # Never overwrite a sticky terminal cancel written by cancel_training.
                 existing = await db.get_training_job(job_id, user_id)
                 existing_status = str((existing or {}).get("status") or "").lower()
-                if existing_status == "cancelled" and job.status.value == "completed":
+                if existing_status == "cancelled" and job.status.value in (
+                    "completed",
+                    "failed",
+                ):
                     job.status = JobStatus.CANCELLED
                 metrics_payload = serialize_metrics_payload(
                     orchestrator.get_metrics(job_id),
@@ -483,6 +488,10 @@ async def start_training(
                                 hub_metadata_from_request,
                                 resolve_hub_publish_token,
                             )
+                            from forge.services.memory_release import (
+                                prepare_for_gpu_task,
+                                release_after_task,
+                            )
                             from seiso.export.pipeline import auto_export_after_training
 
                             export_cfg = dict(body.export_on_complete)
@@ -516,12 +525,26 @@ async def start_training(
                                     ),
                                 }
                             )
-                            outputs = auto_export_after_training(
-                                Path(job.result["checkpoint_path"]),
-                                export_dir,
-                                export_cfg,
-                                sandbox_root=settings.data_dir,
+                            export_job_id = f"train-export-{job_id}"
+                            prep = prepare_for_gpu_task(
+                                task="export",
+                                job_id=export_job_id,
+                                user_id=user_id,
                             )
+                            try:
+                                outputs = await asyncio.to_thread(
+                                    auto_export_after_training,
+                                    Path(job.result["checkpoint_path"]),
+                                    export_dir,
+                                    export_cfg,
+                                    sandbox_root=settings.data_dir,
+                                )
+                            finally:
+                                release_after_task(
+                                    reason="export_on_complete",
+                                    resource_token=prep.get("resource_token"),
+                                    job_id=export_job_id,
+                                )
                             await register_export_outputs(
                                 db,
                                 user_id=user_id,
@@ -670,8 +693,15 @@ async def cancel_training(
 ) -> dict:
     if not await db.get_training_job(job_id, user_id):
         raise HTTPException(404, "Job not found")
-    assert_job_owner(orchestrator, job_id, user_id)
-    ok = await orchestrator.cancel(job_id)
+    # Allow durable-only cancel after restart / MAX_JOBS eviction (no in-memory job).
+    assert_job_owner(orchestrator, job_id, user_id, allow_missing=True)
+    from seiso.training.cancel import request as request_cancel
+
+    request_cancel(job_id)
+    if orchestrator.get_job(job_id):
+        ok = await orchestrator.cancel(job_id)
+    else:
+        ok = True
     if ok:
         await db.update_job_status(job_id, "cancelled", user_id=user_id)
     return {"cancelled": ok}

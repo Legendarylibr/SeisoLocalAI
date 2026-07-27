@@ -323,7 +323,13 @@ class SeisoTrainer:
                 if patch_session is not None:
                     patch_session.__exit__(None, None, None)
             finally:
-                release_training_memory(model)
+                # Avoid process-wide patch wipe when model load failed (model is None).
+                if model is not None:
+                    release_training_memory(model)
+                else:
+                    from seiso.memory.protection import release_cached_memory
+
+                    release_cached_memory(sync=False)
                 self._cleanup_gpu(None)
 
     def _prepare_datasets(self, tokenizer) -> PreparedTrainingDatasets:

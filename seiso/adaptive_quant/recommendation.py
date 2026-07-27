@@ -57,10 +57,10 @@ def recommend_quantization(trainer, config: FrameworkConfig) -> dict[str, object
     )
 
     evidence = infer_evidence_level(config)
-    has_external_quality = bool(config.external_quality_path)
-    # Deploy claims require local llama.cpp measurements AND an external quality
-    # sidecar. llama.cpp alone still uses simulator perplexity without sidecar.
-    claimable = evidence == EVIDENCE_LOCAL_LLAMA_CPP and has_external_quality
+    external_applied = _external_quality_applied(adaptive_results)
+    # Deploy claims require local llama.cpp measurements AND external quality
+    # scores actually applied to rollout prompts (path alone is insufficient).
+    claimable = evidence == EVIDENCE_LOCAL_LLAMA_CPP and external_applied
     payload: dict[str, object] = {
         "detected_hardware": detected.to_metadata() if detected is not None else None,
         "target_hardware": target_hardware.value,
@@ -71,6 +71,7 @@ def recommend_quantization(trainer, config: FrameworkConfig) -> dict[str, object
         "candidates": evaluated_candidates,
         "evidence_level": evidence,
         "deploy_quality_claimable": claimable,
+        "external_quality_applied": external_applied,
     }
     if evidence == EVIDENCE_SIMULATOR:
         payload["deploy_quality_note"] = (
@@ -78,10 +79,11 @@ def recommend_quantization(trainer, config: FrameworkConfig) -> dict[str, object
             "backend=llama_cpp with external_quality_path before treating "
             "quant recommendations as production quality."
         )
-    elif evidence == EVIDENCE_LOCAL_LLAMA_CPP and not has_external_quality:
+    elif evidence == EVIDENCE_LOCAL_LLAMA_CPP and not external_applied:
         payload["deploy_quality_note"] = (
-            "llama.cpp latency/throughput are local, but perplexity remains "
-            "simulator-derived without external_quality_path — not deploy-claimable."
+            "llama.cpp latency/throughput are local, but perplexity was not "
+            "replaced by external_quality scores for recommendation prompts — "
+            "not deploy-claimable."
         )
     payload["decision"] = recommendation_decision_block(payload)
     return payload
@@ -204,6 +206,17 @@ def _summarize_results(results: list[EpisodeResult]) -> dict[str, object]:
     summary["unstable_rate"] = unstable_count / len(results) if results else 0.0
     summary["mode_histogram"] = dict(mode_histogram)
     return summary
+
+
+def _external_quality_applied(results: list[EpisodeResult]) -> bool:
+    """True when every result used an external:* perplexity source."""
+    if not results:
+        return False
+    for result in results:
+        source = str(getattr(result.metrics, "perplexity_source", "") or "")
+        if not source.startswith("external:"):
+            return False
+    return True
 
 
 def _candidate_template(decision: QuantizationDecision) -> QuantizationDecision:

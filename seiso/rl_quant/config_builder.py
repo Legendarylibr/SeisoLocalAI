@@ -70,20 +70,24 @@ def _path_overrides(payload: dict[str, Any], product: Any) -> dict[str, Any]:
         "policy_checkpoint"
     ):
         overrides["resume_from_checkpoint"] = str(resume)
-    # Product/CLI "Fine-tune checkpoint" and Forge link_training_job_id feed
-    # checkpoint_path — that is a quality sidecar / HF train artifact, not an
-    # adaptive_quant policy JSON resume path.
+    # Explicit quality sidecar only — never treat an HF train checkpoint dir as
+    # external_quality_path (that must be JSON/JSONL prompt scores).
     if quality := (
-        payload.get("external_quality_path")
-        or payload.get("quality_sidecar")
-        or payload.get("checkpoint_path")
+        payload.get("external_quality_path") or payload.get("quality_sidecar")
     ):
         overrides["external_quality_path"] = str(quality)
+
+    # Product/CLI "Fine-tune checkpoint" and Forge link_training_job_id feed
+    # checkpoint_path — HF train artifact used as GGUF export source.
+    if checkpoint := payload.get("checkpoint_path"):
+        overrides["llama_cpp_gguf_export_source"] = str(checkpoint)
+        if payload.get("gguf_export"):
+            overrides["llama_cpp_gguf_export_enabled"] = True
 
     if gguf := payload.get("gguf_path"):
         overrides["llama_cpp_model"] = str(gguf)
         overrides["backend"] = "llama_cpp"
-        if payload.get("gguf_export"):
+        if payload.get("gguf_export") and "llama_cpp_gguf_export_source" not in overrides:
             overrides["llama_cpp_gguf_export_source"] = str(gguf)
 
     if binary := payload.get("llama_cpp_binary"):

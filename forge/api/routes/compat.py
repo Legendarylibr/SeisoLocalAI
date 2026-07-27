@@ -319,8 +319,12 @@ async def chat_completions(
     except Exception:
         await orchestrator.cancel_generation_for_user(user_id)
         raise
+    finally:
+        orchestrator.end_generation_for_user(user_id, epoch=gen_epoch)
     if not job or job.status.value == "failed":
         raise HTTPException(500, job.error if job else "Inference failed")
+    if job.status.value == "cancelled":
+        raise HTTPException(409, "Inference cancelled")
 
     content = sanitize_llm_output(job.result.get("content", ""), strip_tool_calls=not body.tools)
     prompt_tokens = prompt_token_estimate(body.messages)

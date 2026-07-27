@@ -164,7 +164,7 @@ class DatabaseCore:
                    VALUES (?, ?, ?, ?, ?, ?)"""  # nosec B608
             await conn.execute(
                 query,
-                (jid, user_id, "pending", json.dumps(config), now, now),
+                (jid, user_id, "pending", self._enc(json.dumps(config)), now, now),
             )
             await conn.commit()
         return {"id": jid, "status": "pending", "config": config, "created_at": now}
@@ -182,7 +182,7 @@ class DatabaseCore:
             ) as cur,
         ):
             row = await cur.fetchone()
-            return dict(row) if row else None
+            return self._decrypt_row(table, dict(row)) if row else None
 
     async def _list_config_jobs(
         self,

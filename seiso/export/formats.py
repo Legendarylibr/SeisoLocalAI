@@ -182,6 +182,16 @@ def export_checkpoint(
         push_folder = _select_hub_folder(out_root, options.formats)
         meta = _enriched_metadata(options, ckpt)
         meta.export_formats = [f.value for f in options.formats]
+        # Always re-precheck immediately before push (TOCTOU after long export work).
+        log(f"Re-running Hub precheck for {options.hub_repo} before push...")
+        push_precheck = precheck_hub_export(
+            repo_id=options.hub_repo,
+            token=options.hub_token,
+            metadata=meta,
+            formats=[f.value for f in options.formats],
+            on_log=log,
+        )
+        assert_hub_precheck_ok(push_precheck)
         _push_hub(
             options.hub_repo,
             options.hub_token,

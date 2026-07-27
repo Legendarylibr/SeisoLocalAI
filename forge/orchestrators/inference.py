@@ -210,8 +210,12 @@ class InferenceOrchestrator(Orchestrator):
             self._emit_log(job_id, msg)
 
         result_router_meta: dict[str, Any] | None = None
+        # Capture epoch at reserve time so a stale finally cannot clear a newer
+        # reservation after cancel → restart (epoch bump).
         if not self._active_generation_user_id:
-            self.begin_generation_for_user(user_id)
+            gen_epoch = self.begin_generation_for_user(user_id)
+        else:
+            gen_epoch = self._active_generation_epoch
         try:
             if provider:
                 reply = await self._provider_chat(provider, payload, messages, user_id=user_id)
@@ -242,7 +246,7 @@ class InferenceOrchestrator(Orchestrator):
                 reply = await self._local_chat(payload)
                 backend = payload.get("inference_backend") or active
         finally:
-            self.end_generation_for_user(user_id)
+            self.end_generation_for_user(user_id, epoch=gen_epoch)
 
         self._emit_log(job_id, f"Generated {len(reply)} chars")
         result: dict[str, Any] = {
@@ -267,8 +271,9 @@ class InferenceOrchestrator(Orchestrator):
         # Only release ownership if this call reserved it. Callers that already
         # began generation (chat multi-pass auto-continue) keep the hold.
         started_here = self._active_generation_user_id is None
+        gen_epoch: int | None = None
         if started_here:
-            self.begin_generation_for_user(user_id)
+            gen_epoch = self.begin_generation_for_user(user_id)
         try:
             async for token in router_stream_chat(
                 settings,
@@ -280,7 +285,7 @@ class InferenceOrchestrator(Orchestrator):
                 yield token
         finally:
             if started_here:
-                self.end_generation_for_user(user_id)
+                self.end_generation_for_user(user_id, epoch=gen_epoch)
 
     async def _router_chat(
         self,
@@ -315,15 +320,16 @@ class InferenceOrchestrator(Orchestrator):
         """
         user_id = payload.get("user_id")
         started_here = self._active_generation_user_id is None
+        gen_epoch: int | None = None
         if started_here:
-            self.begin_generation_for_user(user_id)
+            gen_epoch = self.begin_generation_for_user(user_id)
         try:
             async with self._local_inference_lock:
                 async for update in self._runner.stream_updates(payload):
                     yield update
         finally:
             if started_here:
-                self.end_generation_for_user(user_id)
+                self.end_generation_for_user(user_id, epoch=gen_epoch)
 
     def _active_backend(self, payload: dict[str, Any]) -> str:
         explicit = (payload.get("inference_backend") or "").lower()
@@ -392,8 +398,9 @@ class InferenceOrchestrator(Orchestrator):
         messages = list(payload.get("messages", []))
         user_id = payload.get("user_id")
         started_here = self._active_generation_user_id is None
+        gen_epoch: int | None = None
         if started_here:
-            self.begin_generation_for_user(user_id)
+            gen_epoch = self.begin_generation_for_user(user_id)
         try:
             audit_event(
                 "provider_chat_stream",
@@ -412,7 +419,7 @@ class InferenceOrchestrator(Orchestrator):
                 yield token
         finally:
             if started_here:
-                self.end_generation_for_user(user_id)
+                self.end_generation_for_user(user_id, epoch=gen_epoch)
 
     async def _local_chat(self, payload: dict[str, Any]) -> str:
         async with self._local_inference_lock:

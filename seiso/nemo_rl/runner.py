@@ -47,8 +47,22 @@ def train_nemo_rl(
             if not value or value.startswith(("http://", "https://", "s3://")):
                 continue
             candidate = Path(value).expanduser()
-            if candidate.is_absolute() or value.startswith(("./", "../", "~/")):
-                assert_within(sandbox, candidate)
+            looks_like_path = (
+                candidate.is_absolute()
+                or value.startswith(("~/", "./", "../"))
+                or "/" in value
+                or "\\" in value
+                or ".." in candidate.parts
+            )
+            if looks_like_path:
+                # Resolve relative values against cwd (NeMo launch dir) so
+                # embedded ``..`` segments cannot skip the sandbox check.
+                target = (
+                    candidate
+                    if candidate.is_absolute()
+                    else (Path.cwd() / candidate)
+                )
+                assert_within(sandbox, target)
 
     try:
         nemo_root = resolve_nemo_rl_root(config.nemo_rl_root)

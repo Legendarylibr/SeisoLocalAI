@@ -6,7 +6,6 @@ import asyncio
 import contextlib
 import json
 import os
-import threading
 import time
 from pathlib import Path
 from typing import Any
@@ -24,7 +23,9 @@ from seiso.training.multi_gpu import (
     resolve_distributed_plan,
 )
 
-_HF_TOKEN_LOCK = threading.Lock()
+# asyncio.Lock: serialize HF token env mutation without blocking the event loop
+# (threading.Lock held across await deadlocks all Forge requests).
+_HF_TOKEN_LOCK = asyncio.Lock()
 
 
 class TrainingOrchestrator(Orchestrator):
@@ -45,7 +46,7 @@ class TrainingOrchestrator(Orchestrator):
         import os
 
         hf_token = payload.get("hf_token")
-        with _HF_TOKEN_LOCK:
+        async with _HF_TOKEN_LOCK:
             prev_hf_token = os.environ.get("HF_TOKEN")
             prev_hub_token = os.environ.get("HUGGING_FACE_HUB_TOKEN")
             token_applied = False

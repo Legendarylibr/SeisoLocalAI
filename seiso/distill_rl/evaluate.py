@@ -54,10 +54,12 @@ def evaluate_pipeline(
         "eval_prompt_count": len(eval_prompts),
     }
     val_rows = _load_jsonl(val_preferences_path)
+    skipped: list[str] = []
 
     for name, model_ref in checkpoints.items():
         model_path = _resolve_model_ref(model_ref)
         if model_path is None:
+            skipped.append(f"{name}:{model_ref!r}")
             continue
         if on_log:
             on_log(f"Evaluate: {name} → {model_path}")
@@ -74,6 +76,14 @@ def evaluate_pipeline(
             trust_remote_code=trust_remote_code,
         )
         results["checkpoints"][name] = metrics
+
+    if checkpoints and not results["checkpoints"]:
+        detail = ", ".join(skipped) if skipped else "none resolved"
+        raise FileNotFoundError(
+            f"Evaluate found no usable checkpoints (skipped: {detail})"
+        )
+    if skipped and on_log:
+        on_log(f"Evaluate skipped missing checkpoints: {', '.join(skipped)}")
 
     if benchmark_verifiable:
         from seiso.distill_rl.verifiable_benchmarks import (
@@ -152,14 +162,15 @@ def _val_preference_metrics(
     tokenizer,
     val_rows: list[dict[str, Any]],
     device,
-) -> dict[str, float | int]:
+) -> dict[str, float | int | bool | None]:
     if not val_rows:
         return {
-            "val_preference_accuracy": 0.0,
-            "val_preference_margin_mean": 0.0,
-            "val_preference_margin_median": 0.0,
+            "val_preference_accuracy": None,
+            "val_preference_margin_mean": None,
+            "val_preference_margin_median": None,
             "val_preference_count": 0,
-            "alignment_score": 0.0,
+            "alignment_score": None,
+            "val_preference_unavailable": True,
         }
 
     correct = 0

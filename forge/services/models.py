@@ -97,13 +97,15 @@ def resolve_training_model_id(
         raise ValueError(GGUF_ONLY_REPO_MESSAGE)
 
     if is_local_filesystem_path(model_id):
-        try:
-            path = assert_user_path(data_dir, user_id, model_id)
-            if path.exists() and snapshot_has_trainable_weights(path):
-                resolved = str(path.resolve())
-                return resolved, resolved
-        except SecurityError:
-            pass
+        # Fail closed: never return a forbidden local path as model_id for
+        # from_pretrained (cross-user / host escapes).
+        path = assert_user_path(data_dir, user_id, model_id)
+        if path.exists() and snapshot_has_trainable_weights(path):
+            resolved = str(path.resolve())
+            return resolved, resolved
+        raise ValueError(
+            f"Local model path is not a trainable snapshot: {model_id}"
+        )
 
     hf_source = f"hf:{model_id}"
     for row in inventory or []:

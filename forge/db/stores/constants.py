@@ -5,6 +5,13 @@ from __future__ import annotations
 ENCRYPTED_COLUMNS: dict[str, tuple[str, ...]] = {
     "chat_messages": ("content", "metadata_json"),
     "providers": ("config_json",),
+    # Job configs may contain paths / hub metadata; encrypt at rest.
+    "training_jobs": ("config_json",),
+    "export_jobs": ("config_json",),
+    "rl_quant_jobs": ("config_json",),
+    "compress_jobs": ("config_json",),
+    "distill_rl_jobs": ("config_json",),
+    "hub_publish_jobs": ("config_json",),
 }
 
 SCHEMA = """

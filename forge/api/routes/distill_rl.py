@@ -36,7 +36,12 @@ STAGE_HELP = {
     "evaluate": "Perplexity + validation preference accuracy",
 }
 
-_DISTILL_PATH_KEYS = ("distilled_path", "prompt_library")
+_DISTILL_PATH_KEYS = (
+    "distilled_path",
+    "prompt_library",
+    "teacher_model",
+    "student_model",
+)
 
 
 class DistillRLStartRequest(BaseModel):
