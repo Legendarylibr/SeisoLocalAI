@@ -102,7 +102,7 @@ def encrypt_ncryptsec(
     """Encrypt a 32-byte secp256k1 secret → ncryptsec1…"""
     if len(secret) != 32:
         raise ValueError("secret must be 32 bytes")
-    if not password:
+    if not password or not password.strip():
         raise ValueError("password is required")
     if key_security not in (0x00, 0x01, 0x02):
         raise ValueError("key_security must be 0x00, 0x01, or 0x02")
@@ -119,7 +119,7 @@ def encrypt_ncryptsec(
 
 def decrypt_ncryptsec(ncryptsec: str, password: str) -> bytes:
     """Decrypt ncryptsec1… → 32-byte secret."""
-    if not password:
+    if not password or not password.strip():
         raise ValueError("password is required")
     hrp, data = bech32_decode(ncryptsec.strip())
     if hrp != "ncryptsec":
@@ -128,7 +128,9 @@ def decrypt_ncryptsec(ncryptsec: str, password: str) -> bytes:
         raise ValueError("invalid ncryptsec payload length")
     if data[0] != _VERSION:
         raise ValueError(f"unsupported ncryptsec version {data[0]}")
-    log_n = data[1]
+    log_n = int(data[1])
+    if not (1 <= log_n <= 22):
+        raise ValueError("log_n must be between 1 and 22")
     salt = data[2:18]
     nonce = data[18:42]
     aad = data[42:43]

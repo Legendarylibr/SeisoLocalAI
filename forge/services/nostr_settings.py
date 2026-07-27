@@ -96,9 +96,14 @@ def nostr_status(
     pair = load_keypair(identity=user_id, data_dir=data_dir) if npub else None
     attest_pubkey = pair.public_hex if pair else None
     auth = (auth_pubkey or "").strip().lower() or None
-    identity_match = (
-        True if not auth or not attest_pubkey else auth == attest_pubkey
-    )
+    # True only when both sides exist and match. Missing attest material is a
+    # mismatch when an account npub is configured (e.g. after clear / ephemeral).
+    if auth and attest_pubkey:
+        identity_match = auth == attest_pubkey
+    elif auth and not attest_pubkey:
+        identity_match = False
+    else:
+        identity_match = True
     return {
         "server_allow_nostr": nostr_allowed(),
         "key_saved": npub is not None,

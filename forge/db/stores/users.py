@@ -124,7 +124,7 @@ class UsersMixin:
     async def update_user_nostr_pubkey(self, user_id: str, nostr_pubkey: str) -> dict:
         """Bind account identity to a new npub (settings key rotate / import)."""
         pubkey = (nostr_pubkey or "").strip().lower()
-        if len(pubkey) != 64:
+        if len(pubkey) != 64 or any(ch not in "0123456789abcdef" for ch in pubkey):
             raise ValueError("nostr_pubkey must be 64-char hex")
         async with self._conn() as conn:  # type: ignore[attr-defined]
             cur = await conn.execute(

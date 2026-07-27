@@ -6,6 +6,7 @@ import unicodedata
 
 import pytest
 
+from seiso.research.nostr.bech32 import bech32_decode, bech32_encode
 from seiso.research.nostr.nip49 import decrypt_ncryptsec, encrypt_ncryptsec
 
 # Official NIP-49 decryption vector (test-only; not production secrets).
@@ -17,6 +18,14 @@ _NIP49_TEST_PASSWORD = "nostr"
 _NIP49_TEST_SECRET_HEX = (
     "3501454135014541350145413501453fefb02227e449e57cf4d3a3ce05378683"
 )
+
+
+def _mutate_log_n(ncryptsec: str, log_n: int) -> str:
+    hrp, data = bech32_decode(ncryptsec.strip())
+    assert hrp == "ncryptsec"
+    mutated = bytearray(data)
+    mutated[1] = log_n & 0xFF
+    return bech32_encode("ncryptsec", bytes(mutated))
 
 
 def test_nip49_official_decrypt_vector():
@@ -37,11 +46,51 @@ def test_nip49_wrong_password():
 
 
 def test_nip49_password_nfkc_normalization():
-    # ÅΩṡ (precomposed / compatibility) — NFKC of the NIP example family.
     secret = bytes.fromhex(_NIP49_TEST_SECRET_HEX)
-    # Use a password that changes under NFKC
     password = "ÅΩẛ̣"  # U+212B U+2126 U+1E9B U+0323
     enc = encrypt_ncryptsec(secret, password, log_n=16)
-    # Same visual after NFKC should decrypt
     normalized = unicodedata.normalize("NFKC", password)
     assert decrypt_ncryptsec(enc, normalized) == secret
+
+
+def test_nip49_decrypt_rejects_log_n_out_of_range():
+    secret = bytes.fromhex(_NIP49_TEST_SECRET_HEX)
+    enc = encrypt_ncryptsec(secret, "bound-check", log_n=16)
+    for bad in (0, 23, 30, 255):
+        mutated = _mutate_log_n(enc, bad)
+        with pytest.raises(ValueError, match="log_n"):
+            decrypt_ncryptsec(mutated, "bound-check")
+
+
+def test_nip49_encrypt_rejects_log_n_out_of_range():
+    secret = bytes.fromhex(_NIP49_TEST_SECRET_HEX)
+    with pytest.raises(ValueError, match="log_n"):
+        encrypt_ncryptsec(secret, "x", log_n=0)
+    with pytest.raises(ValueError, match="log_n"):
+        encrypt_ncryptsec(secret, "x", log_n=23)
+
+
+def test_nip49_rejects_empty_and_whitespace_password():
+    secret = bytes.fromhex(_NIP49_TEST_SECRET_HEX)
+    for bad in ("", "   ", "\t"):
+        with pytest.raises(ValueError, match="password"):
+            encrypt_ncryptsec(secret, bad)
+        with pytest.raises(ValueError, match="password"):
+            decrypt_ncryptsec(_NIP49_TEST_NCRYPTSEC, bad)
+
+
+def test_nip49_rejects_bad_secret_length_and_key_security():
+    with pytest.raises(ValueError, match="32 bytes"):
+        encrypt_ncryptsec(b"short", "pass")
+    secret = bytes.fromhex(_NIP49_TEST_SECRET_HEX)
+    with pytest.raises(ValueError, match="key_security"):
+        encrypt_ncryptsec(secret, "pass", key_security=0x03)
+
+
+def test_nip49_rejects_invalid_prefix_and_payload():
+    with pytest.raises(ValueError, match="prefix|ncryptsec|bech32|checksum"):
+        decrypt_ncryptsec("nsec1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq", "x")
+    # Valid bech32 checksum with wrong HRP.
+    wrong_hrp = bech32_encode("npub", bytes(32))
+    with pytest.raises(ValueError, match="prefix"):
+        decrypt_ncryptsec(wrong_hrp, "x")

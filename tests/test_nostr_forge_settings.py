@@ -324,3 +324,111 @@ async def test_ephemeral_mode_skips_nostr_key_persist(tmp_path: Path, monkeypatc
         assert reg.status_code == 201, reg.text
         user_id = reg.json()["user"]["id"]
         assert load_npub(identity=user_id, data_dir=tmp_path) is None
+        headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+        status = await client.get("/api/settings/nostr", headers=headers)
+        assert status.status_code == 200
+        assert status.json()["key_saved"] is False
+        assert status.json()["identity_match"] is False
+        assert status.json()["key_persisted"] is False
+
+        regen = await client.post("/api/settings/nostr/keygen", headers=headers)
+        assert regen.status_code == 200
+        assert regen.json()["nsec"].startswith("nsec1")
+        assert load_npub(identity=user_id, data_dir=tmp_path) is None
+        me = await client.get("/api/auth/me", headers=headers)
+        assert me.json()["npub"] == regen.json()["npub"]
+
+
+@pytest.mark.asyncio
+async def test_clear_nostr_key_leaves_auth_pubkey_and_login_works(tmp_path: Path):
+    pair = generate_keypair()
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post("/api/auth/register", json={"nsec": pair.nsec})
+        assert reg.status_code == 201
+        headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+        user_id = reg.json()["user"]["id"]
+
+        cleared = await client.delete("/api/settings/nostr/key", headers=headers)
+        assert cleared.status_code == 200
+        assert load_npub(identity=user_id, data_dir=tmp_path) is None
+
+        status = await client.get("/api/settings/nostr", headers=headers)
+        assert status.json()["key_saved"] is False
+        assert status.json()["identity_match"] is False
+
+        me = await client.get("/api/auth/me", headers=headers)
+        assert me.json()["npub"] == pair.npub
+
+        login = await client.post("/api/auth/login", json={"nsec": pair.nsec})
+        assert login.status_code == 200
+        assert load_npub(identity=user_id, data_dir=tmp_path) == pair.npub
+
+
+@pytest.mark.asyncio
+async def test_settings_keygen_updates_auth_and_me_never_echoes_nsec(tmp_path: Path):
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post("/api/auth/register", json={"generate": True})
+        assert reg.status_code == 201
+        headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
+        old_npub = reg.json()["user"]["npub"]
+
+        regen = await client.post("/api/settings/nostr/keygen", headers=headers)
+        assert regen.status_code == 200
+        new_nsec = regen.json()["nsec"]
+        new_npub = regen.json()["npub"]
+        assert new_npub != old_npub
+
+        me = await client.get("/api/auth/me", headers=headers)
+        assert me.status_code == 200
+        assert me.json()["npub"] == new_npub
+        assert "nsec" not in me.json()
+        assert new_nsec not in me.text
+
+        status = await client.get("/api/settings/nostr", headers=headers)
+        assert status.json()["identity_match"] is True
+        assert status.json()["npub"] == new_npub
+
+
+def test_wipe_nostr_identity_removes_prefs_and_encryption_key(
+    tmp_path: Path, public_dns
+):
+    from seiso.research.nostr.keys import encryption_key_path
+
+    gen = generate_user_nostr_key(tmp_path, "u1")
+    save_nostr_prefs(
+        tmp_path,
+        "u1",
+        NostrPrefs(auto_attest=True, relays=["wss://relay.example.com"]),
+    )
+    enc = encryption_key_path(tmp_path)
+    assert enc.is_file()
+    assert load_npub(identity="u1", data_dir=tmp_path) == gen["npub"]
+    prefs_path = tmp_path / "nostr_keys" / "u1.prefs.json"
+    assert prefs_path.is_file()
+
+    report = wipe_nostr_identity_material(tmp_path)
+    assert report["encryption_key_rotated"] is True
+    assert not enc.exists()
+    assert not prefs_path.exists()
+    assert load_keypair(identity="u1", data_dir=tmp_path) is None
+
+
+@pytest.mark.asyncio
+async def test_update_user_nostr_pubkey_rejects_non_hex(tmp_path: Path):
+    from forge.api.deps import get_db
+
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post("/api/auth/register", json={"generate": True})
+        assert reg.status_code == 201
+        user_id = reg.json()["user"]["id"]
+        db = get_db()
+        with pytest.raises(ValueError, match="64-char hex"):
+            await db.update_user_nostr_pubkey(user_id, "z" * 64)
+        with pytest.raises(ValueError, match="64-char hex"):
+            await db.update_user_nostr_pubkey(user_id, "abcd")
