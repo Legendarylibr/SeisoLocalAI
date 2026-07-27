@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -392,8 +393,6 @@ def test_slime_manifest_uses_runtime_world_size(monkeypatch, tmp_path: Path):
         }
     )
     _write_slime_manifest(cfg, tmp_path)
-    import json
-
     payload = json.loads((tmp_path / "seiso_manifest.json").read_text(encoding="utf-8"))
     assert payload["post_training_algorithm"] == "single_gpu_slime_grpo"
 
@@ -494,8 +493,13 @@ def test_resolve_distributed_artifact_prefers_slime_final(tmp_path: Path):
     older.mkdir()
     (older / "adapter_config.json").write_text("{}", encoding="utf-8")
     (out / "slime_training_state.json").write_text(
-        '{"final_checkpoint_dir": "%s", "best_checkpoint_dir": "%s"}\n'
-        % (out, older),
+        json.dumps(
+            {
+                "final_checkpoint_dir": str(out),
+                "best_checkpoint_dir": str(older),
+            }
+        )
+        + "\n",
         encoding="utf-8",
     )
 
