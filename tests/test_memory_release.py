@@ -160,6 +160,38 @@ def test_prepare_for_gpu_task_releases_lock_on_unload_failure(monkeypatch):
     assert memory_release.running_gpu_task_kinds() == []
 
 
+def test_prepare_for_gpu_task_refuses_uncertain_ollama_orphan_unload(monkeypatch):
+    """Native Linux must refuse GPU tasks when orphan Ollama unload is unconfirmed."""
+    from forge.services import memory_release
+
+    memory_release._ACTIVE_GPU_TASKS.clear()
+    monkeypatch.setattr(memory_release, "running_gpu_task_kinds", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        "seiso.memory.gpu_resource_lock.acquire_gpu_resource_lock", lambda: None
+    )
+    monkeypatch.setattr(
+        "seiso.memory.gpu_resource_lock.release_gpu_resource_lock", lambda: None
+    )
+    monkeypatch.setattr(
+        memory_release,
+        "release_inference_memory",
+        lambda **_kwargs: {
+            "release_notes": [
+                "Could not confirm Ollama orphan unload: still resident",
+            ]
+        },
+    )
+    monkeypatch.setattr(
+        "seiso.inference.backends._native_linux_requires_isolated_gguf",
+        lambda: True,
+    )
+
+    with pytest.raises(RuntimeError, match="refusing to start training"):
+        memory_release.prepare_for_gpu_task(task="training", job_id="train-oom")
+
+    assert memory_release.running_gpu_task_kinds() == []
+
+
 def test_prepare_for_gpu_task_reservation_is_atomic(monkeypatch):
     from forge.services import memory_release
 

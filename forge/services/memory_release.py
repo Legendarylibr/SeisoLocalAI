@@ -340,7 +340,10 @@ def prepare_for_gpu_task(
         raise
     release_notes = [str(note) for note in result.get("release_notes") or []]
     sidecar_unload_uncertain = any(
-        "Could not confirm llama-swap external model unload" in note or "Ollama unload" in note
+        "Could not confirm llama-swap external model unload" in note
+        or "Could not confirm Ollama orphan unload" in note
+        or "Ollama unload" in note
+        or "Ollama still reports resident" in note
         for note in release_notes
     )
     if sidecar_unload_uncertain:
