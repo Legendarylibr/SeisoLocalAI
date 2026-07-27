@@ -160,3 +160,38 @@ def test_kernel_patch_session_commit_keeps_patches(monkeypatch):
     assert _ACTIVE_PATCH_SESSION.get() is None
     assert restore_kernel_patches(model) >= 1
     assert not hasattr(model[0], "_seiso_orig_forward")
+
+
+def test_gpu_task_restores_kernel_patches_on_success_and_exception(monkeypatch):
+    """CLI gpu_task must restore patches in finally (success and exception)."""
+    restores: list[int] = []
+
+    monkeypatch.setattr(
+        "seiso.kernels.lifecycle.restore_kernel_patches",
+        lambda *args, **kwargs: restores.append(1) or 0,
+    )
+
+    class _Pool:
+        def prepare_for_load(self):
+            return None
+
+    monkeypatch.setattr(
+        "seiso.inference.model_pool.get_model_pool",
+        lambda: _Pool(),
+    )
+    monkeypatch.setattr(
+        "seiso.memory.protection.release_cached_memory",
+        lambda **kwargs: None,
+    )
+
+    from seiso.memory.gpu_task import gpu_task
+
+    with gpu_task("train"):
+        pass
+    assert restores == [1]
+
+    restores.clear()
+    with __import__("pytest").raises(RuntimeError, match="boom"):
+        with gpu_task("train"):
+            raise RuntimeError("boom")
+    assert restores == [1]
