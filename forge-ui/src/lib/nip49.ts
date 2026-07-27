@@ -3,9 +3,9 @@
  * @see https://github.com/nostr-protocol/nips/blob/master/49.md
  */
 import { bech32 } from "@scure/base";
-import { scrypt } from "@noble/hashes/scrypt";
-import { xchacha20poly1305 } from "@noble/ciphers/chacha";
-import { concatBytes, randomBytes } from "@noble/hashes/utils";
+import { scrypt } from "@noble/hashes/scrypt.js";
+import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { concatBytes, randomBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 
 const BECH32_LIMIT = 5000;
 const PAYLOAD_LEN = 91;
@@ -50,7 +50,7 @@ export function encryptNip49(
     throw new Error("passphrase is required");
   }
   const salt = randomBytes(16);
-  const key = scrypt(password.normalize("NFKC"), salt, {
+  const key = scrypt(utf8ToBytes(password.normalize("NFKC")), salt, {
     N: 2 ** logn,
     r: 8,
     p: 1,
@@ -100,7 +100,7 @@ export function decryptNip49(ncryptsec: string, password: string): Uint8Array {
   const nonce = b.slice(18, 42);
   const ksb = b[42]!;
   const ciphertext = b.slice(43);
-  const key = scrypt(password.normalize("NFKC"), salt, {
+  const key = scrypt(utf8ToBytes(password.normalize("NFKC")), salt, {
     N: 2 ** logn,
     r: 8,
     p: 1,
