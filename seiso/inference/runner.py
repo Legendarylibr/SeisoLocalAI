@@ -877,9 +877,14 @@ class LocalInferenceRunner:
         idle = await loop.run_in_executor(
             None, lambda: self._pool._wait_for_inference_idle(timeout_s=timeout_s)
         )
+        # Match ModelPool.reset_instance: always unload after the idle wait so a
+        # deferred cancel_and_unload (refs > 0) still drops the handle.
+        await loop.run_in_executor(None, self._pool.unload_all)
         status = self._pool.status()
         status["inference_idle"] = idle
-        status["unload_complete"] = bool(idle and status.get("active_model") is None)
+        status["unload_complete"] = bool(
+            idle and status.get("active_model") is None and self._pool.active_inference_refs == 0
+        )
         return status
 
     async def cancel_generation(self) -> dict:

@@ -29,11 +29,12 @@ __all__ = [
 def enumerate_gpus(*, include_mlx: bool = True) -> tuple[dict[str, Any], ...]:
     """Return GPUs as an immutable tuple (cached per process).
 
-    Order: PyTorch CUDA → nvidia-smi (Linux/Windows) → MLX (Darwin, optional).
+    Order: nvidia-smi (no torch import) → PyTorch CUDA → MLX (Darwin, optional).
+    Preferring nvidia-smi keeps idle Forge from pulling torch into RSS.
     """
-    gpus = _torch_gpus()
+    gpus = _nvidia_smi_gpus()
     if not gpus:
-        gpus = _nvidia_smi_gpus()
+        gpus = _torch_gpus()
     if not gpus and include_mlx:
         gpus = _mlx_apple_gpu()
     return tuple(gpus)

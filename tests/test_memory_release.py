@@ -23,6 +23,9 @@ def test_release_inference_memory_unloads_active(monkeypatch):
             self.active_key = None
             return True
 
+        def drain_release_notes(self):
+            return []
+
     fake = FakePool()
     monkeypatch.setattr(
         "seiso.inference.model_pool.get_model_pool",
@@ -35,6 +38,8 @@ def test_release_inference_memory_unloads_active(monkeypatch):
     monkeypatch.setattr(
         memory_release, "_refresh_hardware_profile", lambda: calls.append("refresh")
     )
+    monkeypatch.setattr(memory_release, "_release_orphan_sidecars", lambda **_k: [])
+    monkeypatch.setattr(memory_release, "_stop_managed_vllm", lambda **_k: (False, []))
 
     result = memory_release.release_inference_memory(reason="training")
 

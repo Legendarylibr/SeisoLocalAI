@@ -302,8 +302,9 @@ export async function bootstrapChatSession(
   }
 
   let loadedBackend = backend;
+  // Opt-in only: bootstrap must not auto-load weights (keeps RAM for larger models).
   if (
-    options.preload !== false &&
+    options.preload === true &&
     selectedId &&
     selected &&
     selected.kind !== "router" &&

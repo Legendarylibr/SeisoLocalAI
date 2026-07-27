@@ -1025,6 +1025,7 @@ def test_attach_llama_prompt_cache_native_linux_unsafe_opt_in(monkeypatch):
             self.cache_attached = True
 
     monkeypatch.setenv("SEISO_LLAMA_UNSAFE_PROMPT_CACHE", "1")
+    monkeypatch.setenv("SEISO_LLAMA_PROMPT_CACHE", "true")
     monkeypatch.setenv("SEISO_LLAMA_CACHE_MB", "128")
     monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda **_: True)
     monkeypatch.setitem(
@@ -1852,6 +1853,11 @@ def test_platform_profile_linux_nvidia_cpu_only_wheel(monkeypatch):
 
     monkeypatch.setattr(plat, "system", lambda: "Linux")
     monkeypatch.setattr(mp, "_llama_gpu_offload_ok", lambda: False)
+    # Lean profile only probes when llama_cpp is already imported.
+    import sys
+    import types
+
+    monkeypatch.setitem(sys.modules, "llama_cpp", types.ModuleType("llama_cpp"))
     monkeypatch.setattr(
         "seiso.memory.platform_profile.classify_tier",
         lambda _p: HardwareTier.WORKSTATION,

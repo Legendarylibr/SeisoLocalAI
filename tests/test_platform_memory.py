@@ -50,14 +50,48 @@ def test_native_linux_nvidia_llama_batch_caps_unknown_total_low_steps_down():
 
 
 @pytest.fixture(autouse=True)
-def _clear_llama_env(monkeypatch):
-    for key in list(os.environ):
+def _clear_llama_env():
+    """Isolate SEISO_LLAMA_* so setdefault/assign during tests cannot leak."""
+    keys = [
+        key
+        for key in list(os.environ)
         if (
             key.startswith("SEISO_LLAMA_")
-            or key == "SEISO_MEMORY_PROFILE"
-            or key == "SEISO_SKIP_MLX_PROBE"
-        ):
-            monkeypatch.delenv(key, raising=False)
+            or key
+            in {
+                "SEISO_MEMORY_PROFILE",
+                "SEISO_SKIP_MLX_PROBE",
+                "SEISO_STREAM_BATCH_CHARS",
+                "SEISO_CHAT_CONTEXT_CHARS",
+                "SEISO_DISABLE_MEMORY_CAPS",
+            }
+        )
+    ]
+    saved = {key: os.environ.get(key) for key in keys}
+    for key in keys:
+        os.environ.pop(key, None)
+    try:
+        yield
+    finally:
+        for key in list(os.environ):
+            if (
+                key.startswith("SEISO_LLAMA_")
+                or key
+                in {
+                    "SEISO_MEMORY_PROFILE",
+                    "SEISO_SKIP_MLX_PROBE",
+                    "SEISO_STREAM_BATCH_CHARS",
+                    "SEISO_CHAT_CONTEXT_CHARS",
+                    "SEISO_DISABLE_MEMORY_CAPS",
+                }
+            ):
+                if key not in saved:
+                    os.environ.pop(key, None)
+        for key, value in saved.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
 
 
 def test_memory_profile_label_low_on_tight_headroom():
@@ -98,8 +132,8 @@ def test_platform_profile_darwin_16gb_apple(monkeypatch):
     assert result["memory_profile"] == "low"
     assert os.environ["SEISO_LLAMA_USE_MMAP"] == "true"
     assert os.environ["SEISO_LLAMA_USE_MLOCK"] == "false"
-    assert os.environ["SEISO_LLAMA_PROMPT_CACHE"] == "true"
-    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "1024"
+    assert os.environ["SEISO_LLAMA_PROMPT_CACHE"] == "false"
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == "0"
     assert os.environ.get("SEISO_SKIP_MLX_PROBE") == "1"
 
 
@@ -172,6 +206,38 @@ def test_platform_profile_windows_no_cuda(monkeypatch):
     apply_platform_memory_profile(profile=profile)
 
     assert os.environ["SEISO_LLAMA_GPU_LAYERS"] == "0"
+
+
+def test_platform_profile_native_linux_16gb_host_keeps_vram_cache_caps(monkeypatch):
+    """Apple tight-RAM lean must not clamp native Linux VRAM-derived CACHE_MB."""
+    profile = {
+        "ram_gb": 16,
+        "gpus": [{"name": "NVIDIA GeForce RTX 4090", "vram_total_mb": 24576}],
+        "backend": "torch",
+        "platform": "Linux",
+    }
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.classify_tier",
+        lambda _p: HardwareTier.WORKSTATION,
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 20480
+    )
+    monkeypatch.setattr(
+        "seiso.memory.platform_profile.performance_headroom_mb", lambda _p: 20480
+    )
+    monkeypatch.setattr("platform.system", lambda: "Linux")
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
+
+    apply_platform_memory_profile(profile=profile)
+
+    expected_batch, expected_ubatch, expected_cache = _expected_native_caps(24576)
+    assert os.environ["SEISO_LLAMA_PROMPT_CACHE"] == "false"
+    assert os.environ["SEISO_LLAMA_BATCH"] == str(expected_batch)
+    assert os.environ["SEISO_LLAMA_UBATCH"] == str(expected_ubatch)
+    # Host RAM 16GB → default cache seed 1024, then VRAM cap — not Apple's CACHE_MB=0.
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] == str(min(1024, expected_cache))
+    assert os.environ["SEISO_LLAMA_CACHE_MB"] != "0"
 
 
 def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):

@@ -236,10 +236,13 @@ class ModelPool:
         backend = active.backend
         key = active.key
         handle = active.handle
+        # Drop the LoadedModel reference before cache clear so GC can reclaim.
+        active.handle = None
         logger.info("Unloading model from VRAM: %s", key)
 
         if backend == BackendKind.LLAMA:
             llm = handle
+            handle = None
             try:
                 if hasattr(llm, "close"):
                     llm.close()
@@ -928,15 +931,30 @@ class ModelPool:
             if self._inference_refs > 0:
                 self._unload_pending = True
                 return
-            if not self._active:
-                self._unload_pending = False
-                clear_dflash_draft_cache()
-                return
             active = self._active
             self._active = None
             self._unload_pending = False
 
-        self._release_handle(active)
+        if active is not None:
+            self._release_handle(active)
+        else:
+            clear_dflash_draft_cache()
+            # Pool empty — still ask sidecars to drop orphan residency.
+            self._release_orphan_sidecars()
+
+    def _release_orphan_sidecars(self) -> None:
+        """Best-effort unload of Ollama/llama-swap models not tracked in the pool."""
+        try:
+            from seiso.inference.llamaswap import release_orphan_sidecar_memory
+
+            notes = release_orphan_sidecar_memory()
+        except Exception:
+            logger.debug("Orphan sidecar unload skipped", exc_info=True)
+            return
+        if not notes:
+            return
+        with self._lock:
+            self._release_notes.extend(notes)
 
     def _free_memory(self, *, sync: bool = False) -> None:
         from seiso.memory.protection import release_cached_memory

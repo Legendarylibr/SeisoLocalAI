@@ -149,23 +149,33 @@ class InferenceOrchestrator(Orchestrator):
         return await self.release_all_inference_memory(user_id)
 
     async def release_all_inference_memory(self, user_id: str | None) -> dict[str, Any]:
-        """Unload local pool and refresh headroom for the next model load."""
+        """Unload local pool, sidecars, managed vLLM; refresh headroom for next load."""
         self.assert_generation_available_for_user(user_id)
         await self._cancel_running_jobs_for_user(user_id)
-        await self._runner.cancel_and_unload()
+        unload_status = await self._runner.cancel_and_unload()
         if await self._wait_for_preload():
-            await self._runner.cancel_and_unload()
+            unload_status = await self._runner.cancel_and_unload()
         self.end_generation_for_user(user_id)
-        from seiso.memory.protection import release_cached_memory
 
-        release_cached_memory(sync=False)
         from forge.services.hardware import build_vram_status
         from forge.services.inference_models import invalidate_inference_options_cache
-        from seiso.hardware.profile import hardware_profile as core_hardware_profile
+        from forge.services.memory_release import release_external_inference_memory
 
-        core_hardware_profile(force_refresh=True)
+        external = release_external_inference_memory(
+            reason="free_memory", sync_caches=True
+        )
         invalidate_inference_options_cache()
-        return build_vram_status(self)
+        status = build_vram_status(self)
+        status["unload_complete"] = bool(unload_status.get("unload_complete", True))
+        status["inference_idle"] = bool(unload_status.get("inference_idle", True))
+        status["managed_vllm_stopped"] = bool(external.get("managed_vllm_stopped"))
+        notes = list(status.get("release_notes") or [])
+        for note in external.get("release_notes") or []:
+            if note not in notes:
+                notes.append(note)
+        if notes:
+            status["release_notes"] = notes
+        return status
 
     async def cancel_generation_for_user(self, user_id: str | None) -> dict[str, Any]:
         self.assert_generation_available_for_user(user_id)

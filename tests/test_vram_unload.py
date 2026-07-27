@@ -21,12 +21,11 @@ async def test_release_all_inference_memory_unloads_local(monkeypatch, tmp_path)
 
     monkeypatch.setattr(orchestrator._runner, "cancel_and_unload", fake_cancel_and_unload)
     monkeypatch.setattr(
-        "seiso.memory.protection.release_cached_memory",
-        lambda sync=False: calls.append(f"cache:{sync}"),
-    )
-    monkeypatch.setattr(
-        "seiso.hardware.profile.hardware_profile",
-        lambda force_refresh=False: {"ram_gb": 16},
+        "forge.services.memory_release.release_external_inference_memory",
+        lambda **kwargs: (
+            calls.append("external"),
+            {"release_notes": ["Released Ollama resident models (keep_alive=0)"], "managed_vllm_stopped": True},
+        )[1],
     )
     monkeypatch.setattr(
         "forge.services.inference_models.invalidate_inference_options_cache",
@@ -39,8 +38,10 @@ async def test_release_all_inference_memory_unloads_local(monkeypatch, tmp_path)
 
     result = await orchestrator.release_all_inference_memory("user-1")
 
-    assert calls == ["local", "cache:False", "invalidate"]
+    assert calls == ["local", "external", "invalidate"]
     assert result["headroom_mb"] == 8192
+    assert result["managed_vllm_stopped"] is True
+    assert "Released Ollama resident models (keep_alive=0)" in result["release_notes"]
 
 
 @pytest.mark.asyncio
@@ -69,16 +70,18 @@ async def test_release_all_inference_memory_refreshes_headroom(monkeypatch, tmp_
     refresh_calls: list[bool] = []
 
     async def noop_unload():
-        return {"active_model": None}
+        return {"active_model": None, "unload_complete": True, "inference_idle": True}
 
     monkeypatch.setattr(orchestrator._runner, "cancel_and_unload", noop_unload)
-    monkeypatch.setattr("seiso.memory.protection.release_cached_memory", lambda sync=False: None)
 
-    def fake_hw(force_refresh=False):
-        refresh_calls.append(force_refresh)
-        return {"ram_gb": 24, "gpus": []}
+    def fake_external(**_kwargs):
+        refresh_calls.append(True)
+        return {"release_notes": [], "managed_vllm_stopped": False}
 
-    monkeypatch.setattr("seiso.hardware.profile.hardware_profile", fake_hw)
+    monkeypatch.setattr(
+        "forge.services.memory_release.release_external_inference_memory",
+        fake_external,
+    )
     monkeypatch.setattr(
         "forge.services.inference_models.invalidate_inference_options_cache",
         lambda: None,
@@ -91,6 +94,7 @@ async def test_release_all_inference_memory_refreshes_headroom(monkeypatch, tmp_
     result = await orchestrator.release_all_inference_memory(None)
     assert refresh_calls == [True]
     assert result["headroom_mb"] == 16384
+    assert result["unload_complete"] is True
 
 
 def test_build_vram_status_shape(monkeypatch, tmp_path):

@@ -627,6 +627,13 @@ def _load_llama_model(
         ensure_cuda_library_path()
     except ImportError:
         pass
+    # First GGUF load ensures llama-cpp-python (deferred from Forge lifespan).
+    try:
+        from seiso.inference.llamacpp_install import ensure_llamacpp_installed
+
+        ensure_llamacpp_installed()
+    except Exception:
+        pass
     from llama_cpp import Llama
 
     from seiso.inference.tuning import attach_llama_prompt_cache

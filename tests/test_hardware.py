@@ -410,11 +410,12 @@ def test_apple_silicon_without_mlx_probe_prefers_llamacpp(monkeypatch):
     assert preferred_inference_backend(profile) == "llamacpp"
 
 
-def test_preferred_backend_apple_mlx_not_constrained_by_tight_memory(monkeypatch):
+def test_preferred_backend_apple_tight_ram_prefers_llamacpp(monkeypatch):
+    """≤24 GB unified RAM prefers GGUF/llama.cpp so bare Forge stays lean."""
     profile = {"backend": "mlx", "gpus": [], "ram_gb": 16}
     monkeypatch.setattr("seiso.hardware.training.vram_headroom_mb", lambda _p: 10240)
     assert classify_tier(profile).value == "apple_unified"
-    assert preferred_inference_backend(profile) == "mlx"
+    assert preferred_inference_backend(profile) == "llamacpp"
 
 
 def test_preferred_backend_apple_plenty_is_mlx(monkeypatch):

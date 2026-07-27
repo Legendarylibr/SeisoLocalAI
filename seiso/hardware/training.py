@@ -31,6 +31,10 @@ def preferred_inference_backend(profile: dict[str, Any]) -> str:
     if tier == HardwareTier.EDGE:
         return str(InferenceBackend.LLAMACPP)
     if tier == HardwareTier.APPLE_UNIFIED:
+        # Tight unified RAM: prefer GGUF/llama.cpp (SKIP_MLX_PROBE seeds this).
+        ram_gb = float(profile.get("ram_gb") or 0)
+        if ram_gb > 0 and ram_gb <= 24:
+            return str(InferenceBackend.LLAMACPP)
         if backend == Backend.MLX:
             return str(InferenceBackend.MLX)
         return str(InferenceBackend.LLAMACPP)

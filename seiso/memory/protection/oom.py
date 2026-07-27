@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import gc
-import os
+import sys
 
 from seiso.env import env_bool
 
@@ -39,23 +39,26 @@ def is_oom_error(exc: BaseException) -> bool:
 
 
 def release_cached_memory(*, sync: bool = False) -> None:
-    """Best-effort GPU/RAM cache release."""
-    gc.collect()
-    if os.environ.get("SEISO_SKIP_MLX_PROBE", "").strip().lower() not in {
-        "1",
-        "true",
-        "yes",
-    }:
-        try:
-            import mlx.core as mx  # pylint: disable=import-error,no-name-in-module
+    """Best-effort GPU/RAM cache release.
 
-            if hasattr(mx, "metal") and hasattr(mx.metal, "clear_cache"):
-                mx.metal.clear_cache()
+    Only touches MLX/torch when already imported so Free memory does not pull
+    native runtimes into a lean idle process. ``SEISO_SKIP_MLX_PROBE`` must not
+    block Metal reclaim when ``mlx.core`` is already loaded.
+    """
+    gc.collect()
+    mx = sys.modules.get("mlx.core")
+    if mx is not None:
+        try:
+            metal = getattr(mx, "metal", None)
+            clear_cache = getattr(metal, "clear_cache", None) if metal is not None else None
+            if callable(clear_cache):
+                clear_cache()
         except Exception:
             pass
+    torch = sys.modules.get("torch")
+    if torch is None:
+        return
     try:
-        import torch
-
         if torch.cuda.is_available():
             torch.cuda.empty_cache()
             if hasattr(torch.cuda, "ipc_collect"):
@@ -64,7 +67,9 @@ def release_cached_memory(*, sync: bool = False) -> None:
                 torch.cuda.synchronize()
         if hasattr(torch, "mps") and torch.backends.mps.is_available():
             torch.mps.empty_cache()
-    except ImportError:
+            if sync and hasattr(torch.mps, "synchronize"):
+                torch.mps.synchronize()
+    except Exception:
         pass
 
 
