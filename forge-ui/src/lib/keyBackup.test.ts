@@ -53,9 +53,7 @@ describe("keyBackup", () => {
     const createObjectURL = vi
       .spyOn(URL, "createObjectURL")
       .mockReturnValue("blob:key-backup");
-    const appendChild = vi
-      .spyOn(document.body, "appendChild")
-      .mockImplementation((node) => node);
+    vi.spyOn(document.body, "appendChild").mockImplementation((node) => node);
     const remove = vi.fn();
     const createElement = vi.spyOn(document, "createElement").mockReturnValue({
       href: "",
