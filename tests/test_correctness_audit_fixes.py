@@ -242,6 +242,7 @@ def test_detect_training_layout_ignores_stale_world_size(monkeypatch):
 
 
 def test_detect_training_layout_keeps_multi_node(monkeypatch):
+    monkeypatch.setenv("SEISO_DISTRIBUTED_WORKER", "1")
     monkeypatch.setenv("WORLD_SIZE", "16")
     monkeypatch.setenv("LOCAL_WORLD_SIZE", "8")
     monkeypatch.setenv("LOCAL_RANK", "1")

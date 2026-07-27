@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -18,8 +17,10 @@ _METRICS_FLUSH_INTERVAL = 10
 
 
 def is_main_process() -> bool:
-    """True on global rank 0 (RANK preferred over LOCAL_RANK for multi-node)."""
-    return int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0")) or 0) == 0
+    """True on global rank 0 after stale-env resolution (never raw LOCAL_RANK alone)."""
+    from seiso.training.multi_gpu import resolve_distributed_env
+
+    return resolve_distributed_env().rank == 0
 
 
 def normalize_training_log(state, logs: dict[str, Any]) -> dict[str, Any]:

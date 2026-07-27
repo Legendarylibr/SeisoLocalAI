@@ -160,11 +160,12 @@ seiso bench-inference --model <path> --json
 LLM compression pipeline (`seiso.codellama_compress`). Accepts any HuggingFace causal LM; the `prune` stage requires Llama-family architecture (Llama, CodeLlama, Mistral, etc.).
 
 ```bash
-# Presets: smoke | full | distill_only | prune_recover | quantize
-seiso compress run --preset smoke
+# Default preset is full. smoke is CI-only.
+# Presets: full | prune_recover | distill_only | quantize | smoke
 seiso compress run --preset full \
   --teacher-model codellama/CodeLlama-13b-hf \
   --student-model codellama/CodeLlama-7b-hf
+seiso compress run --preset smoke
 seiso compress run --preset distill_only \
   --teacher-model meta-llama/Llama-2-13b-hf \
   --student-model meta-llama/Llama-2-7b-hf
@@ -191,19 +192,19 @@ Teacher-to-student KL distillation, preference rollouts (teacher chosen / studen
 # List presets (smoke | reproducible | full) and stage order
 seiso distill-rl presets
 
-# Fast smoke (uses gpt2 by default — no GPU download required for tiny runs)
-seiso distill-rl run --preset smoke
+# Default preset is reproducible (needs dataset_ref for product runs).
+seiso distill-rl run --preset reproducible --seeds 13,42,99 --json
 
 # Full teacher → student with all stages (example: CodeLlama)
 seiso distill-rl run --preset full \
   --teacher-model codellama/CodeLlama-13b-hf \
   --student-model codellama/CodeLlama-7b-hf
 
+# CI fixture only (gpt2 + bundled prompts)
+seiso distill-rl run --preset smoke
+
 # Skip distill when a checkpoint already exists
 seiso distill-rl run --preset smoke --distilled-path ~/.seiso/distill_rl/cli/<job>/distilled
-
-# Multi-seed reproducibility
-seiso distill-rl run --preset reproducible --seeds 13,42,99 --json
 
 # Disable hyperparameter sweep
 seiso distill-rl run --preset smoke --no-auto-sweep

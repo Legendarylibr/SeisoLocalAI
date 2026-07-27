@@ -6,9 +6,12 @@ import argparse
 from pathlib import Path
 
 from seiso.training.config import TrainConfig, run_training
+from seiso.training.multi_gpu import mark_distributed_worker
 
 
 def main() -> None:
+    # Must run before layout / is_main_process / slime DDP resolve env.
+    mark_distributed_worker()
     parser = argparse.ArgumentParser(description="Seiso distributed training worker")
     parser.add_argument(
         "--config", required=True, help="Path to training YAML/JSON config"
