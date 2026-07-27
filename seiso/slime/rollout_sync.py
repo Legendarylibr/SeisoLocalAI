@@ -362,8 +362,16 @@ def _broadcast_vllm_full(
         client.base_url = base
         try:
             client.pause()
-            client.update_weights_from_disk(model_path, weight_version=weight_version)
-            client.resume()
+            try:
+                client.update_weights_from_disk(
+                    model_path, weight_version=weight_version
+                )
+            finally:
+                # Always resume — a failed update must not leave the engine paused.
+                try:
+                    client.resume()
+                except RuntimeError as resume_exc:
+                    errors.append(f"{base} (resume): {resume_exc}")
         except RuntimeError as exc:
             errors.append(f"{base}: {exc}")
     if errors:

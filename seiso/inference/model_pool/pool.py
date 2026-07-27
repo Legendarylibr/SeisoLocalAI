@@ -335,12 +335,15 @@ class ModelPool:
         self.bump_generation()
         idle = self._wait_for_inference_idle()
         with self._lock:
-            self._unload_pending = False
+            prior_pending = self._unload_pending
             if not idle and self._inference_refs > 0:
                 self._unload_pending = True
                 raise RuntimeError(
                     "Inference is still active; retry after the current generation stops"
                 )
+            # Preserve cancel_and_unload intent across the reload; switch()'s
+            # post-load path discards a fresh handle when unload remains pending.
+            self._unload_pending = prior_pending
             active = self._active
             self._active = None
         if active is not None:

@@ -336,15 +336,68 @@ class TrainingOrchestrator(Orchestrator):
                 raise asyncio.CancelledError()
             raise RuntimeError(f"Distributed training exited with code {code}")
 
-        checkpoints = sorted(
-            config.output_dir.glob("checkpoint-*"), key=lambda p: p.stat().st_mtime
-        )
-        if checkpoints:
-            return checkpoints[-1]
+        artifact = self._resolve_distributed_artifact(config.output_dir)
+        if artifact is not None:
+            return artifact
         raise RuntimeError(
             "Distributed training exited successfully but wrote no "
-            f"checkpoint-* under {config.output_dir}"
+            f"usable checkpoint under {config.output_dir}"
         )
+
+    @staticmethod
+    def _looks_like_saved_model(path: Path) -> bool:
+        if not path.is_dir():
+            return False
+        markers = (
+            "adapter_config.json",
+            "config.json",
+            "model.safetensors",
+            "model.safetensors.index.json",
+            "pytorch_model.bin",
+            "pytorch_model.bin.index.json",
+        )
+        if any((path / name).is_file() for name in markers):
+            return True
+        return any(path.glob("*.safetensors")) or any(path.glob("pytorch_model*.bin"))
+
+    @classmethod
+    def _resolve_distributed_artifact(cls, output_dir: Path) -> Path | None:
+        """Prefer slime/NeMo final paths; fall back to newest checkpoint-* / root."""
+        root = Path(output_dir)
+        if not root.is_dir():
+            return None
+
+        state_path = root / "slime_training_state.json"
+        if state_path.is_file():
+            try:
+                state = json.loads(state_path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError, TypeError, ValueError):
+                state = {}
+            for key in ("final_checkpoint_dir", "best_checkpoint_dir"):
+                raw = state.get(key)
+                if not raw:
+                    continue
+                candidate = Path(str(raw))
+                if not candidate.is_absolute():
+                    candidate = root / candidate
+                if cls._looks_like_saved_model(candidate):
+                    return candidate
+
+        # Slime writes the final weights at output_dir; SFT uses checkpoint-*.
+        # Prefer the newest path that looks like a saved model.
+        candidates: list[Path] = []
+        if cls._looks_like_saved_model(root):
+            candidates.append(root)
+        for path in root.glob("checkpoint-*"):
+            if path.is_dir() and cls._looks_like_saved_model(path):
+                candidates.append(path)
+        if candidates:
+            return max(candidates, key=lambda p: p.stat().st_mtime)
+
+        checkpoints = [p for p in root.glob("checkpoint-*") if p.is_dir()]
+        if checkpoints:
+            return max(checkpoints, key=lambda p: p.stat().st_mtime)
+        return None
 
     @staticmethod
     def _load_metrics_summary(metrics_path: Path) -> dict[str, Any]:

@@ -28,6 +28,10 @@ _LOCAL_DEFAULT_PORTS = {
 _ALLOW_ANY_LOOPBACK_PORT = True
 # Remote multi-GPU chat servers (HTTPS only, no loopback). Canonical + legacy alias.
 _REMOTE_CHAT_TYPES = frozenset({"remote_chat", "vllm_cloud"})
+# CGNAT / shared-address space (RFC 6598) — not covered by ipaddress.is_private.
+_BLOCKED_NETWORKS = (
+    ipaddress.ip_network("100.64.0.0/10"),
+)
 
 
 def _literal_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
@@ -58,7 +62,7 @@ def _is_blocked_ip(addr: str) -> bool:
         ip = ipaddress.ip_address(addr)
     except ValueError:
         return False
-    return (
+    if (
         ip.is_private
         or ip.is_loopback
         or ip.is_link_local
@@ -66,7 +70,9 @@ def _is_blocked_ip(addr: str) -> bool:
         or ip.is_reserved
         or ip.is_unspecified
         or str(ip) in _BLOCKED_HOSTS
-    )
+    ):
+        return True
+    return any(ip in network for network in _BLOCKED_NETWORKS)
 
 
 def _resolve_host(host: str) -> list[str]:

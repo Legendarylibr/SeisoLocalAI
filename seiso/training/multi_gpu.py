@@ -147,9 +147,8 @@ def resolve_distributed_env(device_count: int | None = None) -> DistributedEnv:
         return _single(stale=True)
     if not any(_env_nonempty(k) for k in _DISTRIBUTED_LAUNCH_MARKERS):
         return _single(stale=True)
-    worker_proof = any(_env_nonempty(k) for k in _DISTRIBUTED_WORKER_PROOF) or (
-        "GROUP_RANK" in os.environ
-    )
+    # Require nonempty proof — empty GROUP_RANK="" leftovers must not enable DDP.
+    worker_proof = any(_env_nonempty(k) for k in _DISTRIBUTED_WORKER_PROOF)
     if not worker_proof and not _dist_initialized():
         return _single(stale=True)
     if device_count > 0 and local_rank >= device_count:
