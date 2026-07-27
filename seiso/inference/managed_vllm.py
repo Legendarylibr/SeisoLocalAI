@@ -103,7 +103,17 @@ def build_launch_command(
     if not model:
         raise ValueError("model is required")
 
-    tp = int(tensor_parallel_size or suggest_tensor_parallel())
+    visible = str(cuda_visible_devices or "").strip()
+    visible_n = (
+        len([p for p in visible.split(",") if p.strip() != ""]) if visible else None
+    )
+    default_tp = suggest_tensor_parallel(visible_n)
+    tp = int(tensor_parallel_size or default_tp)
+    if visible_n is not None and tp > visible_n:
+        raise ValueError(
+            f"tensor_parallel_size={tp} exceeds CUDA_VISIBLE_DEVICES count "
+            f"({visible_n}: {visible!r})"
+        )
     if tp < 1:
         raise ValueError("tensor_parallel_size must be >= 1")
 

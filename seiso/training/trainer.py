@@ -739,7 +739,7 @@ class SeisoTrainer:
         from seiso.models.hf_env import configure_hf_hub_auth
         from seiso.models.trainable_mirrors import resolve_trainable_hub_id
 
-        hub_token = configure_hf_hub_auth()
+        hub_token = configure_hf_hub_auth(cfg.extra.get("hf_token"))
         if not Path(model_ref).exists():
             resolved_hub, mirror_note = resolve_trainable_hub_id(
                 str(cfg.model_id),

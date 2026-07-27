@@ -64,6 +64,36 @@ def prompt_token_estimate(messages: list[ChatMessage]) -> int:
     )
 
 
+_SEISO_COMPAT_TOOL_NAMES = frozenset(
+    {"web_search", "write_artifact", "execute_code"}
+)
+
+
+def _assert_compat_tools_honesty(body: ChatCompletionRequest) -> None:
+    """Only Seiso registry tool names are accepted; no OpenAI tool_calls round-trip."""
+    if not body.tools:
+        return
+    for item in body.tools:
+        if not isinstance(item, dict):
+            raise HTTPException(400, "Compat tools entries must be objects")
+        fn = item.get("function") if item.get("type") == "function" else item
+        name = str((fn or {}).get("name") or "").strip() if isinstance(fn, dict) else ""
+        if not name:
+            raise HTTPException(
+                400,
+                "Compat tools requires function.name from the Seiso registry "
+                f"({', '.join(sorted(_SEISO_COMPAT_TOOL_NAMES))}). "
+                "OpenAI tool_calls round-trips are not implemented — the server "
+                "runs its own agent loop and returns assistant content.",
+            )
+        if name not in _SEISO_COMPAT_TOOL_NAMES:
+            raise HTTPException(
+                400,
+                f"Unknown Compat tool {name!r}; supported: "
+                f"{', '.join(sorted(_SEISO_COMPAT_TOOL_NAMES))}",
+            )
+
+
 async def prepare_compat_chat_payload(
     body: ChatCompletionRequest,
     user_id: str,
@@ -76,6 +106,7 @@ async def prepare_compat_chat_payload(
     external agents via ``provider:<id>`` or a non-colliding config model alias.
     ``default`` / ``seiso`` and local inventory paths are unchanged.
     """
+    _assert_compat_tools_honesty(body)
     messages = normalize_compat_messages(body)
     max_tokens = body.max_tokens or 512
 
@@ -92,12 +123,18 @@ async def prepare_compat_chat_payload(
         db, user_id, body.model, local_model_ids=local_ids
     )
     if provider is not None:
+        if body.tools:
+            raise HTTPException(
+                400,
+                "Compat tools require a local model; provider backends cannot "
+                "run Seiso server-side tools",
+            )
         # External agents / multi-GPU: no local weights required.
         return {
             "messages": messages,
             "max_tokens": max_tokens,
             "temperature": body.temperature,
-            "tools": bool(body.tools),
+            "tools": False,
             "provider": {
                 "provider_type": provider["provider_type"],
                 "config": provider["config"],
@@ -174,6 +211,8 @@ async def prepare_compat_chat_payload(
         "max_tokens": target.get("max_tokens", max_tokens),
         "temperature": body.temperature,
         "tools": bool(body.tools),
+        # Let the inference orchestrator honor SEISO_ALLOW_COMPAT_TOOLS alone.
+        "compat_tools": bool(body.tools),
         "inference_backend": target.get("inference_backend", "auto"),
     }
     if target.get("model_format"):

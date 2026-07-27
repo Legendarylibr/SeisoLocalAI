@@ -16,11 +16,21 @@ logger = logging.getLogger(__name__)
 
 def resolve_hf_cache_dir(data_dir: Path | None = None) -> Path:
     """Directory used by huggingface_hub and transformers."""
-    if raw := os.environ.get("HUGGINGFACE_HUB_CACHE"):
-        return Path(raw).expanduser()
-    if raw := os.environ.get("HF_HOME"):
-        return Path(raw).expanduser() / "hub"
     root = resolve_data_dir(data_dir)
+    if raw := os.environ.get("HUGGINGFACE_HUB_CACHE"):
+        candidate = Path(raw).expanduser().resolve()
+        try:
+            candidate.relative_to(root.resolve())
+            return candidate
+        except ValueError:
+            pass
+    if raw := os.environ.get("HF_HOME"):
+        candidate = Path(raw).expanduser().resolve()
+        try:
+            candidate.relative_to(root.resolve())
+            return candidate / "hub"
+        except ValueError:
+            pass
     return root / "hf_cache"
 
 
@@ -152,10 +162,20 @@ def configure_hf_hub_cache(data_dir: Path | None = None) -> Path:
     """
     root = resolve_data_dir(data_dir)
     hf_home = root / "hf_home"
+    cache = root / "hf_cache"
     if raw_cache := os.environ.get("HUGGINGFACE_HUB_CACHE"):
-        cache = Path(raw_cache).expanduser()
-    else:
-        cache = root / "hf_cache"
+        candidate = Path(raw_cache).expanduser().resolve()
+        try:
+            candidate.relative_to(root.resolve())
+            cache = candidate
+        except ValueError:
+            # External caches break later assert_user_path on inventory symlinks.
+            logger.warning(
+                "Ignoring HUGGINGFACE_HUB_CACHE outside SEISO_DATA_DIR (%s); "
+                "using %s so downloads stay sandboxed",
+                candidate,
+                cache,
+            )
     cache.mkdir(parents=True, exist_ok=True)
     # Always relocate Hub state under Seiso's data dir (do not leave a stale HF_HOME).
     os.environ["HF_HOME"] = str(hf_home)

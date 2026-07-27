@@ -275,13 +275,29 @@ async def chat_completions(
     if body.stream:
 
         async def job_sse_stream():
+            # Tools/job path: OpenAI clients expect chat.completion.chunk only —
+            # drain logs silently, then emit a single content delta.
             try:
-                async for line in orchestrator.stream_logs(job_id):
-                    yield f"data: {json.dumps({'log': line})}\n\n"
+                async for _line in orchestrator.stream_logs(job_id):
+                    pass
                 job = await orchestrator.wait_for(job_id)
                 content = job.result.get("content", "") if job and job.result else ""
                 if job and job.status.value == "failed":
-                    yield f"data: {json.dumps({'error': job.error or 'Inference failed'})}\n\n"
+                    err = {
+                        "error": {
+                            "message": job.error or "Inference failed",
+                            "type": "server_error",
+                        }
+                    }
+                    yield f"data: {json.dumps(err)}\n\n"
+                elif job and job.status.value == "cancelled":
+                    err = {
+                        "error": {
+                            "message": "Inference cancelled",
+                            "type": "cancelled",
+                        }
+                    }
+                    yield f"data: {json.dumps(err)}\n\n"
                 elif content:
                     content = sanitize_llm_output(content, strip_tool_calls=not body.tools)
                     chunk = {

@@ -43,29 +43,11 @@ class TrainingOrchestrator(Orchestrator):
         self._on_metrics_persist[job_id] = callback
 
     async def execute(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
-        import os
-
-        hf_token = payload.get("hf_token")
+        # Serialize training jobs that may apply a per-user HF token. Do not
+        # mutate process-wide HF_TOKEN for the whole await — the trainer applies
+        # the token at model-load time via config.extra (workers get it in env).
         async with _HF_TOKEN_LOCK:
-            prev_hf_token = os.environ.get("HF_TOKEN")
-            prev_hub_token = os.environ.get("HUGGING_FACE_HUB_TOKEN")
-            token_applied = False
-            if hf_token:
-                os.environ["HF_TOKEN"] = str(hf_token)
-                os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
-                token_applied = True
-            try:
-                return await self._execute_training(job_id, payload)
-            finally:
-                if token_applied:
-                    if prev_hf_token is None:
-                        os.environ.pop("HF_TOKEN", None)
-                    else:
-                        os.environ["HF_TOKEN"] = prev_hf_token
-                    if prev_hub_token is None:
-                        os.environ.pop("HUGGING_FACE_HUB_TOKEN", None)
-                    else:
-                        os.environ["HUGGING_FACE_HUB_TOKEN"] = prev_hub_token
+            return await self._execute_training(job_id, payload)
 
     async def cancel(self, job_id: str) -> bool:
         from seiso.training.cancel import request
@@ -83,6 +65,8 @@ class TrainingOrchestrator(Orchestrator):
         )
 
         config = TrainConfig.model_validate(payload["config"])
+        if payload.get("hf_token"):
+            config.extra = {**(config.extra or {}), "hf_token": str(payload["hf_token"])}
         user_id = str(payload.get("user_id") or "")
         if "output_dir" in payload and payload["output_dir"]:
             from seiso.security import assert_user_scoped_path, assert_within

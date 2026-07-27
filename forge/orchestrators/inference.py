@@ -106,13 +106,19 @@ class InferenceOrchestrator(Orchestrator):
 
         Returns a generation epoch; pass it to ``end_generation_for_user`` so a
         stale stream ``finally`` cannot clear a newer reservation.
+
+        Re-checks GPU-task exclusivity here so chat cannot race past an earlier
+        idle check while ``prepare_for_gpu_task`` is registering.
         """
+        from forge.services.memory_release import assert_gpu_available_for_inference
+
         owner = self._normalize_generation_user(user_id)
         if self._active_generation_user_id:
             if self._active_generation_user_id == owner:
                 raise RuntimeError("Inference is already running for this user")
             raise PermissionError("Another user has active inference")
         self.assert_backend_idle()
+        assert_gpu_available_for_inference()
         self._generation_epoch += 1
         self._active_generation_epoch = self._generation_epoch
         self._active_generation_user_id = owner
@@ -217,6 +223,11 @@ class InferenceOrchestrator(Orchestrator):
         else:
             gen_epoch = self._active_generation_epoch
         try:
+            if provider and use_tools:
+                raise PermissionError(
+                    "Provider chat cannot run Seiso server-side tools; "
+                    "omit tools or use a local model"
+                )
             if provider:
                 reply = await self._provider_chat(provider, payload, messages, user_id=user_id)
                 backend = f"provider:{provider.get('provider_type', 'unknown')}"
@@ -227,7 +238,12 @@ class InferenceOrchestrator(Orchestrator):
             elif use_tools:
                 if not user_id:
                     raise PermissionError("user_id required for tool execution")
-                if not settings.allow_tools:
+                # Compat can enable tools via allow_compat_tools alone (payload flag).
+                tools_enabled = bool(settings.allow_tools) or (
+                    bool(settings.allow_compat_tools)
+                    and bool(payload.get("compat_tools"))
+                )
+                if not tools_enabled:
                     raise PermissionError("Tools are disabled on this server")
                 if allow_code_exec and not settings.allow_code_exec:
                     raise PermissionError("Code execution is disabled on this server")

@@ -174,3 +174,109 @@ async def test_training_job_config_encrypted_at_rest(tmp_path: Path):
     loaded = await db.get_training_job(job["id"], user["id"])
     assert json.loads(loaded["config_json"])["model_id"] == "org/model"
     await db.close()
+
+
+def test_code_exec_blocks_list_times_large_int():
+    from forge.tools.code_exec import _validate_code
+
+    err = _validate_code("x = [0] * 10000000")
+    assert err is not None
+    assert "too large" in err.lower()
+
+
+def test_compat_tools_reject_unknown_client_schemas():
+    from fastapi import HTTPException
+
+    from forge.api.schemas.compat import ChatCompletionRequest
+    from forge.services.compat_chat import _assert_compat_tools_honesty
+
+    body = ChatCompletionRequest(
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[{"type": "function", "function": {"name": "CodebaseSearch"}}],
+    )
+    with pytest.raises(HTTPException) as exc:
+        _assert_compat_tools_honesty(body)
+    assert exc.value.status_code == 400
+
+
+def test_compat_tools_allow_seiso_registry_names():
+    from forge.api.schemas.compat import ChatCompletionRequest
+    from forge.services.compat_chat import _assert_compat_tools_honesty
+
+    body = ChatCompletionRequest(
+        messages=[{"role": "user", "content": "hi"}],
+        tools=[{"type": "function", "function": {"name": "web_search"}}],
+    )
+    _assert_compat_tools_honesty(body)
+
+
+def test_detect_training_layout_ignores_stale_world_size(monkeypatch):
+    monkeypatch.setenv("WORLD_SIZE", "8")
+    monkeypatch.setenv("LOCAL_RANK", "3")
+
+    class _Cuda:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def device_count():
+            return 1
+
+    class _Torch:
+        cuda = _Cuda()
+
+    import sys
+    from types import ModuleType
+
+    fake = ModuleType("torch")
+    fake.cuda = _Cuda()
+    monkeypatch.setitem(sys.modules, "torch", fake)
+
+    from seiso.training.multi_gpu import detect_training_layout
+
+    layout = detect_training_layout()
+    assert layout.world_size == 1
+    assert layout.use_ddp is False
+
+
+def test_managed_vllm_tp_respects_cuda_visible_devices(monkeypatch):
+    from seiso.inference import managed_vllm
+
+    monkeypatch.setattr(
+        managed_vllm, "resolve_vllm_command", lambda: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+    )
+    with pytest.raises(ValueError, match="CUDA_VISIBLE_DEVICES"):
+        managed_vllm.build_launch_command(
+            model="org/model",
+            tensor_parallel_size=8,
+            cuda_visible_devices="0,1",
+        )
+
+
+def test_knowledge_retrieve_cache_busts_on_index_change(tmp_path: Path):
+    from forge.services.knowledge_context import retrieve_knowledge_chunks
+    from seiso.security import safe_join
+
+    user = "u1"
+    kb = "kb1"
+    kb_dir = safe_join(tmp_path, "knowledge", user, kb)
+    kb_dir.mkdir(parents=True)
+    index = kb_dir / "index.jsonl"
+    index.write_text(
+        '{"id":"a","text":"alpha beta gamma","source":"a.txt"}\n',
+        encoding="utf-8",
+    )
+    first = retrieve_knowledge_chunks(
+        tmp_path, user_id=user, knowledge_base_id=kb, query="alpha", top_k=3
+    )
+    assert first
+    index.write_text(
+        '{"id":"b","text":"delta epsilon zeta","source":"b.txt"}\n',
+        encoding="utf-8",
+    )
+    second = retrieve_knowledge_chunks(
+        tmp_path, user_id=user, knowledge_base_id=kb, query="alpha", top_k=3
+    )
+    # Query no longer matches new corpus — must not return stale first hit.
+    assert second == []

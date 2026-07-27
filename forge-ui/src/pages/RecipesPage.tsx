@@ -34,10 +34,16 @@ export function RecipesPage() {
       setError("Build your recipe on the canvas first.");
       return;
     }
-    const importNode = r.nodes.find((n) => n.type === "import");
-    const importPath = String(importNode?.config?.path ?? "").trim();
-    if (!importPath) {
-      setError("Select the Import node and set a file path under your uploads folder.");
+    const importNodes = r.nodes.filter((n) => n.type === "import");
+    if (importNodes.length === 0) {
+      setError("Add an Import node and set a file path under your uploads folder.");
+      return;
+    }
+    const missingImport = importNodes.find(
+      (n) => !String(n.config?.path ?? "").trim(),
+    );
+    if (missingImport) {
+      setError("Every Import node needs a file path under your uploads folder.");
       return;
     }
 
