@@ -93,5 +93,14 @@ dataset_ref: open-r1/OpenR1-Math-220k
 data_gen_count: 2048
 data_gen_filename: slime_generated.jsonl
 data_designer: "off"
+# Policy update via Accelerate DDP (required for seiso train multi-GPU launch).
+# Generate still runs on the remote vLLM server (tensor-parallel there).
+multi_gpu: true
+distributed_strategy: ddp
+distributed_nproc_per_node: null
+distributed_num_nodes: 1
+distributed_node_rank: 0
+distributed_master_addr: "127.0.0.1"
+distributed_master_port: 29500
 # Optional TP size hint when training is single-process but vLLM uses multi-GPU:
 # vllm_tensor_parallel: 2

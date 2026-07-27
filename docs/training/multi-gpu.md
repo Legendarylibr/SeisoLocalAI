@@ -56,8 +56,10 @@ or set `distributed_strategy: none` to run the existing single-process trainer.
 
 | Backend | Config | Launch helper |
 |---------|--------|---------------|
-| **vLLM** (tensor parallel) | `rollout_backend: vllm` + `configs/example_training_slime_vllm.yaml` | `scripts/run_slime_vllm_ddp.sh` |
-| **SGLang** | `rollout_backend: sglang` + `configs/example_training_slime_ddp.yaml` | `scripts/run_slime_ddp.sh` |
+| **vLLM** (tensor parallel) | `rollout_backend: vllm` + `multi_gpu: true` in `configs/example_training_slime_vllm.yaml` | `seiso train -c …` or `scripts/run_slime_vllm_ddp.sh` |
+| **SGLang** | `rollout_backend: sglang` + `multi_gpu: true` in `configs/example_training_slime_ddp.yaml` | `seiso train -c …` or `scripts/run_slime_ddp.sh` |
+
+`seiso slime` is single-process only and ignores DDP launch flags — use `seiso train` for policy DDP.
 
 vLLM weight sync defaults to dynamic LoRA (`/v1/load_lora_adapter`) when
 `slime_use_lora: true`. Start the server with `--enable-lora`, or set

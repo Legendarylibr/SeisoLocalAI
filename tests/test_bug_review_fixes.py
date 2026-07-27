@@ -135,6 +135,140 @@ def test_export_checksum_hashes_weight_files(tmp_path: Path):
     assert len(manifest["model.safetensors"]) == 64
 
 
+def test_example_vllm_yaml_enables_ddp():
+    from seiso.training.config import DistributedStrategy, TrainConfig
+    from seiso.training.multi_gpu import distributed_requested
+
+    cfg = TrainConfig.from_yaml("configs/example_training_slime_vllm.yaml")
+    assert cfg.multi_gpu is True
+    assert cfg.distributed_strategy == DistributedStrategy.DDP
+    assert distributed_requested(cfg) is True
+
+
+def test_example_lora_uses_hub_dataset_not_toy_sample():
+    from seiso.training.config import TrainConfig
+
+    cfg = TrainConfig.from_yaml("configs/example_lora.yaml")
+    assert "sample.jsonl" not in str(cfg.dataset)
+    assert "/" in str(cfg.dataset)  # Hub id
+
+
+def test_smoke_slime_max_steps_projects_via_train_config(monkeypatch):
+    monkeypatch.setenv("SEISO_ALLOW_TINY_RL", "1")
+    from seiso.training.config import TrainConfig
+
+    cfg = TrainConfig.from_yaml("configs/smoke_slime_cpu.yaml")
+    assert cfg.max_steps == 1
+    slime = cfg.to_single_gpu_slime_config()
+    assert slime.max_steps == 1
+
+
+def test_slime_distributed_context_ignores_stale_world_size(monkeypatch):
+    monkeypatch.setenv("WORLD_SIZE", "8")
+    monkeypatch.setenv("LOCAL_RANK", "3")
+    monkeypatch.setenv("RANK", "3")
+
+    class _Cuda:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def device_count():
+            return 1
+
+        @staticmethod
+        def set_device(_idx):
+            raise AssertionError("stale DDP must not set_device")
+
+    class _Torch:
+        cuda = _Cuda()
+        distributed = None
+
+    from seiso.slime.config import SingleGpuSlimeConfig
+    from seiso.slime.distributed import _distributed_context
+
+    cfg = SingleGpuSlimeConfig(
+        model_id="m",
+        dataset=Path("data/slime_sample.jsonl"),
+        output_dir=Path("/tmp/out"),
+        device="cuda",
+        rollouts_per_prompt=2,
+        policy_micro_batch_size=2,
+        require_held_out_eval=False,
+    )
+    ctx = _distributed_context(_Torch(), cfg)
+    assert ctx.enabled is False
+    assert ctx.world_size == 1
+
+
+def test_resolve_training_device_map_ignores_stale_world_size(monkeypatch):
+    monkeypatch.setenv("WORLD_SIZE", "8")
+    monkeypatch.setenv("LOCAL_RANK", "3")
+
+    class _Cuda:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def device_count():
+            return 1
+
+    import sys
+    from types import ModuleType
+
+    fake = ModuleType("torch")
+    fake.cuda = _Cuda()
+    monkeypatch.setitem(sys.modules, "torch", fake)
+
+    from seiso.memory.protection.device_map import resolve_training_device_map
+
+    assert resolve_training_device_map("cuda") == "auto"
+
+
+def test_slime_manifest_uses_runtime_world_size(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("WORLD_SIZE", "1")
+    from seiso.training.config import TrainConfig, _write_slime_manifest
+
+    cfg = TrainConfig.model_validate(
+        {
+            "model_id": "m",
+            "dataset": "open-r1/OpenR1-Math-220k",
+            "output_dir": tmp_path / "out",
+            "method": "slime",
+            "multi_gpu": True,
+            "distributed_strategy": "ddp",
+            "data_gen": True,
+            "data_gen_source": "dataset",
+            "dataset_ref": "open-r1/OpenR1-Math-220k",
+            "data_gen_count": 2048,
+            "require_held_out_eval": True,
+        }
+    )
+    _write_slime_manifest(cfg, tmp_path)
+    import json
+
+    payload = json.loads((tmp_path / "seiso_manifest.json").read_text(encoding="utf-8"))
+    assert payload["post_training_algorithm"] == "single_gpu_slime_grpo"
+
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    _write_slime_manifest(cfg, tmp_path)
+    payload = json.loads((tmp_path / "seiso_manifest.json").read_text(encoding="utf-8"))
+    assert payload["post_training_algorithm"] == "distributed_slime_grpo"
+
+
+def test_emit_standard_artifacts_skips_orphan_distill_by_default(tmp_path: Path):
+    from seiso.rl_verify.synth_code import emit_standard_artifacts
+
+    stats = emit_standard_artifacts(
+        data_dir=tmp_path, seed=0, verify=True, limit=2, include_variants=False
+    )
+    assert "distill_code_synth" not in stats
+    assert not (tmp_path / "distill_code_synth.jsonl").exists()
+    assert (tmp_path / "slime_code_sample.jsonl").is_file()
+
+
 def test_knowledge_upload_refuses_symlink_destination(tmp_path: Path):
     import asyncio
 

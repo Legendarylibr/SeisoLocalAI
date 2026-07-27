@@ -92,7 +92,7 @@ seiso train --config configs/example_training_slime.yaml
 
 ```yaml
 model_id: meta-llama/Llama-3.2-3B-Instruct
-dataset: ./data/sample.jsonl
+dataset: HuggingFaceH4/no_robots
 output_dir: ./outputs/lora-run
 method: lora
 quant: 4bit              # use 16bit on macOS
@@ -531,7 +531,7 @@ Seiso accepts JSONL, JSON, local dataset directories, and Hugging Face hub IDs. 
 {"text": "..."}
 ```
 
-Sample file: `data/sample.jsonl` (chat format, four rows).
+CI/format smoke sample: `data/sample.jsonl` (chat format, four rows). Product example: `configs/example_lora.yaml` uses a Hub chat corpus.
 
 ---
 

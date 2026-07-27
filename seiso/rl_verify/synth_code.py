@@ -907,20 +907,24 @@ def emit_standard_artifacts(
     build_preferences: bool = True,
     limit: int | None = None,
     slime_name: str = "slime_code_sample.jsonl",
-    distill_name: str = "distill_code_synth.jsonl",
+    distill_name: str | None = None,
     prefs_name: str = "synthetic_code_preferences.jsonl",
     eval_count: int = 0,
     eval_seed: int | None = None,
     eval_name: str = "slime_code_eval.jsonl",
 ) -> dict[str, Any]:
-    """Write slime code sample + distill prompts + synthetic preference JSONL.
+    """Write slime code CI fixtures + optional synthetic preference JSONL.
 
     For large coding corpora set ``corpus_count`` (e.g. 2000). Smoke defaults
-    keep the small hand catalog when ``corpus_count=0``.
+    keep the small hand catalog when ``corpus_count=0`` (CI refresh only —
+    product training rejects ``synthetic_code`` / ``code_corpus`` sources).
 
     When ``eval_count > 0``, also write a **disjoint** held-out eval JSONL from
     ``code_corpus`` (different seed / ``eval_`` prompt ids) — never used as
     ``dataset`` for training.
+
+    ``distill_name`` is optional; distill-RL uses operator/Hub prompts, not this
+    hand catalog. Pass a filename only when regenerating a legacy artifact.
     """
     bundle = synthesize_code_bundle(
         seed=seed,
@@ -933,22 +937,22 @@ def emit_standard_artifacts(
         include_hand_catalog=include_hand_catalog,
     )
     slime_path = data_dir / slime_name
-    distill_code_path = data_dir / distill_name
     pref_path = data_dir / prefs_name
 
     # Slime rows: prompt/tests/solution (model never sees solution at reward time).
     n_slime = write_jsonl(slime_path, bundle.dataset_rows())
-    n_distill = write_jsonl(distill_code_path, bundle.dataset_rows())
     n_pref = write_jsonl(pref_path, bundle.preference_rows())
     stats: dict[str, Any] = {
         "tasks": len(bundle.tasks),
         "preferences": len(bundle.preferences),
         "slime_code_sample": n_slime,
-        "distill_code_synth": n_distill,
         "synthetic_code_preferences": n_pref,
         "corpus_count": corpus_count,
         "seed": seed,
     }
+    if distill_name:
+        n_distill = write_jsonl(data_dir / distill_name, bundle.dataset_rows())
+        stats["distill_code_synth"] = n_distill
     if corpus_count > 0:
         from seiso.rl_verify.code_corpus import corpus_stats
 

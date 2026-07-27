@@ -18,6 +18,7 @@ def train(
     from seiso.training.config import TrainConfig, run_training
     from seiso.training.multi_gpu import (
         detect_training_layout,
+        distributed_requested,
         launch_worker_command,
         resolve_distributed_plan,
     )
@@ -36,6 +37,11 @@ def train(
             subprocess.run(launch_worker_command(str(Path(config)), plan), check=True)
             console.print(f"[green]Done:[/] {cfg.output_dir}")
             return
+
+        if distributed_requested(cfg) and not plan.enabled:
+            console.print(
+                f"[yellow]distributed launch skipped:[/] {plan.reason}"
+            )
 
         out = run_training(cfg)
     console.print(f"[green]Done:[/] {out}")

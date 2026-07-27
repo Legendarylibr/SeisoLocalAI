@@ -60,7 +60,7 @@ Fine-tune or post-train from a YAML config.
 seiso train --config configs/example_lora.yaml
 ```
 
-Example config: `configs/example_lora.yaml` (dataset: `data/sample.jsonl`).
+Example config: `configs/example_lora.yaml` (dataset: `HuggingFaceH4/no_robots`). CI/format smoke uses `data/sample.jsonl` via `configs/smoke_train_*.yaml`.
 
 Single-GPU slime-style post-training is also a first-class training method:
 
