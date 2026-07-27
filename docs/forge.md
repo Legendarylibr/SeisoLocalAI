@@ -36,7 +36,13 @@ seiso forge
 
 On later sessions, skip the UI build unless `forge-ui/dist` is missing or you changed frontend code.
 
-Open **http://127.0.0.1:8765**. On first run, complete onboarding to create or import a Nostr key (npub identity).
+Open **http://127.0.0.1:8765**. On first run:
+
+1. **Generate npub** (default) or import an `nsec`
+2. Write down the shown `npub1…`, then **Continue**
+3. Later: unlock with the instance `nsec`
+
+See [Auth (Nostr)](#auth-nostr) below.
 
 ### UI development (hot reload)
 
@@ -101,16 +107,29 @@ For production behind a reverse proxy, terminate TLS upstream and run **one** Fo
 | `/rl-quant` | RL Quant | Adaptive GGUF quantization policy training |
 | `/recipes` | Recipe Studio | Visual graph editor for data/recipe jobs |
 | `/knowledge` | Knowledge | RAG corpus ingest and retrieval |
-| `/integrations` | Integrations | External providers (OpenAI, Anthropic, vLLM) |
+| `/integrations` | Integrations | External providers + Nostr provenance |
 | `/settings` | Settings | HF token, hardware info, security toggles |
 
 Knowledge-base ingest and retrieve are also available via API (`/api/knowledge/...`).
+
+## Auth (Nostr)
+
+Forge uses a single local account per instance. Identity is a Nostr **npub**; possession of the matching **nsec** unlocks the session (JWT + HttpOnly cookies + CSRF).
+
+| Step | What happens |
+|------|----------------|
+| First launch | **Generate npub** (default) or import `nsec` |
+| After generate | UI shows the new `npub1…` — write it down, then **Continue** |
+| Later sessions | Paste the instance `nsec` to sign in |
+| Lost nsec | **Start a new session** clears the local account (downloaded model files remain) |
+
+There is no password path. Generated secrets are shown once in the browser; an encrypted signing key is kept under `{SEISO_DATA_DIR}/nostr_keys/` for provenance attest. See also [provenance-nostr.md](provenance-nostr.md).
 
 ## API surface
 
 | Prefix | Purpose |
 |--------|---------|
-| `/api/auth` | Login, register (onboarding), session |
+| `/api/auth` | Nostr register (generate/import), nsec login, session, reset |
 | `/api/models` | Catalog, downloads, VRAM management (`GET /vram`, `POST /vram/unload`) |
 | `/api/inference` | Chat completions, streaming |
 | `/api/training` | Training jobs, dataset search/analysis, recommendations, SSE logs |

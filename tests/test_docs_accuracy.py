@@ -154,7 +154,7 @@ def test_cli_docs_cover_experiment_command():
 
 
 def test_cli_docs_cover_provenance_nostr():
-    """Opt-in Nostr provenance CLI must be documented and registered."""
+    """Nostr provenance CLI must be documented and registered."""
     cli_doc = _read("docs/cli.md")
     assert "seiso provenance" in cli_doc
     assert (REPO_ROOT / "docs/provenance-nostr.md").is_file()

@@ -68,7 +68,7 @@ Runs on **Windows**, **Linux**, **WSL2**, and **macOS**. See [docs/platforms/](d
 ## Quick start
 
 **Forge URL (all platforms):** [http://127.0.0.1:8765](http://127.0.0.1:8765)  
-On first launch, create your local Nostr key (npub identity) in the browser tab that opens.
+On first launch, **generate an npub** in the browser (write it down → Continue), or import an existing `nsec`.
 
 ### Paths on your system
 
@@ -203,7 +203,7 @@ seiso forge               # http://127.0.0.1:8765
 seiso forge --open        # same, and open the browser
 ```
 
-On first launch, create or import a Nostr key (npub identity) in the browser. User data (models, checkpoints, exports) lives in `~/.seiso` unless you set `SEISO_DATA_DIR`.
+On first launch, **generate an npub** (write it down → Continue) or import an `nsec` in the browser. User data (models, checkpoints, exports) lives in `~/.seiso` unless you set `SEISO_DATA_DIR`.
 
 **Later sessions:** `cd "$HOME/Seiso" && source .venv/bin/activate && seiso forge`, or use `start` from the repo root after `scripts/install.sh` has registered it.
 
@@ -524,7 +524,7 @@ All user data lives under **`SEISO_DATA_DIR`** (default below):
 ├── hf_home/          # HF_HOME mirror (created on first Hub configure)
 ├── hf_xet_cache/     # hf-xet transfer cache (created on first Hub configure)
 ├── hf_tokens/        # Encrypted Hugging Face tokens (per user)
-├── nostr_keys/       # Encrypted Nostr keys for opt-in provenance attest
+├── nostr_keys/       # Encrypted Nostr keys (auth + provenance attest)
 ├── models/           # Per-user inventory links to cached weights
 ├── checkpoints/      # Training outputs (per user)
 ├── exports/          # Merged / GGUF / LoRA exports

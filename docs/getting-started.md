@@ -93,10 +93,12 @@ See [install.md](install.md) for AMD ROCm, pip extras, and upgrade steps.
 ## Step 2 — Onboarding
 
 1. Open **http://127.0.0.1:8765**
-2. Generate a Nostr key (default) or import an nsec — your npub is the local identity
-3. Optionally paste a [Hugging Face token](https://huggingface.co/settings/tokens) in **Settings** for gated models and faster downloads
+2. Choose **Generate npub and continue** (default), or import an existing `nsec`
+3. If you generated a key: **write down the `npub1…` shown on screen**, then press **Continue**
+4. Later sessions: sign in by pasting the instance `nsec` (lost key → start a new local session)
+5. Optionally paste a [Hugging Face token](https://huggingface.co/settings/tokens) in **Settings** for gated models and faster downloads
 
-Seiso binds to `127.0.0.1` by default. Your credentials stay on your machine.
+Your **npub** is the public identity for this local instance; the **nsec** proves ownership. Seiso binds to `127.0.0.1` by default — keys stay on your machine (encrypted under `nostr_keys/`).
 
 ## Step 3 — Download a model
 
