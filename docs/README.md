@@ -19,6 +19,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Install on Linux or macOS in one command | [install.md](install.md#linux--macos--one-command-recommended) |
 | Install on Windows or AMD ROCm | [platforms/windows.md](platforms/windows.md) · [platforms/linux-amd-rocm.md](platforms/linux-amd-rocm.md) |
 | Launch the web UI | `start` or `seiso forge` → [forge.md](forge.md) |
+| First-run Nostr auth (npub / nsec) | [getting-started.md § Onboarding](getting-started.md#step-2--onboarding) · [forge.md § Auth](forge.md#auth-nostr) |
 | Diagnose install / HF / GPU | `seiso doctor` or `./scripts/doctor.sh` → [cli.md](cli.md) |
 | Chat with a local model | [getting-started.md § Step 4](getting-started.md#step-4--chat-with-a-local-model) |
 | Fine-tune with QLoRA / LoRA | [training/quickstart.md](training/quickstart.md) |
@@ -64,7 +65,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | **CLI training** | `seiso train --config configs/example_lora.yaml` | `seiso train --config configs\example_lora.yaml` |
 | **Compat API** | `seiso forge` then POST `/v1/chat/completions` | Same |
 
-First launch opens onboarding — create or import a Nostr key (npub identity). Copy `.env.example` to `.env` to override host, port, or data directory.
+First launch opens Nostr onboarding — **generate an npub** (default; write it down, then Continue) or import an `nsec`. Copy `.env.example` to `.env` to override host, port, or data directory.
 
 On native Linux + NVIDIA, `start` also prepares the isolated GGUF chat sidecar:
 healthy Ollama first, otherwise llama-swap's `llamacpp` engine. See

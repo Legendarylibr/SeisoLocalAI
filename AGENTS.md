@@ -15,7 +15,7 @@ Key commands:
 - `seiso forge` (then open browser)
 - `seiso train --config configs/example_lora.yaml`
 - `seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml` (research)
-- `seiso provenance attest|verify` (opt-in Nostr digest attestation; see [docs/provenance-nostr.md](docs/provenance-nostr.md))
+- `seiso provenance attest|verify` (Nostr digest attestation; default on, kill with `SEISO_ALLOW_NOSTR=0` — see [docs/provenance-nostr.md](docs/provenance-nostr.md))
 - `make ci-fast` (or `python3 scripts/run_ci_local.py --fast`)
 
 ## Rules of thumb
@@ -45,6 +45,7 @@ Do not relax sandbox or crypto defaults without a very strong documented reason 
 ## Extending common areas (pointers)
 
 - **New training preset / recs**: `seiso/training/recommendations.py`, `seiso/training/dataset_analysis.py`, `seiso/training/practices.py`, `platform_caps.py`, example YAML in `configs/`. Update TrainPage + `docs/training/quickstart.md` if new knobs appear. Run `pytest tests/test_docs_accuracy.py`.
+- **Forge auth**: Nostr npub identity; nsec proves ownership. Default onboarding is keygen → show npub to write down → Continue (`forge/services/nostr_auth.py`, `AuthPage`). No password path.
 - **Nostr provenance**: Default path on (`SEISO_ALLOW_NOSTR=1`, public digests-only relays). Kill with `SEISO_ALLOW_NOSTR=0`. Auto-attest still opt-in (`SEISO_NOSTR_ATTEST`). Digests-only events via `seiso/research/nostr/`; keys under `nostr_keys/` (HF-token style). Do not add DMs, agent tools, or always-on social clients without a new design review. See [docs/provenance-nostr.md](docs/provenance-nostr.md).
 - **New kernel op**: Add to `seiso/kernels/cuda/` + `cuda_ops.py` + dispatch + hooks + tests. Update low-VRAM profile logic.
 - **New pipeline stage (compress/distill/rl)**: Update the stage router / config builder + manifest + the corresponding orchestrator + page.

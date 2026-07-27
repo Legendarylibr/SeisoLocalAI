@@ -57,7 +57,7 @@ cd "$env:USERPROFILE\Seiso"
 seiso forge
 ```
 
-Open **http://127.0.0.1:8765** in your browser. On first run, create or import a Nostr key (npub identity).
+Open **http://127.0.0.1:8765** in your browser. On first run, **generate an npub** (write it down → Continue) or import an `nsec`.
 
 If the UI is blank, rebuild the frontend:
 
