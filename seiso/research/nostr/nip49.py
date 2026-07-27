@@ -18,6 +18,8 @@ from seiso.research.nostr.bech32 import bech32_decode, bech32_encode
 
 _PAYLOAD_LEN: Final = 91
 _VERSION: Final = 0x02
+# Spec allows up to 22; cap lower so crafted ncryptsec cannot DoS decrypt paths.
+_MAX_LOG_N: Final = 18
 
 
 def _normalize_password(password: str) -> bytes:
@@ -25,8 +27,8 @@ def _normalize_password(password: str) -> bytes:
 
 
 def _scrypt_key(password: str, salt: bytes, log_n: int) -> bytes:
-    if not (1 <= log_n <= 22):
-        raise ValueError("log_n must be between 1 and 22")
+    if not (1 <= log_n <= _MAX_LOG_N):
+        raise ValueError(f"log_n must be between 1 and {_MAX_LOG_N}")
     kdf = Scrypt(
         salt=salt,
         length=32,
@@ -129,8 +131,8 @@ def decrypt_ncryptsec(ncryptsec: str, password: str) -> bytes:
     if data[0] != _VERSION:
         raise ValueError(f"unsupported ncryptsec version {data[0]}")
     log_n = int(data[1])
-    if not (1 <= log_n <= 22):
-        raise ValueError("log_n must be between 1 and 22")
+    if not (1 <= log_n <= _MAX_LOG_N):
+        raise ValueError(f"log_n must be between 1 and {_MAX_LOG_N}")
     salt = data[2:18]
     nonce = data[18:42]
     aad = data[42:43]

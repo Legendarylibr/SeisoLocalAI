@@ -114,25 +114,26 @@ Knowledge-base ingest and retrieve are also available via API (`/api/knowledge/.
 
 ## Auth (Nostr)
 
-Forge uses a single local account per instance (JWT + HttpOnly cookies + CSRF). Nostr keys replace passwords:
+Forge is single-tenant: one **owner npub** per instance. The matching **nsec** proves ownership. Browser sessions are HttpOnly cookies + CSRF (no Bearer JWT in the JSON body). Compat `/v1` uses a file-backed inference key that is **bound to that same owner npub**.
 
 | Term | Meaning in Seiso |
 |------|------------------|
-| **npub** | Public identity for this instance (safe to share / show in UI) |
+| **npub** | Public owner identity for this instance (safe to share / show in UI) |
 | **nsec** | Private key — write it down on first generate; paste it (or decrypt from ncryptsec) to sign in later |
 | **ncryptsec** | NIP-49 passphrase-encrypted backup of the nsec (safe to store as a file; useless without the passphrase) |
+| **Compat key** | `{SEISO_DATA_DIR}/.inference_api_key` for `/v1` only; owner recorded in `.inference_api_key.owner` (pubkey hex) |
 | **Relays** | Allowlisted `wss://` endpoints for digests-only provenance, stored in per-user prefs next to the npub — not on the nsec |
 
 | Step | What happens |
 |------|----------------|
-| First launch | **Generate key** (default) or import `nsec` / `ncryptsec` |
+| First launch | **Generate key** (default) or import `nsec` / `ncryptsec` — that npub becomes the instance owner |
 | After generate | UI shows the new `nsec1…` once — write it down, optionally **Download encrypted .txt** (NIP-49 `ncryptsec` + passphrase; no raw nsec in the file), then **Continue**. The matching `npub` is your public identity. |
 | Later sessions | Paste `nsec1…`, or `ncryptsec1…` plus the backup passphrase (decrypted in the browser before login). The npub alone cannot unlock. |
-| Lost nsec | **Start a new session** clears the local account, `job_events`, and `nostr_keys/` (downloaded model files remain) |
+| Lost nsec | **Start a new session** clears the local account, owner binding, Compat key, `job_events`, and `nostr_keys/` (downloaded model files remain) |
 | Ephemeral DB | In-memory SQLite (`SEISO_DB_EPHEMERAL`); signing keys are **not** written under `nostr_keys/` |
-| Settings key rotate | Import/keygen updates the account `npub` and attest key together (keygen returns `nsec` once) |
+| Settings key rotate | Import/keygen updates the account `npub`, attest key, and Compat owner binding together (keygen returns `nsec` once; Compat key rotates) |
 
-There is no password path. Generated secrets are shown once in the browser; an encrypted signing key is kept under `{SEISO_DATA_DIR}/nostr_keys/` for provenance attest (skipped in ephemeral mode). See also [provenance-nostr.md](provenance-nostr.md).
+There is no password path. Generated secrets are shown once in the browser; an encrypted signing key is kept under `{SEISO_DATA_DIR}/nostr_keys/` for provenance attest (skipped in ephemeral mode). Non-browser clients that need a Bearer JWT can send `X-Seiso-Return-Token: 1` on login/register. See also [provenance-nostr.md](provenance-nostr.md).
 
 ## API surface
 
@@ -205,7 +206,7 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 | `SEISO_ALLOW_REMOTE` | `false` | Bind `0.0.0.0` (requires `SEISO_REMOTE_ACK=1`) |
 | `SEISO_TRUST_PROXY` | `false` | Honor `X-Forwarded-*` from `SEISO_TRUSTED_PROXY_IPS` only |
 | `SEISO_TRUSTED_PROXY_IPS` | — | Comma-separated proxy IPs (e.g. `127.0.0.1,::1`) |
-| `SEISO_INFERENCE_API_KEY` | auto | Scoped key for `/v1` only (file: `{SEISO_DATA_DIR}/.inference_api_key`) |
+| `SEISO_INFERENCE_API_KEY` | auto | Scoped `/v1` key bound to the owner npub (files: `.inference_api_key` + `.inference_api_key.owner`; rotated on reset / npub rotate unless env-bound) |
 | `SEISO_SECURE_COOKIES` | `false` | `Secure` cookies when TLS is terminated upstream |
 | `SEISO_CORS_ORIGINS` | *(local defaults)* | Only set for HTTPS reverse proxy |
 | `SEISO_HF_TOKEN` | — | Hugging Face token for gated models |

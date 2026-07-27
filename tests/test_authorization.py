@@ -3,7 +3,7 @@
 import pytest
 from httpx import ASGITransport, AsyncClient
 
-from tests.conftest import make_second_user, user_path
+from tests.conftest import RETURN_TOKEN_HEADERS, make_second_user, user_path
 
 
 @pytest.mark.asyncio
@@ -13,6 +13,7 @@ async def test_thread_cross_user_idor(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         token_a = reg.json()["access_token"]
         headers_a = {"Authorization": f"Bearer {token_a}"}
@@ -43,6 +44,7 @@ async def test_export_job_cross_user(app):
         await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
 
         from forge.api.deps import get_db

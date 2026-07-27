@@ -24,6 +24,7 @@ from forge.services.nostr_settings import (
 )
 from seiso.research.nostr.keys import generate_keypair, load_keypair, load_npub
 from seiso.security import SecurityError
+from tests.conftest import RETURN_TOKEN_HEADERS
 
 
 @pytest.fixture
@@ -207,7 +208,7 @@ async def test_settings_nostr_api_roundtrip(tmp_path: Path, monkeypatch, public_
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"generate": True})
+        reg = await client.post("/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS)
         assert reg.status_code == 201, reg.text
         headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
         auth_npub = reg.json()["user"]["npub"]
@@ -278,7 +279,7 @@ async def test_login_refreshes_signing_key(tmp_path: Path):
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"nsec": pair.nsec})
+        reg = await client.post("/api/auth/register", json={"nsec": pair.nsec}, headers=RETURN_TOKEN_HEADERS)
         assert reg.status_code == 201
         user_id = reg.json()["user"]["id"]
         clear_user_nostr_key(tmp_path, user_id)
@@ -293,7 +294,7 @@ async def test_reset_session_wipes_nostr_keys(tmp_path: Path):
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"generate": True})
+        reg = await client.post("/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS)
         assert reg.status_code == 201
         user_id = reg.json()["user"]["id"]
         assert load_npub(identity=user_id, data_dir=tmp_path) is not None
@@ -320,7 +321,7 @@ async def test_ephemeral_mode_skips_nostr_key_persist(tmp_path: Path, monkeypatc
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"generate": True})
+        reg = await client.post("/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS)
         assert reg.status_code == 201, reg.text
         user_id = reg.json()["user"]["id"]
         assert load_npub(identity=user_id, data_dir=tmp_path) is None
@@ -345,7 +346,7 @@ async def test_clear_nostr_key_leaves_auth_pubkey_and_login_works(tmp_path: Path
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"nsec": pair.nsec})
+        reg = await client.post("/api/auth/register", json={"nsec": pair.nsec}, headers=RETURN_TOKEN_HEADERS)
         assert reg.status_code == 201
         headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
         user_id = reg.json()["user"]["id"]
@@ -371,7 +372,7 @@ async def test_settings_keygen_updates_auth_and_me_never_echoes_nsec(tmp_path: P
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"generate": True})
+        reg = await client.post("/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS)
         assert reg.status_code == 201
         headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
         old_npub = reg.json()["user"]["npub"]
@@ -424,7 +425,7 @@ async def test_update_user_nostr_pubkey_rejects_non_hex(tmp_path: Path):
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"generate": True})
+        reg = await client.post("/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS)
         assert reg.status_code == 201
         user_id = reg.json()["user"]["id"]
         db = get_db()

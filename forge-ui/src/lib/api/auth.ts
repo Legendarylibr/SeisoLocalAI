@@ -2,7 +2,8 @@ import { request } from "./client";
 import type { AuthUser } from "./types";
 
 export type AuthResponse = {
-  access_token: string;
+  /** Opt-in Bearer JWT only; browser sessions use the HttpOnly cookie. */
+  access_token?: string | null;
   user: AuthUser;
   /** Present only when Forge generated a fresh key during register. */
   nsec?: string | null;
@@ -15,6 +16,8 @@ export const authApi = {
       storage_mode: "persistent" | "ephemeral";
       storage_mode_configured: boolean;
       auth_method: "nostr";
+      /** Public owner identity when an account exists. */
+      owner_npub?: string | null;
     }>("/auth/status"),
   register: (
     body?:

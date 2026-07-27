@@ -17,7 +17,6 @@ describe("API payloads", () => {
   it("sends onboarding storage mode when registering", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
       mockJsonResponse({
-        access_token: "token",
         user: { id: "u1", display_name: "Admin", npub: "npub1test" },
         nsec: "nsec1test",
       }),

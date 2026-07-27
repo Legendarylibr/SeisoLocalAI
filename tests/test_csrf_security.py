@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 
 from forge.api.deps import clear_dependency_caches
 from forge.main import create_app
+from tests.conftest import RETURN_TOKEN_HEADERS
 
 
 @pytest.fixture
@@ -28,6 +29,7 @@ async def test_csrf_blocks_cookie_mutation_without_header(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201
 
@@ -44,6 +46,7 @@ async def test_csrf_allows_cookie_mutation_with_header(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201
 
@@ -62,6 +65,7 @@ async def test_bearer_auth_bypasses_csrf(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         token = reg.json()["access_token"]
 
@@ -81,6 +85,7 @@ async def test_empty_bearer_does_not_bypass_csrf(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201
 
@@ -101,6 +106,7 @@ async def test_junk_bearer_does_not_bypass_csrf(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201
 
@@ -118,14 +124,16 @@ async def test_inference_api_key_bypasses_csrf_on_v1(app):
     """Configured inference API key is a real Bearer credential (not junk)."""
     from forge.config import get_settings
 
-    key = get_settings().inference_api_key
-    assert key
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
+        # Register binds/rotates the Compat key to the owner npub — read after.
+        key = get_settings().inference_api_key
+        assert key
         res = await client.post(
             "/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}"},
@@ -147,6 +155,7 @@ async def test_csrf_blocks_v1_without_header(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201
 
@@ -165,6 +174,7 @@ async def test_cookie_session_auth(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201
         assert client.cookies.get("seiso_token")
@@ -187,6 +197,7 @@ async def test_login_rate_limit(monkeypatch):
         await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
 
         saw_unauthorized = False
@@ -241,6 +252,7 @@ async def test_settings_includes_security_posture(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         token = reg.json()["access_token"]
 

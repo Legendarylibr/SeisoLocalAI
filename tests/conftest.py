@@ -82,6 +82,10 @@ def enable_tools(monkeypatch):
     clear_dependency_caches()
 
 
+# Opt into body JWT for tests that still use Authorization: Bearer.
+RETURN_TOKEN_HEADERS = {"X-Seiso-Return-Token": "1"}
+
+
 @pytest.fixture
 async def auth_client(app, tmp_path):
     """Register default user and return (client, token, headers)."""
@@ -90,9 +94,11 @@ async def auth_client(app, tmp_path):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201, reg.text
         token = reg.json()["access_token"]
+        assert token, "register with X-Seiso-Return-Token must return access_token"
         headers = {"Authorization": f"Bearer {token}"}
         yield client, token, headers, tmp_path
 

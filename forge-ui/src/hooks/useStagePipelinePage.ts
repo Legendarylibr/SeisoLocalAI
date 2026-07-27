@@ -54,13 +54,16 @@ export function useStagePipelinePage<TJob extends { id: string }>({
       resetStream();
       try {
         const res = await startJob(body);
+        const refreshAfterJob = () => {
+          invalidateApiCache("/inference/models");
+          invalidateApiCache("/training/models");
+          refreshJobs();
+        };
         watchJob(streamPath(res.job_id), res.job_id, {
           onEvent: opts?.onEvent,
-          onResult: () => {
-            invalidateApiCache("/inference/models");
-            invalidateApiCache("/training/models");
-            refreshJobs();
-          },
+          onResult: refreshAfterJob,
+          onError: refreshAfterJob,
+          onStreamError: refreshAfterJob,
         });
         refreshJobs();
       } catch (err) {

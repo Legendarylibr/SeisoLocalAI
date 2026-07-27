@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, ReactNode } from "react";
 import { api, AuthUser, clearLegacyToken } from "@/lib/api";
+import { invalidateApiCache } from "@/lib/api/getCache";
 import {
   type KeyBackup,
   persistKeyBackup,
@@ -123,6 +124,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const resetSession = useCallback(async () => {
     const res = await api.resetSession("RESET");
+    invalidateApiCache();
     setUser(null);
     setPendingUser(null);
     setKeyBackup(null);
@@ -134,6 +136,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const logout = useCallback(async () => {
     await api.logout();
+    invalidateApiCache();
     setUser(null);
     setPendingUser(null);
     setKeyBackup(null);

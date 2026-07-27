@@ -101,9 +101,9 @@ See [install.md](install.md) for AMD ROCm, pip extras, and upgrade steps.
 | Key | Role |
 |-----|------|
 | **nsec** | Private — backup on generate; paste to sign in later |
-| **npub** | Public identity for this instance (shown in UI; cannot unlock alone) |
+| **npub** | Public owner identity for this instance (shown in UI; cannot unlock alone) |
 
-Seiso binds to `127.0.0.1` by default — keys stay on your machine (encrypted under `nostr_keys/`).
+Seiso binds to `127.0.0.1` by default — the owner npub/nsec pair is the instance identity (encrypted under `nostr_keys/`; Compat `/v1` key is bound to the same npub).
 
 ## Step 3 — Download a model
 

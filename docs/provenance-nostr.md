@@ -165,8 +165,11 @@ Private keys are encrypted under `$SEISO_DATA_DIR/nostr_keys/` (skipped when
 `SEISO_DB_EPHEMERAL` is on). Auth returns a one-time `nsec` when Forge generated
 the key (onboarding write-down). Settings **keygen** also returns `nsec` once
 because it rotates the account `npub` and attest key together; login and key
-import never echo `nsec`. `reset-session` wipes `nostr_keys/` and rotates the
-Nostr field-encryption key.
+import never echo `nsec`. `reset-session` wipes `nostr_keys/`, clears the
+Compat owner-npub binding, rotates the Nostr field-encryption key, and
+regenerates the Compat `/v1` inference API key (unless `SEISO_INFERENCE_API_KEY`
+is env-bound). Register / keygen / import rebind that Compat key to the active
+owner npub.
 
 ## Replay vs attestation
 

@@ -23,7 +23,7 @@ from forge.tools.sanitize import (
     wrap_tool_result,
 )
 from seiso.security import SecurityError
-from tests.conftest import make_second_user, user_path
+from tests.conftest import RETURN_TOKEN_HEADERS, make_second_user, user_path
 
 
 def test_provider_url_blocks_metadata_ip():
@@ -48,8 +48,18 @@ def test_provider_url_fails_on_unresolvable_host():
     with pytest.raises(SecurityError, match="could not be resolved"):
         validate_provider_base_url(
             "https://this-host-definitely-does-not-exist-xyz123.invalid/v1",
-            provider_type="vllm",
+            provider_type="remote_chat",
         )
+
+
+def test_local_chat_rejects_public_https():
+    """local_chat must not accept arbitrary public HTTPS (cloud gate bypass)."""
+    with pytest.raises(SecurityError, match="loopback"):
+        validate_provider_base_url(
+            "https://example.com/v1", provider_type="local_chat"
+        )
+    with pytest.raises(SecurityError, match="loopback"):
+        validate_provider_base_url("https://example.com/v1", provider_type="vllm")
 
 
 def test_resolve_pinned_endpoint_pins_remote_host(monkeypatch):
@@ -57,7 +67,9 @@ def test_resolve_pinned_endpoint_pins_remote_host(monkeypatch):
         "forge.security.url_policy._resolve_host",
         lambda host: ["93.184.216.34"],
     )
-    endpoint = resolve_pinned_endpoint("https://example.com/v1", provider_type="vllm")
+    endpoint = resolve_pinned_endpoint(
+        "https://example.com/v1", provider_type="remote_chat"
+    )
     assert endpoint.pinned_ip == "93.184.216.34"
     assert endpoint.host == "example.com"
     assert endpoint.base_url == "https://example.com/v1"
@@ -707,9 +719,9 @@ async def test_registration_rejects_second_user(app):
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        first = await client.post("/api/auth/register", json={"generate": True})
+        first = await client.post("/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS)
         assert first.status_code == 201
-        second = await client.post("/api/auth/register", json={"generate": True})
+        second = await client.post("/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS)
         assert second.status_code == 403
 
 
@@ -826,6 +838,7 @@ async def test_inference_api_key_scoped_to_compat(app, auth_client, tmp_path):
 
     settings = get_settings()
     assert settings.inference_api_key
+    assert settings.get_inference_api_key_owner()
     client, _token, _headers, _tmp = auth_client
     res = await client.post(
         "/v1/chat/completions",
@@ -843,6 +856,52 @@ async def test_inference_api_key_scoped_to_compat(app, auth_client, tmp_path):
         headers={"Authorization": f"Bearer {settings.inference_api_key}"},
     )
     assert admin.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_inference_api_key_rejects_owner_mismatch(app, auth_client):
+    """Compat key must match the sole owner's npub binding."""
+    from forge.config import get_settings
+
+    client, _token, _headers, _tmp = auth_client
+    settings = get_settings()
+    key = settings.inference_api_key
+    # Point owner file at a different pubkey without rotating the key material.
+    settings.bind_inference_api_key_owner("ab" * 32)
+    stale = await client.get(
+        "/v1/models",
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert stale.status_code == 401
+    assert "owner npub" in stale.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_npub_keygen_rotates_compat_owner_binding(app, auth_client):
+    """Rotating the account npub rebinds and rotates the Compat /v1 key."""
+    from forge.config import get_settings
+
+    client, _token, headers, _tmp = auth_client
+    settings = get_settings()
+    old_key = settings.inference_api_key
+    old_owner = settings.get_inference_api_key_owner()
+    assert old_key and old_owner
+
+    regen = await client.post("/api/settings/nostr/keygen", headers=headers)
+    assert regen.status_code == 200, regen.text
+    settings = get_settings()
+    assert settings.inference_api_key != old_key
+    assert settings.get_inference_api_key_owner() != old_owner
+    ok = await client.get(
+        "/v1/models",
+        headers={"Authorization": f"Bearer {settings.inference_api_key}"},
+    )
+    assert ok.status_code == 200
+    stale = await client.get(
+        "/v1/models",
+        headers={"Authorization": f"Bearer {old_key}"},
+    )
+    assert stale.status_code == 401
 
 
 @pytest.mark.asyncio
