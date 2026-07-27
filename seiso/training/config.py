@@ -68,6 +68,14 @@ class TrainConfig(BaseModel):
         ge=1,
         description="Maximum training epochs (early stopping may finish earlier)",
     )
+    max_steps: int | None = Field(
+        default=None,
+        ge=1,
+        description=(
+            "Optional hard cap on optimizer steps for slime (and other runners "
+            "that honor it). Prefer this over stuffing max_steps into extra."
+        ),
+    )
     batch_size: int = Field(default=1, ge=1)
     learning_rate: float = Field(default=2e-4, gt=0)
     max_seq_length: int = Field(default=2048, ge=128)
@@ -738,7 +746,11 @@ class TrainConfig(BaseModel):
             weight_decay=self.weight_decay,
             max_grad_norm=self.max_grad_norm,
             epochs=self.epochs,
-            max_steps=extra.get("max_steps"),
+            max_steps=(
+                self.max_steps
+                if self.max_steps is not None
+                else extra.get("max_steps")
+            ),
             kl_coef=self.kl_coef,
             clip_ratio=self.clip_ratio,
             clip_ratio_high=self.clip_ratio_high,
@@ -974,11 +986,12 @@ def run_training(
 
 
 def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
-    distributed = bool(
-        config.multi_gpu
-        or config.distributed_strategy == DistributedStrategy.DDP
-        or config.distributed_num_nodes > 1
-    )
+    # Label from the process that actually trained (Accelerate sets WORLD_SIZE).
+    try:
+        runtime_world = int(os.environ.get("WORLD_SIZE", "1") or 1)
+    except ValueError:
+        runtime_world = 1
+    distributed = runtime_world > 1
     payload = {
         "model_id": config.model_id,
         "original_model_id": str(config.extra.get("original_model_id") or config.model_id),

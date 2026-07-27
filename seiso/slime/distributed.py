@@ -110,6 +110,14 @@ def _distributed_context(torch, config: SingleGpuSlimeConfig) -> _DistributedSli
     world_size = int(os.environ.get("WORLD_SIZE", "1") or 1)
     rank = int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0")) or 0)
     local_rank = int(os.environ.get("LOCAL_RANK", "0") or 0)
+    # Ignore stale Accelerate/Forge env left in the parent process (mirror
+    # seiso.training.multi_gpu.detect_training_layout).
+    if _is_cuda_device(config.device) and torch.cuda.is_available():
+        device_count = int(torch.cuda.device_count())
+        if world_size > device_count or local_rank >= device_count or world_size < 1:
+            world_size = 1
+            rank = 0
+            local_rank = 0
     if world_size <= 1:
         return _DistributedSlimeContext(
             enabled=False,
