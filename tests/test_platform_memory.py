@@ -70,23 +70,19 @@ def _clear_llama_env():
     saved = {key: os.environ.get(key) for key in keys}
     for key in keys:
         os.environ.pop(key, None)
+    tracked = {
+        "SEISO_MEMORY_PROFILE",
+        "SEISO_SKIP_MLX_PROBE",
+        "SEISO_STREAM_BATCH_CHARS",
+        "SEISO_CHAT_CONTEXT_CHARS",
+        "SEISO_DISABLE_MEMORY_CAPS",
+    }
     try:
         yield
     finally:
         for key in list(os.environ):
-            if (
-                key.startswith("SEISO_LLAMA_")
-                or key
-                in {
-                    "SEISO_MEMORY_PROFILE",
-                    "SEISO_SKIP_MLX_PROBE",
-                    "SEISO_STREAM_BATCH_CHARS",
-                    "SEISO_CHAT_CONTEXT_CHARS",
-                    "SEISO_DISABLE_MEMORY_CAPS",
-                }
-            ):
-                if key not in saved:
-                    os.environ.pop(key, None)
+            if (key.startswith("SEISO_LLAMA_") or key in tracked) and key not in saved:
+                os.environ.pop(key, None)
         for key, value in saved.items():
             if value is None:
                 os.environ.pop(key, None)

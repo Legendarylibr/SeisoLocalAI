@@ -106,7 +106,8 @@ def _nvidia_llama_gpu_layers_default() -> str:
 
 def _lean_runtime_caps(profile: dict[str, Any]) -> dict[str, Any]:
     """Inference-startup caps without training stacks (bnb/triton/mlx/torch)."""
-    gpus = profile.get("gpus") if isinstance(profile.get("gpus"), list) else []
+    raw_gpus = profile.get("gpus")
+    gpus: list[Any] = raw_gpus if isinstance(raw_gpus, list) else []
     gpu_count = len(gpus)
     vendor = "none"
     nvidia_hardware = False

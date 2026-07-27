@@ -110,17 +110,17 @@ def release_orphan_sidecar_memory() -> list[str]:
     """
     notes: list[str] = []
     if ollama_health_ok():
-        client = OllamaClient(ollama_url())
-        before = client._ollama_running_names()
+        ollama = OllamaClient(url=ollama_url())
+        before = ollama._ollama_running_names()
         if before:
-            ok, reason = client.release_all_running_models()
+            ok, reason = ollama.release_all_running_models()
             if ok:
                 notes.append("Released Ollama resident models (keep_alive=0)")
             elif reason:
                 notes.append(f"Could not confirm Ollama orphan unload: {reason}")
     if llamaswap_enabled() and llamaswap_health_ok():
-        client = LlamaSwapClient(llamaswap_url())
-        ok, reason = client.release_external_memory(None)
+        swap = LlamaSwapClient(url=llamaswap_url())
+        ok, reason = swap.release_external_memory(None)
         if ok:
             notes.append("Released llama-swap managed model processes")
         elif reason:
