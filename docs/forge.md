@@ -119,14 +119,15 @@ Forge uses a single local account per instance (JWT + HttpOnly cookies + CSRF). 
 | Term | Meaning in Seiso |
 |------|------------------|
 | **npub** | Public identity for this instance (safe to share / show in UI) |
-| **nsec** | Private key — write it down on first generate; paste it to sign in later |
+| **nsec** | Private key — write it down on first generate; paste it (or decrypt from ncryptsec) to sign in later |
+| **ncryptsec** | NIP-49 passphrase-encrypted backup of the nsec (safe to store as a file; useless without the passphrase) |
 | **Relays** | Allowlisted `wss://` endpoints for digests-only provenance, stored in per-user prefs next to the npub — not on the nsec |
 
 | Step | What happens |
 |------|----------------|
-| First launch | **Generate key** (default) or import `nsec` |
-| After generate | UI shows the new `nsec1…` once — write it down or **Download .txt**, then **Continue**. The matching `npub` is shown as public identity. |
-| Later sessions | Paste the instance `nsec` to sign in (the npub alone cannot unlock) |
+| First launch | **Generate key** (default) or import `nsec` / `ncryptsec` |
+| After generate | UI shows the new `nsec1…` once — write it down, optionally **Download encrypted .txt** (NIP-49 `ncryptsec` + passphrase; no raw nsec in the file), then **Continue**. The matching `npub` is your public identity. |
+| Later sessions | Paste `nsec1…`, or `ncryptsec1…` plus the backup passphrase (decrypted in the browser before login). The npub alone cannot unlock. |
 | Lost nsec | **Start a new session** clears the local account, `job_events`, and `nostr_keys/` (downloaded model files remain) |
 | Ephemeral DB | In-memory SQLite (`SEISO_DB_EPHEMERAL`); signing keys are **not** written under `nostr_keys/` |
 | Settings key rotate | Import/keygen updates the account `npub` and attest key together (keygen returns `nsec` once) |

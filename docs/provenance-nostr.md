@@ -149,8 +149,9 @@ export SEISO_NOSTR_ATTEST=1
 
 ## Forge UI
 
-1. First-run auth generates a key (write down the one-time `nsec` → Continue; `npub`
-   is shown as the public identity) or imports an `nsec`.
+1. First-run auth generates a key (write down the one-time `nsec` → Continue; optional
+   NIP-49 encrypted `.txt` download with passphrase; `npub` is the public identity)
+   or imports an `nsec` / `ncryptsec`.
    That key is also used for provenance signing when present.
 2. Open **Integrations → Nostr provenance** to confirm relays / enable auto-attest.
    Relays are a per-user allowlist for the account’s **npub** (digests-only publish),

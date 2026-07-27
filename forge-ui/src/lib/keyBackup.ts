@@ -1,5 +1,11 @@
 /** One-time write-down payload after Forge generates a Nostr key. */
 
+import {
+  encryptNip49,
+  nsecToSecretBytes,
+  type KeySecurityByte,
+} from "./nip49";
+
 export type KeyBackup = {
   /** Private key — required to sign in later. */
   nsec: string;
@@ -47,34 +53,57 @@ export function persistKeyBackup(
   }
 }
 
-export const KEY_BACKUP_FILENAME = "seiso-nsec-backup.txt";
+export const KEY_BACKUP_FILENAME = "seiso-ncryptsec-backup.txt";
 
-/** Plain-text contents for a same-window .txt download. */
-export function formatKeyBackupTxt(backup: KeyBackup): string {
+/** NIP-49 encrypted backup file contents (no raw nsec). */
+export function formatKeyBackupTxt(ncryptsec: string, npub: string): string {
   return [
-    "# Seiso Local AI — Nostr key backup",
-    "# Keep this file secret and offline.",
-    "# Anyone with the nsec can unlock this Seiso instance.",
-    "# Sign in later by pasting the nsec. The npub is public identity only.",
+    "# Seiso Local AI — NIP-49 encrypted key backup (ncryptsec)",
+    "# This file does NOT contain your raw nsec.",
+    "# Decrypt with your passphrase to sign in, or paste ncryptsec + passphrase in Forge.",
+    "# Keep the passphrase separate from this file.",
     "",
-    `nsec=${backup.nsec}`,
-    `npub=${backup.npub}`,
+    `ncryptsec=${ncryptsec}`,
+    `npub=${npub}`,
     "",
   ].join("\n");
 }
 
-/** Trigger a same-tab download of the key backup as a .txt file. */
-export function downloadKeyBackupTxt(
+export type DownloadNip49Options = {
+  passphrase: string;
+  /** Default 16 (~64 MiB / ~100ms). */
+  logn?: number;
+  /**
+   * 0x00 = known insecure handling (e.g. shown on screen).
+   * Onboarding write-down always shows nsec once, so default is 0x00.
+   */
+  keySecurity?: KeySecurityByte;
+  filename?: string;
+};
+
+/** Encrypt with NIP-49 and trigger a same-tab .txt download (no raw nsec in file). */
+export async function downloadNip49KeyBackup(
   backup: KeyBackup,
-  filename: string = KEY_BACKUP_FILENAME,
-): void {
-  const blob = new Blob([formatKeyBackupTxt(backup)], {
+  options: DownloadNip49Options,
+): Promise<void> {
+  const passphrase = options.passphrase;
+  if (!passphrase || passphrase.length < 8) {
+    throw new Error("Passphrase must be at least 8 characters");
+  }
+  const secret = nsecToSecretBytes(backup.nsec);
+  const ncryptsec = encryptNip49(
+    secret,
+    passphrase,
+    options.logn ?? 16,
+    options.keySecurity ?? 0x00,
+  );
+  const blob = new Blob([formatKeyBackupTxt(ncryptsec, backup.npub)], {
     type: "text/plain;charset=utf-8",
   });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = filename;
+  a.download = options.filename ?? KEY_BACKUP_FILENAME;
   a.rel = "noopener";
   document.body.appendChild(a);
   a.click();

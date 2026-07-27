@@ -1,9 +1,9 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AuthPage } from "./AuthPage";
 
 const confirmKeyBackup = vi.fn();
-const downloadKeyBackupTxt = vi.fn();
+const downloadNip49KeyBackup = vi.fn().mockResolvedValue(undefined);
 
 vi.mock("@/hooks/useAuth", () => ({
   useAuth: () => ({
@@ -24,7 +24,7 @@ vi.mock("@/lib/keyBackup", async () => {
   const actual = await vi.importActual<typeof import("@/lib/keyBackup")>("@/lib/keyBackup");
   return {
     ...actual,
-    downloadKeyBackupTxt: (...args: unknown[]) => downloadKeyBackupTxt(...args),
+    downloadNip49KeyBackup: (...args: unknown[]) => downloadNip49KeyBackup(...args),
   };
 });
 
@@ -52,13 +52,25 @@ describe("AuthPage key backup", () => {
     expect(screen.getByText(/write this nsec down now/i)).toBeTruthy();
   });
 
-  it("offers a same-window .txt download of the key backup", () => {
+  it("downloads a NIP-49 encrypted backup after passphrase entry", async () => {
     render(<AuthPage />);
 
-    fireEvent.click(screen.getByRole("button", { name: /download \.txt/i }));
-    expect(downloadKeyBackupTxt).toHaveBeenCalledWith({
-      nsec: "nsec1backupsecretvalue",
-      npub: "npub1publicidentityvalue",
+    fireEvent.change(screen.getByLabelText(/backup passphrase/i), {
+      target: { value: "correct-horse" },
+    });
+    fireEvent.change(screen.getByLabelText(/confirm passphrase/i), {
+      target: { value: "correct-horse" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: /download encrypted \.txt/i }));
+
+    await waitFor(() => {
+      expect(downloadNip49KeyBackup).toHaveBeenCalledWith(
+        {
+          nsec: "nsec1backupsecretvalue",
+          npub: "npub1publicidentityvalue",
+        },
+        { passphrase: "correct-horse" },
+      );
     });
   });
 });
