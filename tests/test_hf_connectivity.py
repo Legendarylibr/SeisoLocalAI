@@ -264,6 +264,58 @@ def test_assert_hub_ready_raises_when_unreachable(monkeypatch):
         hf_connectivity.assert_hub_ready_for_download()
 
 
+def test_build_hf_status_without_probe_is_not_download_ready(monkeypatch):
+    """Offline doctor must not treat probe=False as a Hub outage.
+
+    build_hf_status(probe=False) leaves connectivity.reachable=False, so
+    ready_for_download is False even when libraries are installed. scripts/doctor.sh
+    special-cases this path.
+    """
+    monkeypatch.setattr(
+        hf_connectivity,
+        "hf_auth_status",
+        lambda **_: type(
+            "Auth",
+            (),
+            {
+                "cli_available": True,
+                "cli_binary": "hf",
+                "cli_logged_in": False,
+                "token_configured": True,
+                "token_sources": ["settings"],
+            },
+        )(),
+    )
+    monkeypatch.setattr(
+        hf_connectivity,
+        "resolve_hf_token",
+        lambda **_: ("hf_test", "settings"),
+    )
+    monkeypatch.setattr(
+        hf_connectivity,
+        "check_inference_runtime",
+        lambda: hf_connectivity.InferenceRuntimeStatus(
+            huggingface_hub=True,
+            llamacpp=True,
+            mlx=True,
+            torch=True,
+        ),
+    )
+    probed = {"n": 0}
+
+    def _probe(**_kwargs):
+        probed["n"] += 1
+        return hf_connectivity.HfConnectivityResult(reachable=True, anonymous_ok=True)
+
+    monkeypatch.setattr(hf_connectivity, "probe_hf_hub", _probe)
+    status = hf_connectivity.build_hf_status(probe=False)
+    assert probed["n"] == 0
+    assert status["connectivity"]["reachable"] is False
+    assert status["ready_for_download"] is False
+    assert status["runtime"]["huggingface_hub"] is True
+    assert status["runtime"]["llamacpp"] is True
+
+
 def test_ready_for_gguf_chat_requires_sidecar_on_native_linux(monkeypatch):
     monkeypatch.setattr(
         hf_connectivity,

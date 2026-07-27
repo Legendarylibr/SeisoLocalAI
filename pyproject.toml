@@ -78,6 +78,8 @@ forge = [
   "aiosqlite>=0.20",
   "sse-starlette>=2.1",
   "cryptography>=42",
+  # Nostr provenance relay I/O (default-on; BIP-340 signing is pure-Python in-tree).
+  "websockets>=12",
 ]
 llamacpp = [
   "llama-cpp-python>=0.3",
@@ -97,7 +99,8 @@ compress-eval = [
 data-designer = [
   "data-designer>=0.8.0",
 ]
-# Opt-in Nostr provenance attestation (NIP-01 relays; BIP-340 is pure-Python in-tree).
+# Alias kept for docs / explicit installs — same deps as [forge] for relay I/O.
+# Forge auth (npub/nsec) needs no extra; provenance attest/verify uses websockets.
 nostr = [
   "websockets>=12",
   "cryptography>=42",

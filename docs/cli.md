@@ -287,9 +287,10 @@ Config reference: `configs/examples/quant_regression_study.yaml`.
 
 ## `seiso provenance`
 
-Nostr attestation of local run-manifest digests (not weights). Requires
-`pip install 'seiso[nostr]'`. Outbound is on by default (`SEISO_ALLOW_NOSTR=0` to
-disable); relays default to public digests-only endpoints.
+Nostr attestation of local run-manifest digests (not weights). Relay I/O is
+included with `[forge]` (default install); the `[nostr]` extra remains an alias.
+Outbound is on by default (`SEISO_ALLOW_NOSTR=0` to disable); relays default to
+public digests-only endpoints.
 
 Training runs (default) also write `dataset_merkle.json` and seal
 `dataset_merkle_root` in attestation **v2**. Use `dataset-prove` /

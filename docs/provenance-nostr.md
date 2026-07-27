@@ -130,7 +130,8 @@ train/eval split; **before** tokenization. Eval-only rows are not in the tree.
 disable as needed:
 
 ```bash
-pip install 'seiso[nostr]'   # websockets + cryptography
+# Relay I/O ships with [forge] (default installer profiles on Linux/macOS/WSL/Windows).
+# Explicit alias still works: pip install 'seiso[nostr]'
 # Defaults (also set by scripts/start.sh):
 # export SEISO_ALLOW_NOSTR=1
 # export SEISO_NOSTR_RELAYS=wss://nos.lol,wss://relay.damus.io
