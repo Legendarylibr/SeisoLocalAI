@@ -239,10 +239,12 @@ def prepare_for_gpu_task(
         raise RuntimeError(msg)
     try:
         from forge.api import deps
+        from forge.orchestrators.inference import InferenceOrchestrator
 
         inference = deps.get_inference_orchestrator()
-        inference.assert_generation_available_for_user(None)
-        inference.assert_backend_idle()
+        if isinstance(inference, InferenceOrchestrator):
+            inference.assert_generation_available_for_user(None)
+            inference.assert_backend_idle()
     except ImportError:
         pass
     except PermissionError as exc:
@@ -255,10 +257,12 @@ def prepare_for_gpu_task(
         # begin_generation that passed the earlier idle check.
         try:
             from forge.api import deps
+            from forge.orchestrators.inference import InferenceOrchestrator
 
             inference = deps.get_inference_orchestrator()
-            inference.assert_generation_available_for_user(None)
-            inference.assert_backend_idle()
+            if isinstance(inference, InferenceOrchestrator):
+                inference.assert_generation_available_for_user(None)
+                inference.assert_backend_idle()
         except ImportError:
             pass
         except PermissionError as exc:

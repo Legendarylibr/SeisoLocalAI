@@ -104,10 +104,9 @@ def build_launch_command(
         raise ValueError("model is required")
 
     visible = str(cuda_visible_devices or "").strip()
-    if visible:
-        visible_n = len([p for p in visible.split(",") if p.strip() != ""])
-    else:
-        visible_n = None
+    visible_n = (
+        len([p for p in visible.split(",") if p.strip() != ""]) if visible else None
+    )
     default_tp = suggest_tensor_parallel(visible_n)
     tp = int(tensor_parallel_size or default_tp)
     if visible_n is not None and tp > visible_n:

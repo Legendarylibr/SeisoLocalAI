@@ -194,8 +194,8 @@ def retrieve_knowledge_chunks(
         index_fingerprint,
     )
     cached = _cache_get(_retrieve_cache, _retrieve_lock, retrieve_key, _RETRIEVE_TTL_S)
-    if cached is not None:
-        return list(cached)  # type: ignore[arg-type]
+    if isinstance(cached, list):
+        return list(cached)
 
     chunks, inverted = _load_index_chunks(
         data_dir, user_id=user_id, knowledge_base_id=knowledge_base_id

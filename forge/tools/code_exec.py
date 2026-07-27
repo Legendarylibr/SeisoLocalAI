@@ -52,7 +52,7 @@ def _alloc_size(node: ast.AST) -> int | None:
             right = _alloc_size(node.right)
             if left is not None and right is not None:
                 try:
-                    return left * right
+                    return int(left * right)
                 except OverflowError:
                     return _MAX_ALLOC_SIZE + 1
         if isinstance(node.op, ast.Pow):
@@ -60,7 +60,7 @@ def _alloc_size(node: ast.AST) -> int | None:
             exp = _alloc_size(node.right)
             if base is not None and exp is not None and exp >= 0:
                 try:
-                    return base**exp
+                    return int(base**exp)
                 except OverflowError:
                     return _MAX_ALLOC_SIZE + 1
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.USub):
