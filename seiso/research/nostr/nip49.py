@@ -19,16 +19,6 @@ from seiso.research.nostr.bech32 import bech32_decode, bech32_encode
 _PAYLOAD_LEN: Final = 91
 _VERSION: Final = 0x02
 
-# Official NIP-49 decryption vector
-NIP49_TEST_NCRYPTSEC = (
-    "ncryptsec1qgg9947rlpvqu76pj5ecreduf9jxhselq2nae2kghhvd5g7dgjtcxfqtd67p9m0w57l"
-    "spw8gsq6yphnm8623nsl8xn9j4jdzz84zm3frztj3z7s35vpzmqf6ksu8r89qk5z2zxfmu5gv8th8wclt0h4p"
-)
-NIP49_TEST_PASSWORD = "nostr"
-NIP49_TEST_SECRET_HEX = (
-    "3501454135014541350145413501453fefb02227e449e57cf4d3a3ce05378683"
-)
-
 
 def _normalize_password(password: str) -> bytes:
     return unicodedata.normalize("NFKC", password).encode("utf-8")
