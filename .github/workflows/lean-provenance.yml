@@ -1,0 +1,21 @@
+name: Lean provenance
+
+on:
+  push:
+    paths:
+      - "formal/seiso-provenance/**"
+      - ".github/workflows/lean-provenance.yml"
+  pull_request:
+    paths:
+      - "formal/seiso-provenance/**"
+      - ".github/workflows/lean-provenance.yml"
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: leanprover/lean-action@v1
+        with:
+          lake-package-dir: formal/seiso-provenance
