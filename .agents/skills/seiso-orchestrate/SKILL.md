@@ -16,7 +16,7 @@ Run **local** Seiso work from a Buzz channel. Buzz is the room + audit trail
 
 Humans and agents share the Buzz room. Seiso stays on the machine (localhost).
 Post **receipts** (commands, job ids, manifest paths, Nostr `event_id`) back to
-the channel — not vibes.
+the channel.
 
 ## Preconditions
 
