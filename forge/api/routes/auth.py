@@ -247,8 +247,13 @@ async def reset_session(
         key_file.chmod(0o600)
         sessions_rotated = True
 
-    response.delete_cookie("seiso_token")
-    clear_csrf_cookie(response)
+    response.delete_cookie(
+        "seiso_token",
+        path="/",
+        samesite="strict",
+        secure=settings.cookie_secure,
+    )
+    clear_csrf_cookie(response, secure=settings.cookie_secure)
     audit_event(
         "auth_reset_session",
         rows_deleted=sum(counts.values()),
@@ -282,8 +287,13 @@ async def logout(
     if token:
         revoke_access_token(token, settings)
     await db.purge_user_chat(user_id)
-    response.delete_cookie("seiso_token")
-    clear_csrf_cookie(response)
+    response.delete_cookie(
+        "seiso_token",
+        path="/",
+        samesite="strict",
+        secure=settings.cookie_secure,
+    )
+    clear_csrf_cookie(response, secure=settings.cookie_secure)
     audit_event("auth_logout", user_id=user_id)
     return {"status": "ok"}
 

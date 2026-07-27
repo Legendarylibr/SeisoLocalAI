@@ -284,6 +284,10 @@ def run_compress_job(
 
     manifest_report = verify_manifest(run_dir)
     _log(f"Manifest verify: ok={manifest_report.get('ok')}")
+    if not manifest_report.get("ok"):
+        raise RuntimeError(
+            f"Compression manifest verification failed: {manifest_report}"
+        )
     try:
         from seiso.research.nostr import maybe_auto_attest
 

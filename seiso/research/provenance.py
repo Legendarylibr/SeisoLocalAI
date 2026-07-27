@@ -123,25 +123,34 @@ def git_commit_optional() -> str | None:
 def directory_checksum_manifest(
     root: Path,
     *,
-    max_files: int = 200,
+    max_files: int | None = 200,
     max_file_bytes: int | None = 512 * 1024 * 1024,
+    always_hash_suffixes: tuple[str, ...] = (),
 ) -> dict[str, str]:
-    """SHA-256 manifest for files under root (relative paths → hex)."""
+    """SHA-256 manifest for files under root (relative paths → hex).
+
+    ``always_hash_suffixes`` forces a full hash for matching files even when
+    ``max_file_bytes`` would otherwise skip them (export weight tensors).
+    ``max_files=None`` hashes every file under ``root``.
+    """
     manifest: dict[str, str] = {}
     if not root.is_dir():
         return manifest
+    suffixes = tuple(s.lower() for s in always_hash_suffixes)
     count = 0
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
-        if count >= max_files:
+        if max_files is not None and count >= max_files:
             break
         rel = str(path.relative_to(root))
+        force_full = bool(suffixes) and path.suffix.lower() in suffixes
+        limit = None if force_full else max_file_bytes
         try:
-            if max_file_bytes is not None and path.stat().st_size > max_file_bytes:
+            if limit is not None and path.stat().st_size > limit:
                 manifest[rel] = "skipped-large-file"
             else:
-                manifest[rel] = sha256_file(path, max_bytes=max_file_bytes)
+                manifest[rel] = sha256_file(path, max_bytes=limit)
         except (OSError, ValueError):
             manifest[rel] = "error"
         count += 1

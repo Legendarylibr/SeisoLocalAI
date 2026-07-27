@@ -341,7 +341,10 @@ class TrainingOrchestrator(Orchestrator):
         )
         if checkpoints:
             return checkpoints[-1]
-        return config.output_dir
+        raise RuntimeError(
+            "Distributed training exited successfully but wrote no "
+            f"checkpoint-* under {config.output_dir}"
+        )
 
     @staticmethod
     def _load_metrics_summary(metrics_path: Path) -> dict[str, Any]:

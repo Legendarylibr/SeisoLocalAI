@@ -137,13 +137,23 @@ def _module_belongs_to_model(model: Any, module: Any) -> bool:
 
 
 def _restore_registry_key(model_id: int) -> int:
-    modules = _PATCH_REGISTRY.pop(model_id, [])
+    """Restore modules for one registry key; pop only after success.
+
+    If restoring module *k* fails, modules ``k…N`` stay registered so a later
+    ``restore_kernel_patches`` can retry.
+    """
+    modules = list(_PATCH_REGISTRY.get(model_id, []))
     restored = 0
-    for module in modules:
-        if hasattr(module, "_seiso_orig_forward"):
-            module.forward = module._seiso_orig_forward  # type: ignore[method-assign]
-            restored += 1
-        _clear_patch_markers(module)
+    for idx, module in enumerate(modules):
+        try:
+            if hasattr(module, "_seiso_orig_forward"):
+                module.forward = module._seiso_orig_forward  # type: ignore[method-assign]
+                restored += 1
+            _clear_patch_markers(module)
+        except Exception:
+            _PATCH_REGISTRY[model_id] = modules[idx:]
+            raise
+    _PATCH_REGISTRY.pop(model_id, None)
     return restored
 
 

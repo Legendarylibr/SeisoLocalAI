@@ -228,6 +228,10 @@ def _run_single_job(
             )
 
     manifest_report = verify_run_manifest(config.output_root)
+    if isinstance(manifest_report, dict) and manifest_report.get("ok") is False:
+        raise RuntimeError(
+            f"Distill-RL manifest verification failed: {manifest_report}"
+        )
     try:
         from seiso.research.nostr import maybe_auto_attest
 

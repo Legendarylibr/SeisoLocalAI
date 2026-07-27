@@ -868,9 +868,19 @@ class LocalInferenceRunner:
             )
 
     async def cancel_and_unload(self) -> dict:
+        """Cancel streams and unload; wait for inference refs before reporting done."""
+        from seiso.env import env_int
+
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, self._pool.cancel_and_unload)
-        return self._pool.status()
+        timeout_s = max(0.0, env_int("SEISO_UNLOAD_IDLE_WAIT_MS", 30_000) / 1000.0)
+        idle = await loop.run_in_executor(
+            None, lambda: self._pool._wait_for_inference_idle(timeout_s=timeout_s)
+        )
+        status = self._pool.status()
+        status["inference_idle"] = idle
+        status["unload_complete"] = bool(idle and status.get("active_model") is None)
+        return status
 
     async def cancel_generation(self) -> dict:
         """Stop active streams without unloading the warmed model."""

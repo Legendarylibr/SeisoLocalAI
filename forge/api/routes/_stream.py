@@ -44,7 +44,13 @@ async def job_log_event_gen(
     job = orchestrator.get_job(job_id)
     if job and job.error:
         yield {"event": "error", "data": job.error}
-    if job and job.result:
+    # Never stream a success payload for cancelled/failed jobs (cancel can win
+    # after execute() returns a full result dict).
+    if (
+        job
+        and job.result
+        and job.status.value == "completed"
+    ):
         if before_result:
             for event in before_result(job.result):
                 yield event

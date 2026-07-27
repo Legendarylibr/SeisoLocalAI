@@ -156,6 +156,8 @@ _BLOCKED_NAMES = frozenset(
         "dir",
         "property",
         "__build_class__",
+        # Injecting real ``sys`` re-exposes builtins.open via sys.modules.
+        "sys",
     }
 )
 _BLOCKED_ATTRS = frozenset(
@@ -183,6 +185,7 @@ _BLOCKED_ATTRS = frozenset(
         "__getattribute__",
         "__reduce__",
         "__reduce_ex__",
+        "modules",
     }
 )
 _TIMEOUT_SEC = 15
