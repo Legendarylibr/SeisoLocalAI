@@ -115,9 +115,8 @@ def validate_pipeline_paths(
         assert_llama_cpp_binary,
         assert_user_config_file,
         assert_user_path,
+        is_local_filesystem_path,
     )
-
-    from forge.services.user_paths import is_local_filesystem_path
 
     try:
         if config_file:

@@ -4,11 +4,17 @@ from __future__ import annotations
 
 import json
 import uuid
+from typing import TYPE_CHECKING, Any
 
 from forge.db.stores.constants import _HUB_PUBLISH_LIST_COLUMNS, column_list, now_iso
 
 
 class HubPublishMixin:
+    if TYPE_CHECKING:
+        def _enc(self, value: str) -> str: ...
+
+        def _decrypt_row(self, table: str, row: dict[str, Any]) -> dict[str, Any]: ...
+
     async def create_hub_publish_job(
         self, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
