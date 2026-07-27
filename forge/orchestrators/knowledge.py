@@ -74,10 +74,33 @@ class KnowledgeOrchestrator(Orchestrator):
         )
 
         index_path = kb_dir / "index.jsonl"
-        with index_path.open("a") as f:
+        # Replace prior chunks from the same source so re-ingest does not duplicate.
+        kept: list[dict[str, Any]] = []
+        if index_path.is_file():
+            with index_path.open(encoding="utf-8") as existing:
+                for line in existing:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        rec = json.loads(line)
+                    except json.JSONDecodeError:
+                        continue
+                    if (
+                        rec.get("source_sha256") == source_hash
+                        or rec.get("source_path") == str(source)
+                        or rec.get("source") == str(source.name)
+                    ):
+                        continue
+                    kept.append(rec)
+        with index_path.open("w", encoding="utf-8") as f:
+            for rec in kept:
+                f.write(json.dumps(rec) + "\n")
             for i, chunk in enumerate(chunks):
                 record = {
-                    "id": hashlib.sha256(f"{kb_id}:{i}:{chunk[:32]}".encode()).hexdigest()[:16],
+                    "id": hashlib.sha256(
+                        f"{kb_id}:{source_hash}:{i}:{chunk[:32]}".encode()
+                    ).hexdigest()[:16],
                     "text": chunk,
                     "source": str(source.name),
                     "source_path": str(source),

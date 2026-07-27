@@ -158,7 +158,7 @@ def build_default_registry(
                 },
                 "required": ["query"],
             },
-            handler=lambda query: web_search(query),
+            handler=lambda query: wrap_tool_result("web_search", web_search(query)),
         )
     )
     if allow_code_exec:

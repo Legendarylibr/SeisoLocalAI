@@ -251,6 +251,18 @@ def prepare_for_gpu_task(
 
     acquire_gpu_resource_lock()
     try:
+        # Re-check chat generation after the lock so we cannot race a concurrent
+        # begin_generation that passed the earlier idle check.
+        try:
+            from forge.api import deps
+
+            inference = deps.get_inference_orchestrator()
+            inference.assert_generation_available_for_user(None)
+            inference.assert_backend_idle()
+        except ImportError:
+            pass
+        except PermissionError as exc:
+            raise RuntimeError(str(exc)) from exc
         resource_token = _register_gpu_task_if_available(
             task=task,
             job_id=job_id,

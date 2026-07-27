@@ -52,6 +52,10 @@ def detect_training_layout() -> GpuLayout:
 
     local_rank = int(os.environ.get("LOCAL_RANK", "0"))
     world_size = int(os.environ.get("WORLD_SIZE", "1"))
+    # Ignore stale distributed env from a prior job in this process (Forge).
+    if world_size > device_count or local_rank >= device_count or world_size < 1:
+        world_size = 1
+        local_rank = 0
     use_ddp = world_size > 1
     device = f"cuda:{local_rank}" if use_ddp else "cuda"
     return GpuLayout(

@@ -43,12 +43,18 @@ def _alloc_size(node: ast.AST) -> int | None:
             return abs(node.value)
         if isinstance(node.value, (str, bytes, list, tuple)):
             return len(node.value)
+    # ``[0] * N`` / ``(0,) * N`` — sized sequence literal times an integer.
+    if isinstance(node, (ast.List, ast.Tuple)):
+        return max(len(node.elts), 1)
     if isinstance(node, ast.BinOp):
         if isinstance(node.op, ast.Mult):
             left = _alloc_size(node.left)
             right = _alloc_size(node.right)
             if left is not None and right is not None:
-                return left * right
+                try:
+                    return left * right
+                except OverflowError:
+                    return _MAX_ALLOC_SIZE + 1
         if isinstance(node.op, ast.Pow):
             base = _alloc_size(node.left)
             exp = _alloc_size(node.right)
@@ -167,7 +173,13 @@ def execute_code(
         def _print(*a, **k):
             _stdout.append(" ".join(str(x) for x in a))
         _SAFE_BUILTINS["print"] = _print
-        _g = {{"__builtins__": _SAFE_BUILTINS}}
+        # Inject allowlisted modules — user ``import math`` has no __import__.
+        _g = {{
+            "__builtins__": _SAFE_BUILTINS,
+            "json": json, "math": math, "re": re, "statistics": statistics,
+            "datetime": datetime, "collections": collections, "itertools": itertools,
+            "sys": sys,
+        }}
         try:
             exec({code!r}, _g, _g)
         except Exception as e:

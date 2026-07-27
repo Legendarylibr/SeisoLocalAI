@@ -151,7 +151,6 @@ async def retrieve(
 ) -> dict:
     """Fast-path keyword retrieve (no job orchestration overhead)."""
     from forge.services.knowledge_context import retrieve_knowledge_chunks
-    from forge.tools.sanitize import wrap_tool_result
 
     kb_id = validate_kb_id(body.knowledge_base_id)
     chunks = await asyncio.to_thread(
@@ -162,7 +161,5 @@ async def retrieve(
         query=body.query,
         top_k=body.top_k,
     )
-    results = [
-        {**c, "text": wrap_tool_result(f"kb:{kb_id}", c["text"])} for c in chunks
-    ]
-    return {"results": results}
+    # Studio UI expects plain chunk text (chat injection uses wrap_kb_reference).
+    return {"results": list(chunks)}

@@ -87,7 +87,14 @@ class ModelPool:
         if instance is None:
             return
         instance.cancel_and_unload()
-        instance._wait_for_inference_idle(timeout_s=timeout_s)
+        idle = instance._wait_for_inference_idle(timeout_s=timeout_s)
+        if not idle:
+            logger.warning(
+                "ModelPool.reset_instance: inference still active after %.1fs — "
+                "refusing to orphan the busy pool",
+                timeout_s,
+            )
+            return
         instance.unload_all()
         with cls._lock:
             if cls._instance is instance:
@@ -286,11 +293,13 @@ class ModelPool:
         Used by OOM/prefill recovery: the caller already holds an inference ref
         and will replace the handle, so we must not wait on our own ref or
         invalidate generation_id.
+
+        Preserves ``_unload_pending`` so a concurrent ``cancel_and_unload`` that
+        only armed the flag (refs > 0) is not forgotten across the reload.
         """
         with self._lock:
             active = self._active
             self._active = None
-            self._unload_pending = False
         if active is not None:
             self._release_handle(active)
         else:
@@ -538,22 +547,28 @@ class ModelPool:
                         },
                     )
             if discard is not None:
+                # Torch/MLX handles have no .close() — always go through release.
                 try:
-                    if hasattr(discard, "close"):
-                        discard.close()
+                    self._release_handle(
+                        LoadedModel(
+                            key=key,
+                            backend=backend,
+                            handle=discard,
+                            meta={"path": load_path, "norm_path": norm, **(meta or {})},
+                        )
+                    )
                 except Exception:
                     logger.debug(
-                        "Failed to close cancelled load handle",
+                        "Failed to release cancelled load handle",
                         exc_info=True,
                     )
-                self._release_resident_gpu_resource_lock()
+                    self._release_resident_gpu_resource_lock()
                 if stale is not None:
                     try:
-                        if hasattr(stale.handle, "close"):
-                            stale.handle.close()
+                        self._release_handle(stale)
                     except Exception:
                         logger.debug(
-                            "Failed to close stale pool handle", exc_info=True
+                            "Failed to release stale pool handle", exc_info=True
                         )
                 with self._lock:
                     self._unload_pending = False
@@ -561,10 +576,9 @@ class ModelPool:
                 raise RuntimeError("Model load cancelled (unload requested)")
             if stale is not None:
                 try:
-                    if hasattr(stale.handle, "close"):
-                        stale.handle.close()
+                    self._release_handle(stale)
                 except Exception:
-                    logger.debug("Failed to close stale pool handle", exc_info=True)
+                    logger.debug("Failed to release stale pool handle", exc_info=True)
             return handle
 
     def get_llama(

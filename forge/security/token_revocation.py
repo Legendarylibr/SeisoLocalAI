@@ -54,11 +54,19 @@ def _prune(now: float | None = None) -> None:
     for jti in expired:
         del _revoked[jti]
     if len(_revoked) > _MAX_ENTRIES:
+        # Prefer dropping soonest-to-expire entries that are still live only as
+        # a last resort — never revive a logout by deleting a far-future exp
+        # while keeping an almost-expired one. Sort by exp ascending.
         overflow = len(_revoked) - _MAX_ENTRIES
-        for jti, _ in sorted(_revoked.items(), key=lambda item: item[1])[:overflow]:
+        # Drop entries closest to expiry first (they become irrelevant soonest).
+        # Still incorrect under extreme abuse vs unbounded store, but avoids
+        # preferentially deleting long-lived revocations.
+        victims = sorted(_revoked.items(), key=lambda item: item[1])[:overflow]
+        for jti, _ in victims:
             del _revoked[jti]
         logger.warning(
-            "Evicted %d revoked JTIs to enforce store cap (%d)",
+            "Evicted %d revoked JTIs to enforce store cap (%d); "
+            "those sessions may validate until natural JWT expiry",
             overflow,
             _MAX_ENTRIES,
         )

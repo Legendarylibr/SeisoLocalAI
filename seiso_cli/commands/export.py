@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import typer
@@ -56,7 +55,10 @@ def export_cmd(
                 console.print("No Hub precheck requested (set --hub-repo)")
             return
 
-        sandbox_root = Path(os.path.commonpath([ckpt.resolve(), output_dir.resolve()]))
+        from seiso.security import resolve_data_dir
+
+        # Never use commonpath(ckpt, out) — it collapses to `/` across roots.
+        sandbox_root = resolve_data_dir()
         results = run_export_plan(
             plan, hub_token=settings.hf_token or None, sandbox_root=sandbox_root
         )

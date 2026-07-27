@@ -9,7 +9,13 @@ import typer
 from seiso_cli.console import console
 
 
-async def _run_chat(model: str, messages: list[dict], *, tools_enabled: bool = False) -> str:
+async def _run_chat(
+    model: str,
+    messages: list[dict],
+    *,
+    tools_enabled: bool = False,
+    inference_backend: str | None = None,
+) -> str:
     from seiso.chat.prompts import chat_system_prompt, resolve_model_key
     from seiso.chat.sanitize import sanitize_llm_output
     from seiso.inference.runner import run_chat
@@ -20,14 +26,25 @@ async def _run_chat(model: str, messages: list[dict], *, tools_enabled: bool = F
     if system and not any(m.get("role") == "system" for m in payload_messages):
         payload_messages = [{"role": "system", "content": system}, *payload_messages]
 
-    raw = await run_chat({"model_path": model, "messages": payload_messages})
+    payload: dict = {"model_path": model, "messages": payload_messages}
+    if inference_backend:
+        payload["inference_backend"] = inference_backend
+    raw = await run_chat(payload)
     if tools_enabled:
         return raw
     return sanitize_llm_output(raw, strip_tool_calls=True)
 
 
-def _one_shot_reply(model: str, prompt: str) -> str:
-    return asyncio.run(_run_chat(model, [{"role": "user", "content": prompt}]))
+def _one_shot_reply(
+    model: str, prompt: str, *, inference_backend: str | None = None
+) -> str:
+    return asyncio.run(
+        _run_chat(
+            model,
+            [{"role": "user", "content": prompt}],
+            inference_backend=inference_backend,
+        )
+    )
 
 
 def chat(
@@ -56,7 +73,9 @@ def chat(
         raise typer.Exit(1) from exc
 
     if prompt:
-        console.print(f"[bold]Assistant:[/] {_one_shot_reply(model, prompt)}")
+        console.print(
+            f"[bold]Assistant:[/] {_one_shot_reply(model, prompt, inference_backend=inference_backend)}"
+        )
         return
 
     async def _interactive() -> None:
@@ -68,7 +87,9 @@ def chat(
             except (EOFError, KeyboardInterrupt):
                 break
             messages.append({"role": "user", "content": user_input})
-            reply = await _run_chat(model, messages)
+            reply = await _run_chat(
+                model, messages, inference_backend=inference_backend
+            )
             console.print(f"[bold]Assistant:[/] {reply}")
             messages.append({"role": "assistant", "content": reply})
 

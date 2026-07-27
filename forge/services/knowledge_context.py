@@ -19,7 +19,7 @@ from seiso.security import safe_join
 # Cache retrieved chunks for identical (user, kb, query) during chat typing polls.
 _RETRIEVE_TTL_S = 30.0
 _RETRIEVE_CACHE_MAX = 64
-_retrieve_cache: dict[tuple[str, str, str, int], tuple[float, list[dict]]] = {}
+_retrieve_cache: dict[tuple, tuple[float, list[dict]]] = {}
 _retrieve_lock = threading.Lock()
 
 # Inverted token → chunk indices, keyed by (user, kb, index mtime/size).
@@ -59,6 +59,26 @@ def _cache_put(
             oldest = min(cache.items(), key=lambda item: item[1][0])[0]
             cache.pop(oldest, None)
         cache[key] = (time.monotonic(), *payload)
+
+
+def _index_fingerprint(
+    data_dir: Path,
+    *,
+    user_id: str,
+    knowledge_base_id: str,
+) -> tuple[float, int]:
+    from forge.services.user_paths import assert_user_path
+
+    kb_dir = safe_join(data_dir, "knowledge", user_id, knowledge_base_id)
+    index_path = kb_dir / "index.jsonl"
+    if not index_path.exists() and not index_path.is_symlink():
+        return (0.0, 0)
+    try:
+        index_path = assert_user_path(data_dir, user_id, index_path)
+        st = index_path.stat()
+        return (st.st_mtime, st.st_size)
+    except Exception:
+        return (0.0, 0)
 
 
 def _load_index_chunks(
@@ -162,7 +182,17 @@ def retrieve_knowledge_chunks(
     if not q_tokens:
         return []
 
-    retrieve_key = (user_id, knowledge_base_id, query.strip().lower(), top_k)
+    # Fingerprint the index so ingest invalidates stale query hits.
+    index_fingerprint = _index_fingerprint(
+        data_dir, user_id=user_id, knowledge_base_id=knowledge_base_id
+    )
+    retrieve_key = (
+        user_id,
+        knowledge_base_id,
+        query.strip().lower(),
+        top_k,
+        index_fingerprint,
+    )
     cached = _cache_get(_retrieve_cache, _retrieve_lock, retrieve_key, _RETRIEVE_TTL_S)
     if cached is not None:
         return list(cached)  # type: ignore[arg-type]

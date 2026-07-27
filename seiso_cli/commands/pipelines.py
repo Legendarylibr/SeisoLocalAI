@@ -27,7 +27,12 @@ def rl_quant_run(
     seed: int = typer.Option(13, help="RNG seed"),
     checkpoint_path: str | None = typer.Option(
         None,
-        help="Fine-tune / quality sidecar path (sets external_quality_path)",
+        help="Fine-tune checkpoint dir (GGUF export source, not quality scores)",
+    ),
+    quality_sidecar: str | None = typer.Option(
+        None,
+        "--quality-sidecar",
+        help="JSON/JSONL prompt-score file (sets external_quality_path)",
     ),
     gguf_path: str | None = typer.Option(None, help="GGUF path for llama.cpp backend"),
     gguf_export: bool = typer.Option(False, help="Export GGUF after recommendation"),
@@ -85,6 +90,8 @@ def rl_quant_run(
         payload["evaluation_episodes"] = evaluation_episodes
     if checkpoint_path:
         payload["checkpoint_path"] = checkpoint_path
+    if quality_sidecar:
+        payload["quality_sidecar"] = quality_sidecar
     if gguf_path:
         payload["gguf_path"] = gguf_path
     if kernel_rl:

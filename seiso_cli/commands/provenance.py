@@ -326,9 +326,14 @@ def provenance_dataset_verify_proof(
             console.print_json(data=report)
             raise typer.Exit(code=1)
     else:
-        # No external root source — local path check is enough.
+        # Refuse unbound verify: a self-consistent forged proof would otherwise exit 0.
+        report["ok"] = False
+        report["error"] = (
+            "unbound proof: pass --manifest or --event-id to bind dataset_merkle_root "
+            "(or --local-only to skip external binding intentionally)"
+        )
         console.print_json(data=report)
-        return
+        raise typer.Exit(code=1)
 
     match = (
         remote_root is not None and root.lower() == remote_root.lower()
