@@ -246,17 +246,33 @@ try:
     line("OK" if status["runtime"]["huggingface_hub"] else "FAIL", "Forge can inspect Hugging Face runtime")
     auth = status["auth"]
     conn = status["connectivity"]
+    runtime = status["runtime"]
+    local_backend = bool(
+        runtime.get("llamacpp")
+        or runtime.get("llamaswap")
+        or runtime.get("mlx")
+        or runtime.get("torch")
+    )
     if auth.get("token_configured") and conn.get("token_invalid"):
         line("WARN", "Configured Hugging Face token was rejected — public downloads still work")
     elif auth.get("token_configured") and conn.get("token_valid"):
         line("OK", f"Hugging Face token valid for {conn.get('token_username') or 'user'}")
-    line("OK" if status.get("ready_for_download") else "FAIL", f"Hub ready for download: {status.get('ready_for_download')}")
-    line("OK" if status.get("ready_for_local_chat") else "WARN", f"Local chat runtime ready: {status.get('ready_for_local_chat')}")
     line("OK" if status["auth"]["cli_available"] else "WARN", f"HF CLI visible to Forge: {status['auth']['cli_binary'] or 'no'}")
     if os.environ.get("SEISO_DOCTOR_NETWORK") == "1":
-        conn = status["connectivity"]
+        line("OK" if status.get("ready_for_download") else "FAIL", f"Hub ready for download: {status.get('ready_for_download')}")
+        line("OK" if status.get("ready_for_local_chat") else "WARN", f"Local chat runtime ready: {status.get('ready_for_local_chat')}")
         line("OK" if conn["reachable"] else "FAIL", f"huggingface.co reachable: {conn['reachable']} ({conn.get('error') or 'ok'})")
     else:
+        # Without --network, build_hf_status leaves connectivity.reachable=False, so
+        # ready_for_* would false-FAIL even when libraries/backends are installed.
+        line(
+            "OK" if runtime.get("huggingface_hub") else "FAIL",
+            "Hub client libraries ready (network probe skipped)",
+        )
+        line(
+            "OK" if local_backend else "WARN",
+            f"Local chat backends present: {local_backend}",
+        )
         line("INFO", "network probe skipped. Run scripts/doctor.sh --network to test huggingface.co")
 except Exception as exc:
     line("FAIL", f"Forge status check failed: {exc}")
