@@ -224,6 +224,69 @@ def test_fetch_event_missing_returns_none():
             assert fetch_event_by_id("ab" * 32, ["wss://relay.example.com"]) is None
 
 
+def test_fetch_handles_closed_and_addressable_filter():
+    from seiso.research.nostr.relays import fetch_addressable_event
+
+    class _ClosedWS:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            return False
+
+        def send(self, data: str):
+            self._sub = json.loads(data)[1]
+
+        def recv(self, timeout: float = 0):
+            return json.dumps(["CLOSED", self._sub, "error: idle"])
+
+    with patch(
+        "seiso.research.nostr.relays._require_websockets",
+        return_value=lambda *a, **k: _ClosedWS(),
+    ):
+        with patch(
+            "seiso.research.nostr.relays.validate_relay_url",
+            side_effect=lambda u, **kw: u,
+        ):
+            assert fetch_event_by_id("ab" * 32, ["wss://relay.example.com"]) is None
+
+    event = {
+        "id": "ab" * 32,
+        "pubkey": "cd" * 32,
+        "kind": 31250,
+        "tags": [["d", "compress:run1"]],
+        "content": "{}",
+    }
+
+    class _AddrWS(_FakeWS):
+        def send(self, data: str):
+            super().send(data)
+            msg = json.loads(data)
+            assert msg[0] == "REQ"
+            filt = msg[2]
+            assert filt["authors"] == ["cd" * 32]
+            assert filt["kinds"] == [31250]
+            assert filt["#d"] == ["compress:run1"]
+            self._responses = [["EVENT", msg[1], event], ["EOSE", msg[1]]]
+
+    addr = _AddrWS([])
+    with patch(
+        "seiso.research.nostr.relays._require_websockets",
+        return_value=lambda *a, **k: addr,
+    ):
+        with patch(
+            "seiso.research.nostr.relays.validate_relay_url",
+            side_effect=lambda u, **kw: u,
+        ):
+            got = fetch_addressable_event(
+                pubkey="CD" * 32,
+                kind=31250,
+                d_tag="compress:run1",
+                relays=["wss://relay.example.com"],
+            )
+    assert got == event
+
+
 def test_publish_surfaces_missing_websockets_deps():
     with patch(
         "seiso.research.nostr.relays._require_websockets",

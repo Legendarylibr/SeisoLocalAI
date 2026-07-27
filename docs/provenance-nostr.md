@@ -15,8 +15,10 @@ manifest, Seiso can seal:
 - `git_commit`, `run_id`, pipeline id, Seiso version
 - For training (when enabled): `dataset_merkle_root` + leaf count (see below)
 
-The event is kind **`31250`** (parameterized replaceable) with tags
-`d=<pipeline>:<run_id>`, `t=seiso-provenance`, `client=seiso`.
+The event is kind **`31250`** (NIP-01 addressable: `30000–39999`) with tags
+`d=<pipeline>:<run_id>`, `t=seiso-provenance`, `client=seiso`. Relays keep the
+latest event per `(pubkey, kind, d)`; verify fetches by receipt `event_id`, then
+falls back to that addressable filter when the pinned id was replaced.
 
 Schema:
 

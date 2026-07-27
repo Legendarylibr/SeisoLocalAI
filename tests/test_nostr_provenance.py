@@ -76,6 +76,32 @@ def test_bech32_nsec_npub_roundtrip():
     assert restored.public_hex == pair.public_hex
 
 
+def test_nip19_official_vectors():
+    """NIP-19 bare key examples from nostr-protocol/nips/19.md."""
+    cases = [
+        (
+            "npub",
+            "3bf0c63fcb93463407af97a5e5ee64fa883d107ef9e558472c4eb9aaaefa459d",
+            "npub180cvv07tjdrrgpa0j7j7tmnyl2yr6yr7l8j4s3evf6u64th6gkwsyjh6w6",
+        ),
+        (
+            "npub",
+            "7e7e9c42a91bfef19fa929e5fda1b72e0ebc1a4c1141673e2794234d86addf4e",
+            "npub10elfcs4fr0l0r8af98jlmgdh9c8tcxjvz9qkw038js35mp4dma8qzvjptg",
+        ),
+        (
+            "nsec",
+            "67dea2ed018072d675f5415ecfaed7d2597555e202d85b3d65ea4e58d2d92ffa",
+            "nsec1vl029mgpspedva04g90vltkh6fvh240zqtv9k0t9af8935ke9laqsnlfe5",
+        ),
+    ]
+    for hrp, hex_value, encoded in cases:
+        assert bech32_encode(hrp, bytes.fromhex(hex_value)) == encoded
+        got_hrp, data = bech32_decode(encoded)
+        assert got_hrp == hrp
+        assert data.hex() == hex_value
+
+
 def test_event_sign_verify():
     pair = generate_keypair()
     event = build_attestation_event(
@@ -86,8 +112,15 @@ def test_event_sign_verify():
         created_at=1_700_000_000,
     )
     assert event["kind"] == SEISO_PROVENANCE_KIND
+    assert 30000 <= event["kind"] < 40000  # NIP-01 addressable range
     assert ["d", "compress:abc"] in event["tags"]
     assert verify_event(event)
+    # NIP-01 wire hex is lowercase; mixed-case id/pubkey/sig must still verify.
+    mixed = dict(event)
+    mixed["id"] = event["id"].upper()
+    mixed["pubkey"] = event["pubkey"].upper()
+    mixed["sig"] = event["sig"].upper()
+    assert verify_event(mixed)
     bad = dict(event)
     bad["content"] = '{"tampered":true}'
     assert not verify_event(bad)
@@ -170,15 +203,21 @@ def test_attest_and_verify_with_mocked_relay(tmp_path: Path, monkeypatch):
 
     def fake_fetch(event_id, relays, **kwargs):
         ev = store.get("event")
-        if ev and ev.get("id") == event_id:
+        if ev and str(ev.get("id") or "").lower() == str(event_id).lower():
             return ev
         return None
+
+    def fake_fetch_addressable(**kwargs):
+        return store.get("event")
 
     from seiso.research.nostr import attest as attest_mod
 
     with (
         patch.object(attest_mod, "publish_event", side_effect=fake_publish),
         patch.object(attest_mod, "fetch_event_by_id", side_effect=fake_fetch),
+        patch.object(
+            attest_mod, "fetch_addressable_event", side_effect=fake_fetch_addressable
+        ),
         patch.object(
             attest_mod,
             "normalize_relay_list",
@@ -204,6 +243,7 @@ def test_attest_and_verify_with_mocked_relay(tmp_path: Path, monkeypatch):
         )
         assert verify["ok"]
         assert verify["event_verified"] is True
+        assert verify["event_fetch"] == "id"
 
         # Tamper local digests → verify fails.
         saved["config_fingerprint"] = "ff" * 32
