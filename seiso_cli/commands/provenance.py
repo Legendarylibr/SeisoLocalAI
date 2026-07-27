@@ -278,12 +278,12 @@ def provenance_dataset_verify_proof(
         report["event_verified"] = bool(att_report.get("event_verified"))
     elif event_id:
         os.environ.setdefault("SEISO_ALLOW_NOSTR", "1")
+        from seiso.research.nostr.events import verify_event
         from seiso.research.nostr.policy import (
             normalize_relay_list,
             relay_allowlist_from_env,
         )
         from seiso.research.nostr.relays import fetch_event_by_id
-        from seiso.research.nostr.events import verify_event
 
         relay_urls = list(relay) if relay else relay_allowlist_from_env()
         if not relay_urls:
@@ -330,7 +330,9 @@ def provenance_dataset_verify_proof(
         console.print_json(data=report)
         return
 
-    match = bool(remote_root) and remote_root.lower() == root.lower()
+    match = (
+        remote_root is not None and root.lower() == remote_root.lower()
+    )
     report["event_root_match"] = match
     report["remote_dataset_merkle_root"] = remote_root
     report["ok"] = bool(path_ok and match and report.get("event_verified") is not False)
