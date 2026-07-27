@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 from seiso.research.nostr.events import (
+    SEISO_PROVENANCE_KIND,
     build_attestation_event,
     verify_event,
 )
@@ -197,14 +198,39 @@ def verify_attestation(
     if not remote_match:
         remote_match = content == attestation_content_json(attestation)
 
+    receipt_pubkey = str(receipt.get("pubkey") or "").strip().lower()
+    event_pubkey = str(event.get("pubkey") or "").strip().lower()
+    pubkey_ok = bool(receipt_pubkey) and receipt_pubkey == event_pubkey
+    kind_raw = event.get("kind")
+    try:
+        kind_ok = kind_raw is not None and int(kind_raw) == SEISO_PROVENANCE_KIND
+    except (TypeError, ValueError):
+        kind_ok = False
+    expected_d = str(
+        receipt.get("d_tag")
+        or f"{attestation.get('pipeline')}:{attestation.get('run_id')}"
+    )
+    tags = event.get("tags") or []
+    d_tags = [
+        str(t[1])
+        for t in tags
+        if isinstance(t, list) and len(t) >= 2 and str(t[0]) == "d"
+    ]
+    d_ok = bool(d_tags) and expected_d in d_tags
+
     report["event"] = {
         "id": event.get("id"),
         "pubkey": event.get("pubkey"),
         "created_at": event.get("created_at"),
         "kind": event.get("kind"),
     }
-    report["event_verified"] = bool(sig_ok and remote_match)
-    report["ok"] = bool(local_ok and sig_ok and remote_match)
+    report["event_pubkey_match"] = pubkey_ok
+    report["event_kind_ok"] = kind_ok
+    report["event_d_tag_ok"] = d_ok
+    report["event_verified"] = bool(
+        sig_ok and remote_match and pubkey_ok and kind_ok and d_ok
+    )
+    report["ok"] = bool(local_ok and report["event_verified"])
     if not report["ok"] and not report.get("error"):
         report["error"] = "attestation mismatch or invalid event signature"
     return report

@@ -235,3 +235,44 @@ def test_nostr_allowed_default_on(monkeypatch):
 def test_content_fingerprint_stable_for_attestation_body():
     body = {"a": 1, "b": [2, 3]}
     assert content_fingerprint(body) == content_fingerprint({"b": [2, 3], "a": 1})
+
+
+def test_bip340_vector_odd_y_secret():
+    """Secret whose P has odd Y must still verify (BIP-340 d negation)."""
+    # Secret 2 → G*2; exercise sign/verify path regardless of Y parity.
+    secret = bytes.fromhex("00" * 31 + "02")
+    pk = pubkey_xonly_from_secret(secret)
+    msg = bytes.fromhex("aa" * 32)
+    sig = sign_schnorr(secret, msg, aux_rand=bytes.fromhex("bb" * 32))
+    assert verify_schnorr(pk, msg, sig)
+    # Truncated / out-of-range inputs rejected.
+    assert not verify_schnorr(pk[:31], msg, sig)
+    assert not verify_schnorr(pk, msg, sig[:63])
+
+
+def test_event_id_is_nip01_sha256():
+    from seiso.research.nostr.events import compute_event_id
+
+    event_id = compute_event_id(
+        pubkey="aa" * 32,
+        created_at=123,
+        kind=1,
+        tags=[["t", "x"]],
+        content="hi",
+    )
+    import hashlib
+    import json
+
+    preimage = json.dumps(
+        [0, "aa" * 32, 123, 1, [["t", "x"]], "hi"],
+        separators=(",", ":"),
+        ensure_ascii=False,
+    ).encode("utf-8")
+    assert event_id == hashlib.sha256(preimage).hexdigest()
+
+
+def test_validate_relay_url_rejects_embedded_credentials_and_metadata():
+    with pytest.raises(SecurityError, match="credentials"):
+        validate_relay_url("wss://user:secret@nos.lol")
+    with pytest.raises(SecurityError, match="not allowed"):
+        validate_relay_url("wss://metadata.google.internal")

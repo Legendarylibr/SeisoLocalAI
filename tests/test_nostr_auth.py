@@ -85,3 +85,56 @@ async def test_password_register_rejected():
             json={"password": "securepass1"},
         )
         assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_register_generate_and_nsec_mutually_exclusive():
+    pair = generate_keypair()
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        res = await client.post(
+            "/api/auth/register",
+            json={"generate": True, "nsec": pair.nsec},
+        )
+        assert res.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_user_public_view_never_includes_nsec():
+    from forge.services.nostr_auth import user_public_view
+
+    pair = generate_keypair()
+    view = user_public_view(
+        {
+            "id": "u1",
+            "email": None,
+            "display_name": "Admin",
+            "nostr_pubkey": pair.public_hex,
+            "created_at": "2026-01-01T00:00:00+00:00",
+        }
+    )
+    assert view["npub"] == pair.npub
+    assert "nsec" not in view
+    assert view["nostr_pubkey"] == pair.public_hex
+
+
+@pytest.mark.asyncio
+async def test_second_register_forbidden():
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        first = await client.post("/api/auth/register", json={"generate": True})
+        assert first.status_code == 201
+        second = await client.post("/api/auth/register", json={"generate": True})
+        assert second.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_login_with_invalid_nsec_shape():
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        await client.post("/api/auth/register", json={"generate": True})
+        bad = await client.post("/api/auth/login", json={"nsec": "not-a-valid-key"})
+        assert bad.status_code == 401
