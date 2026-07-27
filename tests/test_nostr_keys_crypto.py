@@ -6,6 +6,7 @@ import base64
 from pathlib import Path
 
 import pytest
+from cryptography.exceptions import InvalidTag
 
 from seiso.research.nostr.bech32 import bech32_decode, bech32_encode
 from seiso.research.nostr.crypto import (
@@ -49,10 +50,10 @@ def test_encrypt_decrypt_roundtrip_and_tamper():
     assert decrypt_field("plaintext", key) == "plaintext"
     # Wrong key / tampered ciphertext must fail.
     other = generate_encryption_key()
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         decrypt_field(token, other)
     tampered = token[:-4] + ("0" if token[-4] != "0" else "1") + token[-3:]
-    with pytest.raises(Exception):
+    with pytest.raises(InvalidTag):
         decrypt_field(tampered, key)
 
 

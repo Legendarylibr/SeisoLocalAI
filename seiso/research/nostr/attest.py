@@ -201,8 +201,9 @@ def verify_attestation(
     receipt_pubkey = str(receipt.get("pubkey") or "").strip().lower()
     event_pubkey = str(event.get("pubkey") or "").strip().lower()
     pubkey_ok = bool(receipt_pubkey) and receipt_pubkey == event_pubkey
+    kind_raw = event.get("kind")
     try:
-        kind_ok = int(event.get("kind")) == SEISO_PROVENANCE_KIND
+        kind_ok = kind_raw is not None and int(kind_raw) == SEISO_PROVENANCE_KIND
     except (TypeError, ValueError):
         kind_ok = False
     expected_d = str(
