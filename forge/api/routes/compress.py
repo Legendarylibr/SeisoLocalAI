@@ -39,8 +39,8 @@ class CompressStartRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
     preset: str = Field(
-        default="smoke",
-        description="smoke | full | distill_only | prune_recover | quantize",
+        default="full",
+        description="full | prune_recover | distill_only | quantize | smoke (CI only)",
     )
     stages: list[str] | None = None
     config_file: str | None = None

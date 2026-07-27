@@ -1,9 +1,10 @@
 # LoRA on a model with native hub quantization (MXFP4 — not bitsandbytes QLoRA).
-# Prepare local text corpus first:
+# REQUIRED data prep (file is not shipped):
 #   python scripts/prepare_code_corpus.py -o ~/.seiso/datasets/code-pretrain.jsonl
 # Train: seiso train -c configs/examples/native_hub_quant_lora.yaml
 # FP8 Hub checkpoints are not fine-tunable; use MXFP4 (or a BF16 base) instead.
 model_id: openai/gpt-oss-20b
+# Local path after prepare_code_corpus (expanduser). Not present until you run it.
 dataset: ~/.seiso/datasets/code-pretrain.jsonl
 output_dir: ~/.seiso/experiments/native-hub-quant-lora
 method: lora

@@ -4,6 +4,7 @@ import { HubComboboxSearch } from "@/components/HubComboboxSearch";
 import { IconChevronDown } from "@/components/Icons";
 import { useHubCombobox } from "@/hooks/useHubCombobox";
 
+const HUB_QUICK_START = "HuggingFaceH4/no_robots";
 const BUNDLED_SAMPLE = "./data/sample.jsonl";
 
 type HfDatasetPickerProps = {
@@ -104,13 +105,25 @@ export function HfDatasetPicker({ value, onChange, disabled }: HfDatasetPickerPr
               <button
                 type="button"
                 role="option"
+                aria-selected={value === HUB_QUICK_START}
+                className={`chat-model-picker-option${value === HUB_QUICK_START ? " active" : ""}`}
+                onClick={() => pick(HUB_QUICK_START)}
+              >
+                <span className="chat-model-picker-option-name">Hub chat corpus</span>
+                <span className="chat-model-picker-option-meta">
+                  {HUB_QUICK_START} · product example dataset
+                </span>
+              </button>
+              <button
+                type="button"
+                role="option"
                 aria-selected={value === BUNDLED_SAMPLE}
                 className={`chat-model-picker-option${value === BUNDLED_SAMPLE ? " active" : ""}`}
                 onClick={() => pick(BUNDLED_SAMPLE)}
               >
-                <span className="chat-model-picker-option-name">Bundled sample dataset</span>
+                <span className="chat-model-picker-option-name">CI format smoke (4 rows)</span>
                 <span className="chat-model-picker-option-meta">
-                  {BUNDLED_SAMPLE} · 4 chat rows for smoke tests
+                  {BUNDLED_SAMPLE} · not meaningful training
                 </span>
               </button>
             </div>

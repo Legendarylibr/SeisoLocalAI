@@ -113,7 +113,7 @@ export function RLQuantPage() {
       checkpoint_path: checkpoint || undefined,
       gguf_path: ggufPath || undefined,
       link_training_job_id: linkTrainingJob || undefined,
-      gguf_export: ggufExport,
+      gguf_export: backend === "simulator" ? false : ggufExport,
       moe_enabled: moeEnabled,
       kernel_rl_enabled: kernelRlEnabled,
       kernel_live_benchmark: kernelLiveBenchmark,
@@ -157,7 +157,7 @@ export function RLQuantPage() {
   return (
     <StudioPageShell
       title="RL Quantization"
-      subtitle="Adaptive quantization via reinforcement learning — train a reward-guided policy, evaluate on simulator or llama.cpp, export GGUF with recommended quant levels."
+      subtitle="Adaptive quantization via reinforcement learning — train a reward-guided policy, measure on the analytic simulator (research-only) or llama.cpp. GGUF export recommendations require llama.cpp evidence."
       badge={<span className="trust-badge trust-badge-dim">REINFORCE · multiseed sweeps</span>}
     >
       <div className="train-layout train-layout--config-monitor">
@@ -228,10 +228,22 @@ export function RLQuantPage() {
               <FormSection title="Backends" collapsible defaultOpen={false}>
                 <div className="form-field">
                   <label>Measure backend</label>
-                  <select value={backend} onChange={(e) => setBackend(e.target.value)}>
-                    <option value="simulator">Simulator (no GPU)</option>
+                  <select
+                    value={backend}
+                    onChange={(e) => {
+                      const next = e.target.value;
+                      setBackend(next);
+                      if (next === "simulator") setGgufExport(false);
+                    }}
+                  >
+                    <option value="simulator">Simulator (research metrics only)</option>
                     <option value="llama_cpp">llama.cpp (GGUF path required)</option>
                   </select>
+                  {backend === "simulator" && (
+                    <p className="field-hint">
+                      Simulator evidence is not deploy-claimable — disable GGUF export or switch to llama.cpp.
+                    </p>
+                  )}
                 </div>
                 <div className="form-field">
                   <label>Policy trainer</label>
@@ -257,10 +269,24 @@ export function RLQuantPage() {
                 </div>
               </FormSection>
 
-              <FormSection title="Export options" hint="Optional GGUF export and MoE variants." collapsible defaultOpen={false}>
+              <FormSection
+                title="Export options"
+                hint={
+                  backend === "simulator"
+                    ? "GGUF export needs llama.cpp measure evidence (not simulator)."
+                    : "Optional GGUF export and MoE variants."
+                }
+                collapsible
+                defaultOpen={false}
+              >
                 <div className="studio-checkbox-grid">
                   <label className="studio-checkbox-item">
-                    <input type="checkbox" checked={ggufExport} onChange={(e) => setGgufExport(e.target.checked)} />
+                    <input
+                      type="checkbox"
+                      checked={ggufExport}
+                      disabled={backend === "simulator"}
+                      onChange={(e) => setGgufExport(e.target.checked)}
+                    />
                     Export GGUF after recommendation
                   </label>
                   <label className="studio-checkbox-item">

@@ -47,7 +47,10 @@ _DISTILL_PATH_KEYS = (
 class DistillRLStartRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    preset: str = Field(default="smoke", description="smoke | reproducible | full")
+    preset: str = Field(
+        default="reproducible",
+        description="reproducible | full | smoke (CI fixture only)",
+    )
     config_file: str | None = None
     stages: list[str] | None = None
     teacher_model: str | None = None
@@ -172,8 +175,8 @@ router = build_stage_pipeline_router(
         stage_order=STAGE_ORDER,
         stage_help=STAGE_HELP,
         model_defaults={
-            "teacher_model": PRESETS["smoke"]["teacher_model"],
-            "student_model": PRESETS["smoke"]["student_model"],
+            "teacher_model": PRESETS["reproducible"]["teacher_model"],
+            "student_model": PRESETS["reproducible"]["student_model"],
         },
         start_request_model=DistillRLStartRequest,
         get_orchestrator=get_distill_rl_orchestrator,

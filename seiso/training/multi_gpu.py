@@ -9,6 +9,15 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Env keys set by torchrun / Accelerate / elastic launch (not bare WORLD_SIZE).
+_DISTRIBUTED_LAUNCH_MARKERS = (
+    "MASTER_ADDR",
+    "MASTER_PORT",
+    "LOCAL_WORLD_SIZE",
+    "GROUP_RANK",
+    "TORCHELASTIC_RUN_ID",
+)
+
 
 @dataclass
 class GpuLayout:
@@ -17,6 +26,21 @@ class GpuLayout:
     device: str
     use_ddp: bool
     device_count: int = 1
+
+
+@dataclass(frozen=True)
+class DistributedEnv:
+    """Parsed torchrun/Accelerate process identity (global world size)."""
+
+    world_size: int
+    rank: int
+    local_rank: int
+    local_world_size: int
+    stale: bool = False
+
+    @property
+    def enabled(self) -> bool:
+        return self.world_size > 1 and not self.stale
 
 
 @dataclass(frozen=True)
@@ -35,6 +59,89 @@ class DistributedPlan:
         return self.nproc_per_node * self.nnodes if self.enabled else 1
 
 
+def _env_int(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None or str(raw).strip() == "":
+        return default
+    try:
+        return int(raw)
+    except (TypeError, ValueError):
+        return default
+
+
+def resolve_distributed_env(device_count: int | None = None) -> DistributedEnv:
+    """Parse distributed env without breaking multi-node or CVD-isolated ranks.
+
+    Stale (ignore → single process) when:
+    - ``WORLD_SIZE < 1``
+    - ``LOCAL_RANK`` is unset while ``WORLD_SIZE > 1`` (incomplete shell leftover)
+    - no launch markers (MASTER_*/LOCAL_WORLD_SIZE/elastic) while ``WORLD_SIZE > 1``
+    - ``LOCAL_RANK >=`` visible GPU count
+    - ``LOCAL_WORLD_SIZE >`` visible GPU count (when set)
+
+    Global ``WORLD_SIZE > device_count`` is **not** stale — that is normal multi-node
+    and per-rank ``CUDA_VISIBLE_DEVICES`` launches.
+    """
+    if device_count is None:
+        try:
+            import torch
+
+            device_count = (
+                int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
+            )
+        except ImportError:
+            device_count = 0
+
+    world_size = _env_int("WORLD_SIZE", 1)
+    local_rank_set = "LOCAL_RANK" in os.environ
+    local_rank = _env_int("LOCAL_RANK", 0)
+    rank = _env_int("RANK", local_rank)
+    local_world = _env_int("LOCAL_WORLD_SIZE", 0)
+
+    def _single(*, stale: bool) -> DistributedEnv:
+        return DistributedEnv(
+            world_size=1,
+            rank=0,
+            local_rank=0,
+            local_world_size=1,
+            stale=stale,
+        )
+
+    if world_size < 1:
+        return _single(stale=True)
+    if world_size <= 1:
+        return _single(stale=False)
+
+    if not local_rank_set:
+        return _single(stale=True)
+    if not any(k in os.environ for k in _DISTRIBUTED_LAUNCH_MARKERS):
+        return _single(stale=True)
+    if device_count > 0 and local_rank >= device_count:
+        return _single(stale=True)
+    if local_world > 0 and device_count > 0 and local_world > device_count:
+        return _single(stale=True)
+
+    if local_world <= 0:
+        if device_count > 0 and world_size <= device_count:
+            local_world = world_size
+        elif device_count > 0:
+            # Multi-node / CVD: local group size unknown; assume one local peer slot
+            # per visible device for metadata only (placement uses local_rank).
+            local_world = device_count
+        else:
+            local_world = world_size
+
+    if rank < 0 or rank >= world_size:
+        rank = local_rank
+    return DistributedEnv(
+        world_size=world_size,
+        rank=rank,
+        local_rank=local_rank,
+        local_world_size=max(1, local_world),
+        stale=False,
+    )
+
+
 def detect_training_layout() -> GpuLayout:
     """Detect GPUs and distributed rank from Accelerate/PyTorch env vars."""
     try:
@@ -50,17 +157,12 @@ def detect_training_layout() -> GpuLayout:
             world_size=1, local_rank=0, device="cpu", use_ddp=False, device_count=0
         )
 
-    local_rank = int(os.environ.get("LOCAL_RANK", "0"))
-    world_size = int(os.environ.get("WORLD_SIZE", "1"))
-    # Ignore stale distributed env from a prior job in this process (Forge).
-    if world_size > device_count or local_rank >= device_count or world_size < 1:
-        world_size = 1
-        local_rank = 0
-    use_ddp = world_size > 1
-    device = f"cuda:{local_rank}" if use_ddp else "cuda"
+    dist_env = resolve_distributed_env(device_count)
+    use_ddp = dist_env.enabled
+    device = f"cuda:{dist_env.local_rank}" if use_ddp else "cuda"
     return GpuLayout(
-        world_size=world_size,
-        local_rank=local_rank,
+        world_size=dist_env.world_size,
+        local_rank=dist_env.local_rank,
         device=device,
         use_ddp=use_ddp,
         device_count=device_count,

@@ -14,6 +14,7 @@ const DISTILL_RL_PIPELINE = {
   listJobs: api.listDistillRLJobs,
   startJob: api.startDistillRL,
   streamPath: (jobId: string) => `/distill-rl/jobs/${jobId}/stream`,
+  initialPreset: "reproducible",
 };
 
 export function DistillRLPage() {
