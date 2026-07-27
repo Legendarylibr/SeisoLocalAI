@@ -5,7 +5,12 @@ const MUTATING = new Set(["POST", "PUT", "DELETE", "PATCH"]);
 /** Read CSRF double-submit cookie set by the server on login/register. */
 export function getCsrfToken(): string | null {
   const match = document.cookie.match(/(?:^|;\s*)seiso_csrf=([^;]*)/);
-  return match ? decodeURIComponent(match[1]) : null;
+  if (!match?.[1]) return null;
+  try {
+    return decodeURIComponent(match[1]);
+  } catch {
+    return null;
+  }
 }
 
 /** Clear any legacy localStorage tokens from older builds. */

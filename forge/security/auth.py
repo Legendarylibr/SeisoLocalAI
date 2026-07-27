@@ -119,6 +119,8 @@ async def get_current_user_id(
 class RateLimiter:
     """Simple in-memory sliding window rate limiter per IP."""
 
+    _MAX_TRACKED_IPS = 1024
+
     def __init__(self, max_per_minute: int = 120) -> None:
         self.max_per_minute = max_per_minute
         self._hits: dict[str, list[float]] = defaultdict(list)
@@ -135,6 +137,19 @@ class RateLimiter:
             raise HTTPException(
                 status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit exceeded"
             )
+        # Hard cap distinct IPs so a many-source flood cannot grow memory forever.
+        if client_ip not in self._hits and len(self._hits) >= self._MAX_TRACKED_IPS:
+            stale = [
+                ip
+                for ip, hits in self._hits.items()
+                if not hits or hits[-1] <= cutoff
+            ]
+            for ip in stale[:128]:
+                self._hits.pop(ip, None)
+            if len(self._hits) >= self._MAX_TRACKED_IPS:
+                raise HTTPException(
+                    status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit exceeded"
+                )
         pruned.append(now)
         self._hits[client_ip] = pruned
         # Opportunistic sweep of other idle IPs (bounded work per request).

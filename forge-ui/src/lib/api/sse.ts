@@ -91,7 +91,9 @@ export function streamPostSSE(
     await consumeSSEStream(
       reader,
       (event, data) => {
-        if (handlers[event]) handlers[event](data);
+        if (Object.hasOwn(handlers, event)) {
+          handlers[event]!(data);
+        }
       },
       controller.signal,
     );

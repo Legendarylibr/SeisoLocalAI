@@ -54,6 +54,17 @@ async def get_compat_identity(
                     raise HTTPException(
                         status.HTTP_401_UNAUTHORIZED, "No local user configured"
                     )
+                owner = settings.get_inference_api_key_owner()
+                user_pubkey = str(user.get("nostr_pubkey") or "").strip().lower()
+                if owner:
+                    if not user_pubkey or owner != user_pubkey:
+                        raise HTTPException(
+                            status.HTTP_401_UNAUTHORIZED,
+                            "Inference API key is not bound to the current owner npub",
+                        )
+                elif user_pubkey:
+                    # Legacy installs: bind existing key to the sole owner npub.
+                    settings.bind_inference_api_key_owner(user_pubkey)
                 identity = CompatIdentity(
                     user_id=str(user["id"]), auth_method="inference_key"
                 )

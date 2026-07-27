@@ -56,7 +56,8 @@ def test_nip49_password_nfkc_normalization():
 def test_nip49_decrypt_rejects_log_n_out_of_range():
     secret = bytes.fromhex(_NIP49_TEST_SECRET_HEX)
     enc = encrypt_ncryptsec(secret, "bound-check", log_n=16)
-    for bad in (0, 23, 30, 255):
+    # Cap is 18 (stricter than NIP-49's 22) to avoid scrypt DoS on decrypt.
+    for bad in (0, 19, 22, 23, 30, 255):
         mutated = _mutate_log_n(enc, bad)
         with pytest.raises(ValueError, match="log_n"):
             decrypt_ncryptsec(mutated, "bound-check")
@@ -66,6 +67,8 @@ def test_nip49_encrypt_rejects_log_n_out_of_range():
     secret = bytes.fromhex(_NIP49_TEST_SECRET_HEX)
     with pytest.raises(ValueError, match="log_n"):
         encrypt_ncryptsec(secret, "x", log_n=0)
+    with pytest.raises(ValueError, match="log_n"):
+        encrypt_ncryptsec(secret, "x", log_n=19)
     with pytest.raises(ValueError, match="log_n"):
         encrypt_ncryptsec(secret, "x", log_n=23)
 

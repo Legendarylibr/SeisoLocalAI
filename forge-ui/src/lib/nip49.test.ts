@@ -52,10 +52,10 @@ describe("nip49", () => {
     expect(looksLikeNcryptsec("nsec1qqqq")).toBe(false);
   });
 
-  it("rejects log_n outside 1..22 on decrypt", () => {
+  it("rejects log_n outside 1..18 on decrypt (DoS cap)", () => {
     const secret = decryptNip49(VECTOR_NCRYPTSEC, "nostr");
     const enc = encryptNip49(secret, "bound-check", 16, 0x00);
-    for (const bad of [0, 23, 30, 255]) {
+    for (const bad of [0, 19, 22, 23, 30, 255]) {
       expect(() => decryptNip49(mutateLogN(enc, bad), "bound-check")).toThrow(/log_n/);
     }
   });

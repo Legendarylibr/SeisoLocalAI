@@ -108,6 +108,62 @@ class ForgeSettings(BaseSettings):
         configure_revocation_store(self.data_dir)
         validate_security_settings(self)
 
+    def rotate_inference_api_key(self) -> bool:
+        """Regenerate Compat ``/v1`` key on disk.
+
+        Returns False when ``SEISO_INFERENCE_API_KEY`` is env-bound (cannot
+        rotate without changing the process environment).
+        """
+        if "SEISO_INFERENCE_API_KEY" in os.environ:
+            return False
+        import secrets
+
+        key_file = self.data_dir / ".inference_api_key"
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        new_key = f"seiso_sk_{secrets.token_urlsafe(32)}"
+        key_file.write_text(new_key, encoding="utf-8")
+        key_file.chmod(0o600)
+        self.inference_api_key = new_key
+        return True
+
+    @property
+    def inference_api_key_owner_file(self) -> Path:
+        return self.data_dir / ".inference_api_key.owner"
+
+    def get_inference_api_key_owner(self) -> str | None:
+        """Pubkey hex of the npub that owns the Compat ``/v1`` key, if bound."""
+        path = self.inference_api_key_owner_file
+        if not path.is_file():
+            return None
+        raw = path.read_text(encoding="utf-8").strip().lower()
+        return raw if len(raw) == 64 and all(c in "0123456789abcdef" for c in raw) else None
+
+    def bind_inference_api_key_owner(self, pubkey_hex: str) -> None:
+        """Record that the Compat key belongs to this owner npub (pubkey hex)."""
+        pubkey = pubkey_hex.strip().lower()
+        if len(pubkey) != 64 or not all(c in "0123456789abcdef" for c in pubkey):
+            raise ValueError("inference key owner must be a 64-char hex pubkey")
+        path = self.inference_api_key_owner_file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(pubkey, encoding="utf-8")
+        path.chmod(0o600)
+
+    def clear_inference_api_key_owner(self) -> None:
+        self.inference_api_key_owner_file.unlink(missing_ok=True)
+
+    def sync_inference_api_key_owner(self, pubkey_hex: str) -> bool:
+        """Bind Compat key to ``pubkey_hex``; rotate when the owner changes.
+
+        Returns whether the key was rotated.
+        """
+        pubkey = pubkey_hex.strip().lower()
+        current = self.get_inference_api_key_owner()
+        if current == pubkey:
+            return False
+        rotated = self.rotate_inference_api_key()
+        self.bind_inference_api_key_owner(pubkey)
+        return rotated
+
     def _resolve_storage_mode(self) -> None:
         marker = self.data_dir / ".storage_mode"
         env_configured = (

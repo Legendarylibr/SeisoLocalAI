@@ -9,6 +9,8 @@ import { concatBytes, randomBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 
 const BECH32_LIMIT = 5000;
 const PAYLOAD_LEN = 91;
+/** Spec allows up to 22; cap lower so crafted ncryptsec cannot freeze the tab. */
+const MAX_LOG_N = 18;
 
 export type KeySecurityByte = 0x00 | 0x01 | 0x02;
 
@@ -43,8 +45,8 @@ export function encryptNip49(
   if (secret.length !== 32) {
     throw new Error("secret must be 32 bytes");
   }
-  if (logn < 1 || logn > 22) {
-    throw new Error("log_n must be between 1 and 22");
+  if (logn < 1 || logn > MAX_LOG_N) {
+    throw new Error(`log_n must be between 1 and ${MAX_LOG_N}`);
   }
   if (!password || !password.trim()) {
     throw new Error("passphrase is required");
@@ -90,8 +92,8 @@ export function decryptNip49(ncryptsec: string, password: string): Uint8Array {
     throw new Error(`invalid ncryptsec version ${b[0]}`);
   }
   const logn = b[1]!;
-  if (logn < 1 || logn > 22) {
-    throw new Error("log_n must be between 1 and 22");
+  if (logn < 1 || logn > MAX_LOG_N) {
+    throw new Error(`log_n must be between 1 and ${MAX_LOG_N}`);
   }
   if (!password.trim()) {
     throw new Error("passphrase is required");

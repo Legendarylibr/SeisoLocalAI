@@ -2,6 +2,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 
 from forge.main import create_app
+from tests.conftest import RETURN_TOKEN_HEADERS
 
 
 @pytest.fixture
@@ -16,6 +17,7 @@ async def authed_client(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         token = reg.json()["access_token"]
         client.headers["Authorization"] = f"Bearer {token}"

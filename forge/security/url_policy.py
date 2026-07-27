@@ -115,10 +115,21 @@ def validate_provider_base_url(url: str, *, provider_type: str = "local_chat") -
         raise SecurityError("base_url host is not allowed")
 
     scheme = parsed.scheme.lower()
-    local_ok = ptype in _LOCAL_CHAT_TYPES and _is_local_host(host)
     remote_chat = ptype in _REMOTE_CHAT_TYPES
+    is_local_type = ptype in _LOCAL_CHAT_TYPES
+    host_is_local = _is_local_host(host)
 
-    if remote_chat and _is_local_host(host):
+    # local_chat/vllm are loopback-only. Public HTTPS belongs on remote_chat
+    # (gated by SEISO_ALLOW_CLOUD_MULTIGPU) — never via the local type.
+    if is_local_type and not host_is_local:
+        raise SecurityError(
+            "local_chat base_url must be a loopback host "
+            "(use type remote_chat for remote HTTPS chat servers)"
+        )
+
+    local_ok = is_local_type and host_is_local
+
+    if remote_chat and host_is_local:
         raise SecurityError(
             "remote_chat base_url must be a remote HTTPS host "
             "(use type local_chat for loopback multi-GPU servers)"

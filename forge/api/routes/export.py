@@ -67,7 +67,9 @@ def _resolve_export_hub_token(
 
 
 @router.get("/profiles")
-async def export_profiles() -> list[dict]:
+async def export_profiles(
+    _user_id: Annotated[str, Depends(get_current_user_id)],
+) -> list[dict]:
     from seiso.export.pipeline import profile_catalog
 
     return profile_catalog()
