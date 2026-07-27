@@ -23,6 +23,8 @@ _PROFILE_DEFAULTS: dict[str, dict[str, str]] = {
     },
     "interactive": {
         # Defaults already tuned for chat; keep light seeds only.
+        # Do NOT seed SEISO_OLLAMA_KEEP_ALIVE here — native Linux NVIDIA uses
+        # VRAM-adaptive keep_alive; fixed env would disable that path.
         "SEISO_STREAM_BATCH_CHARS": "4",
         "SEISO_SIDECAR_PERF_MODE": "0",
     },
@@ -53,10 +55,21 @@ def apply_inference_profile(profile: str | None = None) -> InferenceProfile:
 
 
 def profile_sidecar_keep_alive_override() -> str | None:
-    """Optional keep_alive while a chat/preload request is active."""
+    """Optional keep_alive while a chat/preload request is active.
+
+    Native Linux NVIDIA keeps VRAM-adaptive residency (see
+    ``sidecar_ollama_keep_alive``); interactive short pin is for other hosts.
+    """
     profile = resolve_inference_profile()
     if profile == "throughput":
         return "30m"
     if profile == "interactive":
-        return "15m"
+        try:
+            from seiso.platform import is_native_linux_nvidia
+
+            if is_native_linux_nvidia():
+                return None
+        except ImportError:
+            pass
+        return "2m"
     return None  # safe: use adaptive short residency

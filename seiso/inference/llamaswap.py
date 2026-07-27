@@ -68,6 +68,7 @@ __all__ = [
     "plan_sidecar_request",
     "preferred_llamaswap_engine",
     "preferred_sidecar_engine",
+    "release_orphan_sidecar_memory",
     "sidecar_enabled",
     "sidecar_max_tokens",
     "sidecar_num_ctx",
@@ -100,6 +101,34 @@ class IsolatedGgufClient(Protocol):
     ) -> Iterator[StreamToken]: ...
 
     def release_external_memory(self, model_path: str | None = None) -> tuple[bool, str | None]: ...
+
+
+def release_orphan_sidecar_memory() -> list[str]:
+    """Unload sidecar-resident models even when the Seiso pool is empty.
+
+    Returns human-readable release notes (success or soft failure).
+    """
+    notes: list[str] = []
+    if ollama_health_ok():
+        ollama = OllamaClient(url=ollama_url())
+        before = ollama._ollama_running_names()
+        if before:
+            ok, reason = ollama.release_all_running_models()
+            if ok:
+                notes.append("Released Ollama resident models (keep_alive=0)")
+            elif reason:
+                notes.append(f"Could not confirm Ollama orphan unload: {reason}")
+    if llamaswap_enabled() and llamaswap_health_ok():
+        swap = LlamaSwapClient(url=llamaswap_url())
+        ok, reason = swap.release_external_memory(None)
+        if ok:
+            notes.append("Released llama-swap managed model processes")
+        elif reason:
+            notes.append(
+                "Could not confirm llama-swap external model unload"
+                + (f": {reason}" if reason else "")
+            )
+    return notes
 
 
 def llamaswap_model_name(model_path: str) -> str:
@@ -1059,20 +1088,29 @@ class OllamaClient:
                 f"{sidecar_setup_hint(engine='ollama')}"
             ) from exc
 
-    def release_external_memory(self, model_path: str | None = None) -> tuple[bool, str | None]:
-        """Best-effort Ollama model unload via keep_alive=0."""
-        if not model_path:
-            return False, "Ollama unload requires a model path"
+    def _ollama_running_names(self) -> list[str]:
+        """Return model names currently resident per Ollama ``/api/ps``."""
+        target = urllib.parse.urljoin(f"{self.url}/", "api/ps")
+        req = urllib.request.Request(target, method="GET")
         try:
-            from seiso.inference.ollama_registry import (
-                metadata_for_model_path,
-                resolve_ollama_tag,
-            )
+            with urllib.request.urlopen(req, timeout=5) as response:
+                raw = response.read().decode("utf-8", errors="replace")
+            payload = json.loads(raw) if raw.strip() else {}
+        except (OSError, urllib.error.URLError, TimeoutError, json.JSONDecodeError):
+            return []
+        models = payload.get("models") if isinstance(payload, dict) else None
+        if not isinstance(models, list):
+            return []
+        names: list[str] = []
+        for item in models:
+            if not isinstance(item, dict):
+                continue
+            name = item.get("name") or item.get("model")
+            if isinstance(name, str) and name.strip():
+                names.append(name.strip())
+        return names
 
-            meta = metadata_for_model_path(model_path)
-            tag = resolve_ollama_tag(model_path, meta)
-        except Exception as exc:
-            return False, str(exc)
+    def _unload_ollama_tag(self, tag: str) -> tuple[bool, str | None]:
         body = json.dumps({"model": tag, "keep_alive": 0}).encode("utf-8")
         target = urllib.parse.urljoin(f"{self.url}/", "api/generate")
         req = urllib.request.Request(
@@ -1083,9 +1121,47 @@ class OllamaClient:
         )
         try:
             with urllib.request.urlopen(req, timeout=30):
-                return True, None
+                pass
         except (OSError, urllib.error.URLError, TimeoutError) as exc:
             return False, str(exc)
+        # Confirm residency dropped when /api/ps is available.
+        running = self._ollama_running_names()
+        if running and any(tag == name or tag in name or name in tag for name in running):
+            return False, f"Ollama still reports resident model after unload: {tag}"
+        return True, None
+
+    def release_external_memory(self, model_path: str | None = None) -> tuple[bool, str | None]:
+        """Best-effort Ollama model unload via keep_alive=0."""
+        if not model_path:
+            return self.release_all_running_models()
+        try:
+            from seiso.inference.ollama_registry import (
+                metadata_for_model_path,
+                resolve_ollama_tag,
+            )
+
+            meta = metadata_for_model_path(model_path)
+            tag = resolve_ollama_tag(model_path, meta)
+        except Exception as exc:
+            return False, str(exc)
+        return self._unload_ollama_tag(tag)
+
+    def release_all_running_models(self) -> tuple[bool, str | None]:
+        """Unload every model listed by Ollama ``/api/ps``."""
+        names = self._ollama_running_names()
+        if not names:
+            return True, None
+        errors: list[str] = []
+        for tag in names:
+            ok, reason = self._unload_ollama_tag(tag)
+            if not ok and reason:
+                errors.append(reason)
+        remaining = self._ollama_running_names()
+        if remaining:
+            return False, "; ".join(errors) if errors else (
+                f"Ollama still reports resident models: {', '.join(remaining)}"
+            )
+        return True, None
 
     def _resolve_model(self, model_path: str, payload: dict[str, Any]) -> str:
         from seiso.inference.ollama_registry import (

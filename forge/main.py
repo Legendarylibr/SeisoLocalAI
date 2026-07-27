@@ -34,9 +34,7 @@ async def lifespan(app: FastAPI):
 
     repair_linux_cuda_stack()
     ensure_cuda_library_path()
-    from forge.services.llamacpp_runtime import ensure_llamacpp_runtime
-
-    ensure_llamacpp_runtime()
+    # Defer llama_cpp import until first GGUF load / doctor — keeps idle Forge lean.
     apply_platform_memory_profile()
     try:
         from seiso.inference.profiles import apply_inference_profile

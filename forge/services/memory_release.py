@@ -130,6 +130,64 @@ def running_gpu_task_kinds(*, exclude_job_id: str | None = None) -> list[str]:
     return active
 
 
+def _stop_managed_vllm(*, reason: str, log: LogFn = None) -> tuple[bool, list[str]]:
+    """Stop optional managed multi-GPU vLLM so Free memory clears external VRAM."""
+    notes: list[str] = []
+    try:
+        from forge.config import get_settings
+        from forge.services.managed_vllm import stop_managed_if_running
+
+        settings = get_settings()
+        managed = stop_managed_if_running(data_dir=settings.data_dir, reason=reason)
+        stopped = bool(managed.get("stopped"))
+        if stopped:
+            note = "Stopped managed multi-GPU vLLM to free GPU memory"
+            notes.append(note)
+            if log:
+                log(note)
+            else:
+                logger.info(note)
+        return stopped, notes
+    except Exception:
+        logger.debug("Managed vLLM stop during memory release skipped", exc_info=True)
+        return False, notes
+
+
+def _release_orphan_sidecars(*, log: LogFn = None) -> list[str]:
+    """Ask Ollama/llama-swap to drop models even when the local pool is empty."""
+    try:
+        from seiso.inference.llamaswap import release_orphan_sidecar_memory
+
+        notes = release_orphan_sidecar_memory()
+    except Exception:
+        logger.debug("Orphan sidecar unload skipped", exc_info=True)
+        return []
+    for note in notes:
+        if log:
+            log(note)
+        else:
+            logger.info(note)
+    return notes
+
+
+def release_external_inference_memory(
+    *, reason: str, log: LogFn = None, sync_caches: bool = True
+) -> dict[str, Any]:
+    """Clear sidecar/managed holders + GPU caches after the local pool is unloaded."""
+    from seiso.memory.protection import release_cached_memory
+
+    release_notes = _release_orphan_sidecars(log=log)
+    managed_stopped, managed_notes = _stop_managed_vllm(reason=reason, log=log)
+    release_notes.extend(managed_notes)
+    if sync_caches or managed_stopped or release_notes:
+        release_cached_memory(sync=True)
+    _refresh_hardware_profile()
+    return {
+        "release_notes": release_notes,
+        "managed_vllm_stopped": managed_stopped,
+    }
+
+
 def release_inference_memory(*, reason: str, log: LogFn = None) -> dict[str, Any]:
     """Unload the active chat/inference model and clear GPU/RAM caches."""
     from seiso.inference.model_pool import get_model_pool
@@ -148,6 +206,10 @@ def release_inference_memory(*, reason: str, log: LogFn = None) -> dict[str, Any
             logger.info(msg)
         # Wait for in-flight inference so VRAM is actually freed before GPU tasks.
         pool.prepare_for_load()
+    else:
+        # Empty pool — still drop orphan sidecar residency.
+        if hasattr(pool, "unload_all"):
+            pool.unload_all()
 
     unloaded = pool.active_key is None and had_active
     if hasattr(pool, "drain_release_notes"):
@@ -161,27 +223,17 @@ def release_inference_memory(*, reason: str, log: LogFn = None) -> dict[str, Any
         else:
             logger.info(note)
 
-    # Optional managed multi-GPU vLLM holds external VRAM — stop on Free memory.
-    managed_stopped = False
-    try:
-        from forge.config import get_settings
-        from forge.services.managed_vllm import stop_managed_if_running
-
-        settings = get_settings()
-        managed = stop_managed_if_running(data_dir=settings.data_dir, reason=reason)
-        managed_stopped = bool(managed.get("stopped"))
-        if managed_stopped:
-            note = "Stopped managed multi-GPU vLLM to free GPU memory"
+    external = release_external_inference_memory(
+        reason=reason, log=log, sync_caches=had_active or bool(release_notes)
+    )
+    # Avoid double-counting notes already drained from the pool path.
+    for note in external.get("release_notes") or []:
+        if note not in release_notes:
             release_notes.append(note)
-            if log:
-                log(note)
-            else:
-                logger.info(note)
-    except Exception:
-        logger.debug("Managed vLLM stop during memory release skipped", exc_info=True)
-
-    release_cached_memory(sync=had_active or managed_stopped)
-    _refresh_hardware_profile()
+    managed_stopped = bool(external.get("managed_vllm_stopped"))
+    if not (had_active or managed_stopped or release_notes):
+        release_cached_memory(sync=False)
+        _refresh_hardware_profile()
     return {
         "unloaded_inference": unloaded,
         "previous_model": status_before.get("active_model"),
@@ -288,7 +340,10 @@ def prepare_for_gpu_task(
         raise
     release_notes = [str(note) for note in result.get("release_notes") or []]
     sidecar_unload_uncertain = any(
-        "Could not confirm llama-swap external model unload" in note or "Ollama unload" in note
+        "Could not confirm llama-swap external model unload" in note
+        or "Could not confirm Ollama orphan unload" in note
+        or "Ollama unload" in note
+        or "Ollama still reports resident" in note
         for note in release_notes
     )
     if sidecar_unload_uncertain:

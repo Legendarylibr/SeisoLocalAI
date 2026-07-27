@@ -481,14 +481,10 @@ export function ChatPage() {
       if (!result.selectedId) return;
       setSelection(result.selectedId);
       setInferenceBackend(result.backend);
-      if (!providerId) {
-        setLoadedModelId(result.selectedId);
-        setLoadedBackend(result.backend);
-      }
+      // Bootstrap no longer auto-preloads — keep loaded* null until explicit Load/send.
     };
 
     const bootstrap = async () => {
-      setSwitchingModel(true);
       setError(null);
       setLoadedModelId(null);
       setLoadedBackend(null);
@@ -500,7 +496,8 @@ export function ChatPage() {
 
         const initialModels = initialModelsResp.models;
         const commonOptions = {
-          preload: !providerId,
+          // Load on first send / explicit Load — keep bare Forge small.
+          preload: false,
           providerActive: !!providerId,
           onProgress: setLoadProgress,
           initialModels,
@@ -510,6 +507,8 @@ export function ChatPage() {
         };
 
         if (pendingRepo) {
+          // Hub download is the only bootstrap path that needs a busy state.
+          setSwitchingModel(true);
           if (needsHubDownload(initialModels, navTarget)) {
             setLoadProgress(initialDownloadProgress(pendingRepo, pendingDownloadBytes));
           } else {

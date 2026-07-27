@@ -115,7 +115,8 @@ def test_plan_sidecar_reuses_pinned_ctx(monkeypatch):
     assert max_tokens == 128
 
 
-def test_sidecar_keep_alive_active_uses_profile(monkeypatch):
+def test_sidecar_keep_alive_native_linux_stays_adaptive(monkeypatch):
+    """Interactive lean pin must not override native Linux VRAM-adaptive TTLs."""
     from seiso.inference import llamaswap
 
     monkeypatch.delenv("SEISO_OLLAMA_KEEP_ALIVE", raising=False)
@@ -123,8 +124,25 @@ def test_sidecar_keep_alive_active_uses_profile(monkeypatch):
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(llamaswap, "_sidecar_perf_mode", lambda: False)
     monkeypatch.setattr(llamaswap, "_sidecar_headroom_mb", lambda: 20_000)
-    assert llamaswap.sidecar_ollama_keep_alive(active=True) == "15m"
+    monkeypatch.setattr(
+        "seiso.platform.is_native_linux_nvidia", lambda **_: True
+    )
+    # Active chat pins longer residency; idle uses adaptive 2m at roomy headroom.
+    assert llamaswap.sidecar_ollama_keep_alive(active=True) == "10m"
     assert llamaswap.sidecar_ollama_keep_alive(active=False) == "2m"
+
+
+def test_sidecar_keep_alive_interactive_short_pin_non_native(monkeypatch):
+    from seiso.inference import llamaswap
+
+    monkeypatch.delenv("SEISO_OLLAMA_KEEP_ALIVE", raising=False)
+    monkeypatch.setenv("SEISO_INFERENCE_PROFILE", "interactive")
+    monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: False)
+    monkeypatch.setattr(llamaswap, "_sidecar_perf_mode", lambda: False)
+    monkeypatch.setattr(
+        "seiso.platform.is_native_linux_nvidia", lambda **_: False
+    )
+    assert llamaswap.sidecar_ollama_keep_alive(active=True) == "2m"
 
 
 def test_dflash_draft_infer_prefers_token_path():

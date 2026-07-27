@@ -211,13 +211,16 @@ def hardware_profile(*, force_refresh: bool = False) -> dict[str, Any]:
     except (OSError, FileNotFoundError):
         disk_free = 0
 
+    # Avoid importing torch at idle — only report CUDA runtime when already loaded.
     cuda_runtime = False
-    try:
-        import torch
+    import sys
 
-        cuda_runtime = torch.cuda.is_available()
-    except ImportError:
-        pass
+    torch_mod = sys.modules.get("torch")
+    if torch_mod is not None:
+        try:
+            cuda_runtime = bool(torch_mod.cuda.is_available())
+        except Exception:
+            cuda_runtime = False
 
     profile = {
         "platform": platform.system().lower(),
