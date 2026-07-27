@@ -233,11 +233,14 @@ async def start_export(
             try:
                 from forge.services.nostr_settings import forge_maybe_attest
 
+                user = await db.get_user_by_id(user_id)
                 forge_maybe_attest(
                     data_dir=settings.data_dir,
                     user_id=user_id,
                     result=job.result if isinstance(job.result, dict) else None,
                     output_dir=payload.get("output_dir"),
+                    expected_pubkey=str((user or {}).get("nostr_pubkey") or "")
+                    or None,
                 )
             except Exception:
                 logging.getLogger(__name__).exception(

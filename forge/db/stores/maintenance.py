@@ -15,6 +15,7 @@ class MaintenanceMixin:
                 "chat_messages",
                 "chat_threads",
                 "providers",
+                "job_events",
                 "distill_rl_jobs",
                 "compress_jobs",
                 "rl_quant_jobs",

@@ -93,6 +93,19 @@ def test_event_sign_verify():
     assert not verify_event(bad)
 
 
+def test_infer_run_id_hashes_directory_fallback(tmp_path: Path):
+    from seiso.research.provenance import infer_pipeline_and_run_id
+
+    man = tmp_path / "SecretProjectName" / "manifest.json"
+    man.parent.mkdir(parents=True)
+    man.write_text("{}", encoding="utf-8")
+    pipeline, run_id = infer_pipeline_and_run_id({}, manifest_path=man)
+    assert pipeline == "seiso"
+    assert run_id != "SecretProjectName"
+    assert len(run_id) == 16
+    assert run_id.isalnum()
+
+
 def test_attestation_excludes_nostr_receipt():
     manifest = {
         "pipeline": "compress",

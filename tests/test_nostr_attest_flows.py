@@ -315,7 +315,10 @@ def test_infer_pipeline_variants_and_stable_content():
     }
     att = build_attestation_v1(export_m, manifest_path=Path("/tmp/out/meta.json"))
     assert att["pipeline"] == "export"
-    assert att["run_id"] == "out"
+    # Directory-name fallback is hashed so d-tags do not leak path labels.
+    assert att["run_id"] != "out"
+    assert len(att["run_id"]) == 16
+    assert att["run_id"].isalnum()
 
     aq = {"schema": "seiso.adaptive_quant.v1", "job_id": "j-1"}
     assert build_attestation_v1(aq)["pipeline"] == "adaptive_quant"

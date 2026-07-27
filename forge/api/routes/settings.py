@@ -7,7 +7,9 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 
+from forge.api.deps import get_db
 from forge.config import ForgeSettings, get_settings
+from forge.db.store import Database
 from forge.security.auth import get_current_user_id
 from forge.services.hf_auth import (
     clear_user_hf_token,
@@ -194,14 +196,31 @@ class NostrKeyImport(BaseModel):
     secret: str = Field(min_length=8, max_length=256)
 
 
+async def _nostr_status_for_user(
+    *,
+    db: Database,
+    settings: ForgeSettings,
+    user_id: str,
+) -> dict:
+    from forge.services.nostr_settings import nostr_status
+
+    user = await db.get_user_by_id(user_id)
+    auth_pubkey = str((user or {}).get("nostr_pubkey") or "") or None
+    return nostr_status(
+        settings.data_dir,
+        user_id,
+        auth_pubkey=auth_pubkey,
+        persist_keys=not settings.db_ephemeral,
+    )
+
+
 @router.get("/settings/nostr")
 async def get_nostr_settings(
     user_id: Annotated[str, Depends(get_current_user_id)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
+    db: Annotated[Database, Depends(get_db)],
 ) -> dict:
-    from forge.services.nostr_settings import nostr_status
-
-    return nostr_status(settings.data_dir, user_id)
+    return await _nostr_status_for_user(db=db, settings=settings, user_id=user_id)
 
 
 @router.put("/settings/nostr")
@@ -209,6 +228,7 @@ async def update_nostr_settings(
     body: NostrPrefsUpdate,
     user_id: Annotated[str, Depends(get_current_user_id)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
+    db: Annotated[Database, Depends(get_db)],
 ) -> dict:
     from forge.services.nostr_settings import NostrPrefs, save_nostr_prefs
     from seiso.security import SecurityError
@@ -225,9 +245,7 @@ async def update_nostr_settings(
         )
     except SecurityError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    from forge.services.nostr_settings import nostr_status
-
-    status = nostr_status(settings.data_dir, user_id)
+    status = await _nostr_status_for_user(db=db, settings=settings, user_id=user_id)
     status.update(prefs.to_dict())
     return status
 
@@ -236,13 +254,25 @@ async def update_nostr_settings(
 async def nostr_keygen(
     user_id: Annotated[str, Depends(get_current_user_id)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
+    db: Annotated[Database, Depends(get_db)],
 ) -> dict[str, str]:
+    """Rotate auth + attest identity together. Returns nsec once for offline backup."""
     from forge.services.nostr_settings import generate_user_nostr_key
 
     try:
-        return generate_user_nostr_key(settings.data_dir, user_id)
-    except ImportError as exc:
+        result = generate_user_nostr_key(
+            settings.data_dir,
+            user_id,
+            persist=not settings.db_ephemeral,
+        )
+        await db.update_user_nostr_pubkey(user_id, result["pubkey_hex"])
+    except (ImportError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {
+        "status": result["status"],
+        "npub": result["npub"],
+        "nsec": result["nsec"],
+    }
 
 
 @router.put("/settings/nostr/key")
@@ -250,13 +280,22 @@ async def nostr_import_key(
     body: NostrKeyImport,
     user_id: Annotated[str, Depends(get_current_user_id)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
+    db: Annotated[Database, Depends(get_db)],
 ) -> dict[str, str]:
+    """Import nsec and bind account npub to the same key (auth + attest)."""
     from forge.services.nostr_settings import import_user_nostr_key
 
     try:
-        return import_user_nostr_key(settings.data_dir, user_id, body.secret)
+        result = import_user_nostr_key(
+            settings.data_dir,
+            user_id,
+            body.secret,
+            persist=not settings.db_ephemeral,
+        )
+        await db.update_user_nostr_pubkey(user_id, result["pubkey_hex"])
     except (ImportError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    return {"status": result["status"], "npub": result["npub"]}
 
 
 @router.delete("/settings/nostr/key")

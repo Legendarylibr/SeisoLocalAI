@@ -132,7 +132,7 @@ Forge uses a single local account per instance (JWT + HttpOnly cookies + CSRF). 
 | Ephemeral DB | In-memory SQLite (`SEISO_DB_EPHEMERAL`); signing keys are **not** written under `nostr_keys/` |
 | Settings key rotate | Import/keygen updates the account `npub` and attest key together (keygen returns `nsec` once) |
 
-There is no password path. Generated secrets are shown once in the browser; an encrypted signing key is kept under `{SEISO_DATA_DIR}/nostr_keys/` for provenance attest. See also [provenance-nostr.md](provenance-nostr.md).
+There is no password path. Generated secrets are shown once in the browser; an encrypted signing key is kept under `{SEISO_DATA_DIR}/nostr_keys/` for provenance attest (skipped in ephemeral mode). See also [provenance-nostr.md](provenance-nostr.md).
 
 ## API surface
 
