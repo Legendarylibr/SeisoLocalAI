@@ -7,7 +7,6 @@ import gc
 import inspect
 import json
 import logging
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
