@@ -1,4 +1,9 @@
-"""CLI coverage for `seiso provenance` (mocked relays)."""
+"""CLI coverage for `seiso provenance` (mocked relays).
+
+Invokes ``provenance_app`` directly so importing ``seiso_cli.main`` does not
+run ``bootstrap_runtime()`` (which can seed ``SEISO_LLAMA_GPU_LAYERS`` and
+pollute later model_pool tests in the same xdist worker).
+"""
 
 from __future__ import annotations
 
@@ -15,7 +20,7 @@ from seiso.research.dataset_merkle import (
     row_content_fingerprint,
     write_dataset_merkle_sidecar,
 )
-from seiso_cli.main import app
+from seiso_cli.commands.provenance import provenance_app
 
 runner = CliRunner()
 
@@ -24,7 +29,7 @@ def test_provenance_keygen_show_attest_verify(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SEISO_ALLOW_NOSTR", "1")
 
-    result = runner.invoke(app, ["provenance", "keygen", "--identity", "cli"])
+    result = runner.invoke(provenance_app, ["keygen", "--identity", "cli"])
     assert result.exit_code == 0, result.output
     assert "npub:" in result.output
 
@@ -37,7 +42,7 @@ def test_provenance_keygen_show_attest_verify(tmp_path: Path, monkeypatch):
     path = tmp_path / "manifest.json"
     path.write_text(json.dumps(manifest), encoding="utf-8")
 
-    show = runner.invoke(app, ["provenance", "show", str(path)])
+    show = runner.invoke(provenance_app, ["show", str(path)])
     assert show.exit_code == 0, show.output
     assert "attestation" in show.output
 
@@ -60,9 +65,8 @@ def test_provenance_keygen_show_attest_verify(tmp_path: Path, monkeypatch):
         ),
     ):
         attest = runner.invoke(
-            app,
+            provenance_app,
             [
-                "provenance",
                 "attest",
                 str(path),
                 "--relay",
@@ -71,9 +75,8 @@ def test_provenance_keygen_show_attest_verify(tmp_path: Path, monkeypatch):
         )
         assert attest.exit_code == 0, attest.output
         verify = runner.invoke(
-            app,
+            provenance_app,
             [
-                "provenance",
                 "verify",
                 str(path),
                 "--relay",
@@ -82,7 +85,7 @@ def test_provenance_keygen_show_attest_verify(tmp_path: Path, monkeypatch):
         )
         assert verify.exit_code == 0, verify.output
         local = runner.invoke(
-            app, ["provenance", "verify", str(path), "--local-only"]
+            provenance_app, ["verify", str(path), "--local-only"]
         )
         assert local.exit_code == 0, local.output
 
@@ -108,9 +111,8 @@ def test_dataset_prove_and_verify_local(tmp_path: Path, monkeypatch):
     proof_path = tmp_path / "proof.json"
 
     prove = runner.invoke(
-        app,
+        provenance_app,
         [
-            "provenance",
             "dataset-prove",
             str(man_path),
             "--row",
@@ -123,9 +125,8 @@ def test_dataset_prove_and_verify_local(tmp_path: Path, monkeypatch):
     assert proof_path.is_file()
 
     verify = runner.invoke(
-        app,
+        provenance_app,
         [
-            "provenance",
             "dataset-verify-proof",
             str(proof_path),
             "--local-only",
