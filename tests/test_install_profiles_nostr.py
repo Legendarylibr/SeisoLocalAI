@@ -2,14 +2,31 @@
 
 from __future__ import annotations
 
+import re
 import tomllib
 from pathlib import Path
 
+import pytest
+
 ROOT = Path(__file__).resolve().parents[1]
+
+_UI_CRYPTO_DEPS = ("@noble/ciphers", "@noble/hashes", "@scure/base")
+_NAMED_PROFILES = (
+    "linux-nvidia",
+    "linux-cpu",
+    "linux-rocm",
+    "wsl-nvidia",
+    "macos",
+    "chat",
+)
 
 
 def _pyproject() -> dict:
     return tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+
+
+def _common_sh() -> str:
+    return (ROOT / "scripts/lib/common.sh").read_text(encoding="utf-8")
 
 
 def test_forge_extra_includes_nostr_relay_deps():
@@ -23,8 +40,23 @@ def test_forge_extra_includes_nostr_relay_deps():
     assert "cryptography" in nostr
 
 
+def test_nostr_extra_is_subset_of_forge_relay_deps():
+    """Installing [forge] alone must satisfy everything [nostr] asks for."""
+    extras = _pyproject()["project"]["optional-dependencies"]
+
+    def _names(entries: list[str]) -> set[str]:
+        out: set[str] = set()
+        for item in entries:
+            name = item.split(";", 1)[0].strip()
+            name = re.split(r"[<>=!~\[]", name, maxsplit=1)[0].strip()
+            out.add(name)
+        return out
+
+    assert _names(extras["nostr"]).issubset(_names(extras["forge"]))
+
+
 def test_install_profiles_all_include_forge():
-    common = (ROOT / "scripts/lib/common.sh").read_text(encoding="utf-8")
+    common = _common_sh()
     # Every named profile / auto OS path must pull [forge] so Nostr relay deps install.
     for needle in (
         'printf \'%s\\n\' "forge,train,cuda,llamacpp"',
@@ -42,11 +74,79 @@ def test_install_profiles_all_include_forge():
     assert "npm ci" in common
 
 
+def test_named_install_profiles_documented_in_common():
+    common = _common_sh()
+    for profile in _NAMED_PROFILES:
+        assert profile in common, f"profile {profile!r} missing from common.sh"
+    # Profile help text lists the supported names for curl | bash users.
+    assert "linux-nvidia, linux-cpu, linux-rocm, wsl-nvidia, macos, chat" in common
+
+
+def test_ui_pkg_manager_prefers_bun_unless_npm_forced():
+    common = _common_sh()
+    assert "SEISO_USE_NPM" in common
+    assert "seiso_ui_pkg_manager" in common
+    # Bun path uses frozen lockfile; npm fallback uses ci (package-lock.json).
+    assert re.search(
+        r'seiso_ui_install_deps\(\)[\s\S]*?bun install --frozen-lockfile[\s\S]*?npm ci',
+        common,
+    )
+
+
 def test_ui_lockfiles_present_for_bun_and_npm_paths():
     """macOS/Linux default Bun; Windows / SEISO_USE_NPM=1 use npm ci."""
     assert (ROOT / "forge-ui/bun.lock").is_file()
     assert (ROOT / "forge-ui/package-lock.json").is_file()
     package = (ROOT / "forge-ui/package.json").read_text(encoding="utf-8")
-    for dep in ("@noble/ciphers", "@noble/hashes", "@scure/base"):
+    bun_lock = (ROOT / "forge-ui/bun.lock").read_text(encoding="utf-8")
+    npm_lock = (ROOT / "forge-ui/package-lock.json").read_text(encoding="utf-8")
+    for dep in _UI_CRYPTO_DEPS:
         assert dep in package
-        assert dep in (ROOT / "forge-ui/bun.lock").read_text(encoding="utf-8")
+        assert dep in bun_lock
+        assert dep in npm_lock
+
+
+def test_docs_cover_all_os_install_paths_and_nostr_via_forge():
+    install = (ROOT / "docs/install.md").read_text(encoding="utf-8")
+    provenance = (ROOT / "docs/provenance-nostr.md").read_text(encoding="utf-8")
+    for profile in (
+        "linux-nvidia",
+        "linux-cpu",
+        "wsl-nvidia",
+        "macos",
+    ):
+        assert f"SEISO_INSTALL_PROFILE={profile}" in install
+    assert "npm ci" in install
+    assert "bun.lock" in install or "frozen-lockfile" in install
+    assert "websockets" in install
+    assert "[forge]" in provenance
+    assert "seiso[nostr]" in provenance
+
+
+def test_doctor_checks_websockets_and_skips_false_hub_fail_offline():
+    doctor = (ROOT / "scripts/doctor.sh").read_text(encoding="utf-8")
+    assert '"websockets"' in doctor
+    assert "Nostr provenance relays" in doctor
+    assert "network probe skipped" in doctor
+    assert "Hub client libraries ready (network probe skipped)" in doctor
+    assert "Local chat backends present" in doctor
+    # Network branch still reports the live ready_for_* flags.
+    assert "Hub ready for download" in doctor
+    assert "ready_for_local_chat" in doctor
+
+
+def test_relays_import_error_mentions_nostr_extra(monkeypatch):
+    import builtins
+
+    from seiso.research.nostr import relays
+
+    real_import = builtins.__import__
+
+    def _guarded_import(name, globals=None, locals=None, fromlist=(), level=0):
+        if name == "websockets" or str(name).startswith("websockets."):
+            raise ImportError("blocked for test")
+        return real_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", _guarded_import)
+    with pytest.raises(ImportError, match="seiso\\[nostr\\]"):
+        relays._require_websockets()
