@@ -66,7 +66,7 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | **CLI training** | `seiso train --config configs/example_lora.yaml` | `seiso train --config configs\example_lora.yaml` |
 | **Compat API** | `seiso forge` then POST `/v1/chat/completions` | Same |
 
-First launch opens Nostr onboarding — **generate an npub** (default; write it down, then Continue) or import an `nsec`. Copy `.env.example` to `.env` to override host, port, or data directory.
+First launch opens Nostr onboarding — **generate a key** (default; write down the one-time `nsec`, then Continue; `npub` is the public identity) or import an `nsec`. Copy `.env.example` to `.env` to override host, port, or data directory.
 
 On native Linux + NVIDIA, `start` also prepares the isolated GGUF chat sidecar:
 healthy Ollama first, otherwise llama-swap's `llamacpp` engine. See

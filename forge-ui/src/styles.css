@@ -930,6 +930,26 @@ label {
   color: var(--text);
   line-height: 1.45;
 }
+
+.auth-key-backup-public {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.auth-key-backup-npub {
+  margin: 0;
+  padding: 0.55rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: transparent;
+  white-space: pre-wrap;
+  word-break: break-all;
+  font-size: 0.8rem;
+  line-height: 1.45;
+  opacity: 0.9;
+  user-select: all;
+}
 .auth-reset-link {
   width: 100%;
   margin-top: 0.75rem;

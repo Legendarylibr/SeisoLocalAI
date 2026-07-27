@@ -38,8 +38,8 @@ On later sessions, skip the UI build unless `forge-ui/dist` is missing or you ch
 
 Open **http://127.0.0.1:8765**. On first run:
 
-1. **Generate npub** (default) or import an `nsec`
-2. Write down the shown `npub1…`, then **Continue**
+1. **Generate key** (default) or import an `nsec`
+2. Write down the shown `nsec1…`, then **Continue** (the `npub` is your public identity)
 3. Later: unlock with the instance `nsec`
 
 See [Auth (Nostr)](#auth-nostr) below.
@@ -114,13 +114,19 @@ Knowledge-base ingest and retrieve are also available via API (`/api/knowledge/.
 
 ## Auth (Nostr)
 
-Forge uses a single local account per instance. Identity is a Nostr **npub**; possession of the matching **nsec** unlocks the session (JWT + HttpOnly cookies + CSRF).
+Forge uses a single local account per instance (JWT + HttpOnly cookies + CSRF). Nostr keys replace passwords:
+
+| Term | Meaning in Seiso |
+|------|------------------|
+| **npub** | Public identity for this instance (safe to share / show in UI) |
+| **nsec** | Private key — write it down on first generate; paste it to sign in later |
+| **Relays** | Allowlisted `wss://` endpoints for digests-only provenance, stored in per-user prefs next to the npub — not on the nsec |
 
 | Step | What happens |
 |------|----------------|
-| First launch | **Generate npub** (default) or import `nsec` |
-| After generate | UI shows the new `npub1…` — write it down, then **Continue** |
-| Later sessions | Paste the instance `nsec` to sign in |
+| First launch | **Generate key** (default) or import `nsec` |
+| After generate | UI shows the new `nsec1…` once — write it down, then **Continue**. The matching `npub` is shown as public identity. |
+| Later sessions | Paste the instance `nsec` to sign in (the npub alone cannot unlock) |
 | Lost nsec | **Start a new session** clears the local account (downloaded model files remain) |
 
 There is no password path. Generated secrets are shown once in the browser; an encrypted signing key is kept under `{SEISO_DATA_DIR}/nostr_keys/` for provenance attest. See also [provenance-nostr.md](provenance-nostr.md).
