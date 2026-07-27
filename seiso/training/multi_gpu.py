@@ -9,6 +9,9 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
+# Env key set by seiso.training.worker before run_training (Accelerate child).
+SEISO_DISTRIBUTED_WORKER_ENV = "SEISO_DISTRIBUTED_WORKER"
+
 # Env keys set by torchrun / Accelerate / elastic launch (not bare WORLD_SIZE).
 _DISTRIBUTED_LAUNCH_MARKERS = (
     "MASTER_ADDR",
@@ -16,6 +19,13 @@ _DISTRIBUTED_LAUNCH_MARKERS = (
     "LOCAL_WORLD_SIZE",
     "GROUP_RANK",
     "TORCHELASTIC_RUN_ID",
+)
+
+# Proof we are inside a real launched worker — not a parent with leftover MASTER_*.
+_DISTRIBUTED_WORKER_PROOF = (
+    SEISO_DISTRIBUTED_WORKER_ENV,
+    "TORCHELASTIC_RUN_ID",
+    "GROUP_RANK",
 )
 
 
@@ -69,13 +79,33 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
+def _env_nonempty(name: str) -> bool:
+    return bool(str(os.environ.get(name, "") or "").strip())
+
+
+def _dist_initialized() -> bool:
+    try:
+        import torch.distributed as dist
+
+        return bool(dist.is_available() and dist.is_initialized())
+    except ImportError:
+        return False
+
+
+def mark_distributed_worker() -> None:
+    """Mark this process as an Accelerate/torchrun training worker."""
+    os.environ[SEISO_DISTRIBUTED_WORKER_ENV] = "1"
+
+
 def resolve_distributed_env(device_count: int | None = None) -> DistributedEnv:
     """Parse distributed env without breaking multi-node or CVD-isolated ranks.
 
     Stale (ignore → single process) when:
     - ``WORLD_SIZE < 1``
-    - ``LOCAL_RANK`` is unset while ``WORLD_SIZE > 1`` (incomplete shell leftover)
-    - no launch markers (MASTER_*/LOCAL_WORLD_SIZE/elastic) while ``WORLD_SIZE > 1``
+    - ``LOCAL_RANK`` or ``RANK`` unset while ``WORLD_SIZE > 1``
+    - no non-empty launch markers while ``WORLD_SIZE > 1``
+    - no worker proof (``SEISO_DISTRIBUTED_WORKER`` / elastic / initialized PG)
+      — rejects parent shells with leftover ``MASTER_ADDR``
     - ``LOCAL_RANK >=`` visible GPU count
     - ``LOCAL_WORLD_SIZE >`` visible GPU count (when set)
 
@@ -94,6 +124,7 @@ def resolve_distributed_env(device_count: int | None = None) -> DistributedEnv:
 
     world_size = _env_int("WORLD_SIZE", 1)
     local_rank_set = "LOCAL_RANK" in os.environ
+    rank_set = "RANK" in os.environ
     local_rank = _env_int("LOCAL_RANK", 0)
     rank = _env_int("RANK", local_rank)
     local_world = _env_int("LOCAL_WORLD_SIZE", 0)
@@ -112,13 +143,20 @@ def resolve_distributed_env(device_count: int | None = None) -> DistributedEnv:
     if world_size <= 1:
         return _single(stale=False)
 
-    if not local_rank_set:
+    if not local_rank_set or not rank_set:
         return _single(stale=True)
-    if not any(k in os.environ for k in _DISTRIBUTED_LAUNCH_MARKERS):
+    if not any(_env_nonempty(k) for k in _DISTRIBUTED_LAUNCH_MARKERS):
+        return _single(stale=True)
+    worker_proof = any(_env_nonempty(k) for k in _DISTRIBUTED_WORKER_PROOF) or (
+        "GROUP_RANK" in os.environ
+    )
+    if not worker_proof and not _dist_initialized():
         return _single(stale=True)
     if device_count > 0 and local_rank >= device_count:
         return _single(stale=True)
     if local_world > 0 and device_count > 0 and local_world > device_count:
+        return _single(stale=True)
+    if rank < 0 or rank >= world_size:
         return _single(stale=True)
 
     if local_world <= 0:
@@ -131,8 +169,6 @@ def resolve_distributed_env(device_count: int | None = None) -> DistributedEnv:
         else:
             local_world = world_size
 
-    if rank < 0 or rank >= world_size:
-        rank = local_rank
     return DistributedEnv(
         world_size=world_size,
         rank=rank,

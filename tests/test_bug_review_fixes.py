@@ -205,6 +205,7 @@ def test_slime_distributed_context_ignores_stale_world_size(monkeypatch):
 
 def test_resolve_distributed_env_keeps_multi_node(monkeypatch):
     """Global WORLD_SIZE > local GPU count is multi-node, not stale."""
+    monkeypatch.setenv("SEISO_DISTRIBUTED_WORKER", "1")
     monkeypatch.setenv("WORLD_SIZE", "16")
     monkeypatch.setenv("LOCAL_WORLD_SIZE", "8")
     monkeypatch.setenv("LOCAL_RANK", "0")
@@ -220,10 +221,77 @@ def test_resolve_distributed_env_keeps_multi_node(monkeypatch):
     assert env.local_rank == 0
 
 
+def test_resolve_distributed_env_rejects_master_leftover_without_worker_proof(
+    monkeypatch,
+):
+    """Parent shell with MASTER_* + in-range ranks must not false-enable DDP."""
+    monkeypatch.delenv("SEISO_DISTRIBUTED_WORKER", raising=False)
+    monkeypatch.delenv("TORCHELASTIC_RUN_ID", raising=False)
+    monkeypatch.delenv("GROUP_RANK", raising=False)
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    monkeypatch.setenv("RANK", "0")
+    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
+    monkeypatch.setenv("MASTER_PORT", "29500")
+
+    from seiso.training.multi_gpu import resolve_distributed_env
+
+    env = resolve_distributed_env(device_count=2)
+    assert env.enabled is False
+    assert env.stale is True
+
+
+def test_resolve_distributed_env_rejects_empty_master_marker(monkeypatch):
+    monkeypatch.setenv("SEISO_DISTRIBUTED_WORKER", "1")
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    monkeypatch.setenv("RANK", "0")
+    monkeypatch.setenv("MASTER_ADDR", "")
+    monkeypatch.delenv("MASTER_PORT", raising=False)
+    monkeypatch.delenv("LOCAL_WORLD_SIZE", raising=False)
+    monkeypatch.delenv("GROUP_RANK", raising=False)
+    monkeypatch.delenv("TORCHELASTIC_RUN_ID", raising=False)
+
+    from seiso.training.multi_gpu import resolve_distributed_env
+
+    assert resolve_distributed_env(device_count=2).enabled is False
+
+
+def test_resolve_distributed_env_requires_rank(monkeypatch):
+    monkeypatch.setenv("SEISO_DISTRIBUTED_WORKER", "1")
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    monkeypatch.delenv("RANK", raising=False)
+    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
+
+    from seiso.training.multi_gpu import resolve_distributed_env
+
+    assert resolve_distributed_env(device_count=2).enabled is False
+
+
+def test_is_main_process_follows_resolver_when_stale(monkeypatch):
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("LOCAL_RANK", "1")
+    monkeypatch.setenv("RANK", "1")
+    monkeypatch.delenv("SEISO_DISTRIBUTED_WORKER", raising=False)
+    monkeypatch.delenv("MASTER_ADDR", raising=False)
+    monkeypatch.delenv("MASTER_PORT", raising=False)
+    monkeypatch.delenv("LOCAL_WORLD_SIZE", raising=False)
+    monkeypatch.delenv("GROUP_RANK", raising=False)
+    monkeypatch.delenv("TORCHELASTIC_RUN_ID", raising=False)
+
+    from seiso.training.metrics import is_main_process
+
+    # Stale → single process → rank 0 for save/manifest gates.
+    assert is_main_process() is True
+
+
 def test_resolve_training_device_map_ignores_stale_world_size(monkeypatch):
     monkeypatch.setenv("WORLD_SIZE", "8")
     monkeypatch.setenv("LOCAL_RANK", "3")
+    monkeypatch.setenv("RANK", "3")
     monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
+    monkeypatch.setenv("SEISO_DISTRIBUTED_WORKER", "1")
 
     class _Cuda:
         @staticmethod
@@ -247,6 +315,7 @@ def test_resolve_training_device_map_ignores_stale_world_size(monkeypatch):
 
 
 def test_resolve_training_device_map_pins_multi_node_rank(monkeypatch):
+    monkeypatch.setenv("SEISO_DISTRIBUTED_WORKER", "1")
     monkeypatch.setenv("WORLD_SIZE", "8")
     monkeypatch.setenv("LOCAL_WORLD_SIZE", "4")
     monkeypatch.setenv("LOCAL_RANK", "2")
@@ -282,6 +351,9 @@ def test_slime_manifest_uses_runtime_world_size(monkeypatch, tmp_path: Path):
         "MASTER_ADDR",
         "MASTER_PORT",
         "LOCAL_WORLD_SIZE",
+        "SEISO_DISTRIBUTED_WORKER",
+        "GROUP_RANK",
+        "TORCHELASTIC_RUN_ID",
     ):
         monkeypatch.delenv(key, raising=False)
     from seiso.training.config import TrainConfig, _write_slime_manifest
@@ -307,6 +379,7 @@ def test_slime_manifest_uses_runtime_world_size(monkeypatch, tmp_path: Path):
     payload = json.loads((tmp_path / "seiso_manifest.json").read_text(encoding="utf-8"))
     assert payload["post_training_algorithm"] == "single_gpu_slime_grpo"
 
+    monkeypatch.setenv("SEISO_DISTRIBUTED_WORKER", "1")
     monkeypatch.setenv("WORLD_SIZE", "2")
     monkeypatch.setenv("LOCAL_RANK", "0")
     monkeypatch.setenv("RANK", "0")
@@ -324,6 +397,24 @@ def test_forge_pipeline_defaults_are_product_presets():
 
     assert DistillRLStartRequest().preset == "reproducible"
     assert CompressStartRequest().preset == "full"
+
+
+def test_rl_quant_keeps_gguf_export_when_gguf_path_promotes_backend():
+    """gguf_path implies llama_cpp — do not clear export using default simulator."""
+    from forge.api.routes.rl_quant import (
+        RLQuantStartRequest,
+        _effective_rl_quant_backend,
+    )
+
+    config = RLQuantStartRequest(
+        gguf_path="/tmp/model.gguf",
+        gguf_export=True,
+        backend="simulator",
+    ).model_dump()
+    assert _effective_rl_quant_backend(config) == "llama_cpp"
+    if _effective_rl_quant_backend(config) == "simulator":
+        config["gguf_export"] = False
+    assert config["gguf_export"] is True
 
 
 def test_emit_standard_artifacts_skips_orphan_distill_by_default(tmp_path: Path):

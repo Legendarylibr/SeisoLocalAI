@@ -105,10 +105,10 @@ Forge jobs use your session `user_id` and a UUID `job_id`. CLI `seiso compress r
 ### CLI
 
 ```bash
-seiso compress run --preset smoke
 seiso compress run --preset full \
   --teacher-model meta-llama/Llama-2-13b-hf \
   --student-model meta-llama/Llama-2-7b-hf
+seiso compress run --preset smoke
 seiso compress run --preset distill_only \
   --teacher-model mistralai/Mistral-7B-v0.1 \
   --student-model mistralai/Mistral-7B-v0.1

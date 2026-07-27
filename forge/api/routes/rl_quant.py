@@ -103,6 +103,13 @@ class RLQuantStartRequest(BaseModel):
     )
 
 
+def _effective_rl_quant_backend(config: dict[str, Any]) -> str:
+    """Mirror builder promotion: gguf_path implies llama_cpp measure backend."""
+    if config.get("gguf_path"):
+        return "llama_cpp"
+    return str(config.get("backend") or "simulator").lower()
+
+
 def _prepare_rl_quant_config(
     body: RLQuantStartRequest,
     user_id: str,
@@ -156,7 +163,8 @@ async def start_rl_quant(
 
     config = _prepare_rl_quant_config(body, user_id, settings, config=config)
     # Simulator evidence is research-only; never schedule GGUF export from it.
-    if str(config.get("backend") or "").lower() == "simulator":
+    # gguf_path promotes to llama_cpp in the builder — honor that before clearing.
+    if _effective_rl_quant_backend(config) == "simulator":
         config["gguf_export"] = False
 
     await db.create_rl_quant_job(user_id, config, job_id=job_id)

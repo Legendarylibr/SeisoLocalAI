@@ -171,7 +171,10 @@ def distill_rl_presets() -> None:
 
 @distill_rl_app.command("run")
 def distill_rl_run(
-    preset: str = typer.Option("smoke", help="smoke | reproducible | full"),
+    preset: str = typer.Option(
+        "reproducible",
+        help="reproducible | full | smoke (CI fixture only)",
+    ),
     config: str | None = typer.Option(
         None, "--config", "-c", help="JSON/YAML job config"
     ),
@@ -301,7 +304,8 @@ def distill_rl_run(
 @compress_app.command("run")
 def compress_run(
     preset: str = typer.Option(
-        "smoke", help="smoke | full | distill_only | prune_recover | quantize"
+        "full",
+        help="full | prune_recover | distill_only | quantize | smoke (CI only)",
     ),
     model_dir: str | None = typer.Option(
         None, help="Starting model dir for prune/finetune presets"
