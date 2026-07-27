@@ -39,6 +39,7 @@ Hard rules:
 - Prefer `start` / `seiso` / `scripts/doctor.sh` over raw `python …`.
 - Never delete `$SEISO_DATA_DIR` or its subdirs.
 - Never put Seiso `nsec` / HF tokens in Buzz messages; post `npub` + job receipts only.
+- **Never automate Forge keygen.** Do not `POST /api/auth/register` with `generate`, drive the AuthPage, click **Download encrypted .txt**, read `seiso-ncryptsec-backup.txt`, collect backup passphrases, or scrape `sessionStorage` / DOM for `nsec1…` / `ncryptsec1…`. Onboarding backup is human-only.
 - Default Forge bind is localhost. Do not enable `SEISO_ALLOW_REMOTE` unless the operator asks.
 - Smoke configs first (`configs/*_smoke.*`) before long GPU jobs.
 
@@ -83,19 +84,27 @@ Post to Buzz: doctor summary (ok/warn) + Forge URL.
 
 ### 4 · Auth (local only)
 
-Forge auth is Nostr npub/nsec (no passwords). Agents usually use an already-onboarded
-instance or the inference API key — not interactive browser keygen.
+Forge auth is Nostr npub/nsec (no passwords). Agents use an already-onboarded
+instance or the inference API key — **never** interactive browser keygen or the
+onboarding **Download encrypted .txt** backup (NIP-49 `ncryptsec`; still human-only,
+and never post the passphrase or file contents to Buzz).
 
 ```bash
-# Session status (no secrets)
+# Session status (no secrets) — safe
 curl -sf "$SEISO_FORGE_URL/api/auth/status"
+
+# Forbidden for agents (returns or creates nsec):
+# curl -X POST "$SEISO_FORGE_URL/api/auth/register" -d '{"generate":true}'
+# curl -X POST "$SEISO_FORGE_URL/api/auth/login" -d '{"nsec":"..."}'
 
 # Compat chat-only key (if configured) — never post the key value to Buzz
 # ~/.seiso/.inference_api_key or SEISO_INFERENCE_API_KEY
 ```
 
-If onboarding is required, tell the human to open `$SEISO_FORGE_URL`, generate an
-nsec (write it down), Continue — then continue orchestration. The npub is the public identity only.
+If onboarding is required, stop and ask the human to open `$SEISO_FORGE_URL`,
+generate a key, back up the **nsec** offline (handwrite and/or NIP-49 encrypted
+download — keep passphrase + file out of Buzz), Continue — then resume.
+Post only the **npub** (public identity) to the channel if needed.
 
 ### 5 · Run jobs
 
@@ -184,7 +193,11 @@ buzz reactions add --event "<status-event-id>" --emoji "✅"   # or "❌"
 
 - Seiso ≠ Buzz relay. Do not point Seiso provenance at the Buzz relay unless the
   operator explicitly allowlists that `wss://` URL and understands digests-only.
-- No DMs of secrets. No posting `nsec`, HF tokens, or cookie headers to channels.
+- No DMs of secrets. No posting `nsec`, `ncryptsec`, backup passphrases, HF tokens,
+  cookie headers, AuthPage HTML, `seiso-ncryptsec-backup.txt` contents, or
+  register/login response bodies to channels.
+- Buzz agent key (`BUZZ_PRIVATE_KEY`) and Forge instance `nsec` are different
+  secrets — never reuse one as the other; never paste either into Seiso chat.
 - GPU jobs: call memory-guard / unload patterns when docs say so; don't stack
   heavy jobs without checking VRAM (`seiso doctor`, Forge metrics).
 - Remote tools / code-exec stay opt-in per Seiso security docs — do not enable

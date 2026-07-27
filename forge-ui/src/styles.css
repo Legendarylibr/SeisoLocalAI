@@ -960,6 +960,23 @@ label {
 .auth-key-backup-actions .auth-submit {
   margin-top: 0;
 }
+
+.auth-key-backup-download-hint {
+  margin: 0;
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.auth-key-backup-encrypt {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding-top: 0.25rem;
+}
+
+.auth-key-backup-encrypt label {
+  margin-top: 0.25rem;
+}
 .auth-reset-link {
   width: 100%;
   margin-top: 0.75rem;

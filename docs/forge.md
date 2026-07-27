@@ -119,15 +119,18 @@ Forge uses a single local account per instance (JWT + HttpOnly cookies + CSRF). 
 | Term | Meaning in Seiso |
 |------|------------------|
 | **npub** | Public identity for this instance (safe to share / show in UI) |
-| **nsec** | Private key — write it down on first generate; paste it to sign in later |
+| **nsec** | Private key — write it down on first generate; paste it (or decrypt from ncryptsec) to sign in later |
+| **ncryptsec** | NIP-49 passphrase-encrypted backup of the nsec (safe to store as a file; useless without the passphrase) |
 | **Relays** | Allowlisted `wss://` endpoints for digests-only provenance, stored in per-user prefs next to the npub — not on the nsec |
 
 | Step | What happens |
 |------|----------------|
-| First launch | **Generate key** (default) or import `nsec` |
-| After generate | UI shows the new `nsec1…` once — write it down or **Download .txt**, then **Continue**. The matching `npub` is shown as public identity. |
-| Later sessions | Paste the instance `nsec` to sign in (the npub alone cannot unlock) |
-| Lost nsec | **Start a new session** clears the local account (downloaded model files remain) |
+| First launch | **Generate key** (default) or import `nsec` / `ncryptsec` |
+| After generate | UI shows the new `nsec1…` once — write it down, optionally **Download encrypted .txt** (NIP-49 `ncryptsec` + passphrase; no raw nsec in the file), then **Continue**. The matching `npub` is your public identity. |
+| Later sessions | Paste `nsec1…`, or `ncryptsec1…` plus the backup passphrase (decrypted in the browser before login). The npub alone cannot unlock. |
+| Lost nsec | **Start a new session** clears the local account, `job_events`, and `nostr_keys/` (downloaded model files remain) |
+| Ephemeral DB | In-memory SQLite (`SEISO_DB_EPHEMERAL`); signing keys are **not** written under `nostr_keys/` |
+| Settings key rotate | Import/keygen updates the account `npub` and attest key together (keygen returns `nsec` once) |
 
 There is no password path. Generated secrets are shown once in the browser; an encrypted signing key is kept under `{SEISO_DATA_DIR}/nostr_keys/` for provenance attest. See also [provenance-nostr.md](provenance-nostr.md).
 
@@ -206,7 +209,7 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 | `SEISO_SECURE_COOKIES` | `false` | `Secure` cookies when TLS is terminated upstream |
 | `SEISO_CORS_ORIGINS` | *(local defaults)* | Only set for HTTPS reverse proxy |
 | `SEISO_HF_TOKEN` | — | Hugging Face token for gated models |
-| `SEISO_DB_EPHEMERAL` | `true` | In-memory SQLite (wiped on restart) |
+| `SEISO_DB_EPHEMERAL` | `true` | In-memory SQLite (wiped on restart); also skips durable `nostr_keys/` writes |
 | `SEISO_ALLOW_TOOLS` | `false` | Web search, artifacts |
 | `SEISO_ALLOW_CODE_EXEC` | `false` | AST-limited `execute_code` tool (not OS isolation); **refused** when `SEISO_ALLOW_REMOTE=true` |
 | `SEISO_ALLOW_COMPAT_TOOLS` | `false` | Tool calling on `/v1/chat/completions` for session JWT only (inference API key stays chat-only; alias: `SEISO_ALLOW_OPENAI_TOOLS`) |
