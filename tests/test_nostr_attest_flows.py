@@ -46,13 +46,35 @@ def _patch_relays(attest_mod, store: dict[str, Any]):
 
     def fake_fetch(event_id, relays, **kwargs):
         ev = store.get("event")
-        if ev and ev.get("id") == event_id:
+        if ev and str(ev.get("id") or "").lower() == str(event_id).lower():
             return ev
         return store.get("fetch_override")
+
+    def fake_fetch_addressable(*, pubkey, kind, d_tag, relays, **kwargs):
+        if store.get("addressable_disabled"):
+            return None
+        ev = store.get("addressable_event") or store.get("event")
+        if not ev:
+            return None
+        if str(ev.get("pubkey") or "").lower() != str(pubkey).lower():
+            return None
+        if int(ev.get("kind")) != int(kind):
+            return None
+        d_tags = [
+            str(t[1])
+            for t in (ev.get("tags") or [])
+            if isinstance(t, list) and len(t) >= 2 and str(t[0]) == "d"
+        ]
+        if d_tag not in d_tags:
+            return None
+        return ev
 
     return (
         patch.object(attest_mod, "publish_event", side_effect=fake_publish),
         patch.object(attest_mod, "fetch_event_by_id", side_effect=fake_fetch),
+        patch.object(
+            attest_mod, "fetch_addressable_event", side_effect=fake_fetch_addressable
+        ),
         patch.object(
             attest_mod,
             "normalize_relay_list",
@@ -104,7 +126,7 @@ def test_attest_v2_merkle_and_verify_local_only(tmp_path: Path, monkeypatch):
 
     store: dict[str, Any] = {}
     patches = _patch_relays(attest_mod, store)
-    with patches[0], patches[1], patches[2]:
+    with patches[0], patches[1], patches[2], patches[3]:
         report = attest_mod.attest_manifest(
             path,
             relays=["wss://relay.example.com"],
@@ -135,7 +157,7 @@ def test_verify_rejects_wrong_pubkey_kind_or_d_tag(tmp_path: Path, monkeypatch):
     path = _write_manifest(tmp_path / "m.json")
     store: dict[str, Any] = {}
     patches = _patch_relays(attest_mod, store)
-    with patches[0], patches[1], patches[2]:
+    with patches[0], patches[1], patches[2], patches[3]:
         attest_mod.attest_manifest(
             path,
             relays=["wss://relay.example.com"],
@@ -220,7 +242,7 @@ def test_verify_missing_receipt_and_event_not_found(tmp_path: Path, monkeypatch)
     save_keypair(pair, identity="cli", data_dir=tmp_path)
     store: dict[str, Any] = {}
     patches = _patch_relays(attest_mod, store)
-    with patches[0], patches[1], patches[2]:
+    with patches[0], patches[1], patches[2], patches[3]:
         attest_mod.attest_manifest(
             path,
             relays=["wss://relay.example.com"],
@@ -228,6 +250,7 @@ def test_verify_missing_receipt_and_event_not_found(tmp_path: Path, monkeypatch)
             data_dir=tmp_path,
         )
         store.pop("event", None)
+        store["addressable_disabled"] = True
         not_found = attest_mod.verify_attestation(
             path, relays=["wss://relay.example.com"], require_network=True
         )
@@ -244,7 +267,7 @@ def test_verify_network_blocked_when_nostr_disabled(tmp_path: Path, monkeypatch)
     path = _write_manifest(tmp_path / "m.json")
     store: dict[str, Any] = {}
     patches = _patch_relays(attest_mod, store)
-    with patches[0], patches[1], patches[2]:
+    with patches[0], patches[1], patches[2], patches[3]:
         attest_mod.attest_manifest(
             path,
             relays=["wss://relay.example.com"],
@@ -269,7 +292,7 @@ def test_maybe_auto_attest_success_and_nonfatal_failure(tmp_path: Path, monkeypa
     path = _write_manifest(tmp_path / "m.json")
     store: dict[str, Any] = {}
     patches = _patch_relays(attest_mod, store)
-    with patches[0], patches[1], patches[2]:
+    with patches[0], patches[1], patches[2], patches[3]:
         ok = attest_mod.maybe_auto_attest(
             path, identity="cli", data_dir=tmp_path, relays=["wss://relay.example.com"]
         )
@@ -305,6 +328,39 @@ def test_verify_event_rejects_malformed_and_bad_id():
     assert not verify_event(bad_id)
     assert not verify_event({"pubkey": "nope"})
     assert not verify_event({})
+
+
+def test_verify_falls_back_to_addressable_filter(tmp_path: Path, monkeypatch):
+    """When relays replace an addressable event, verify by (pubkey, kind, #d)."""
+    from seiso.research.nostr import attest as attest_mod
+
+    monkeypatch.setenv("SEISO_ALLOW_NOSTR", "1")
+    pair = generate_keypair()
+    save_keypair(pair, identity="cli", data_dir=tmp_path)
+    path = _write_manifest(tmp_path / "m.json")
+    store: dict[str, Any] = {}
+    patches = _patch_relays(attest_mod, store)
+    with patches[0], patches[1], patches[2], patches[3]:
+        attest_mod.attest_manifest(
+            path,
+            relays=["wss://relay.example.com"],
+            identity="cli",
+            data_dir=tmp_path,
+        )
+        # Simulate relay discarding the pinned id but keeping the addressable slot.
+        pinned = dict(store["event"])
+        store["addressable_event"] = pinned
+        store.pop("event", None)
+        saved = json.loads(path.read_text(encoding="utf-8"))
+        saved["nostr"]["event_id"] = "00" * 32  # stale / replaced id
+        path.write_text(json.dumps(saved, indent=2), encoding="utf-8")
+
+        report = attest_mod.verify_attestation(
+            path, relays=["wss://relay.example.com"], require_network=True
+        )
+        assert report["ok"] is True
+        assert report["event_fetch"] == "addressable"
+        assert report["event_verified"] is True
 
 
 def test_infer_pipeline_variants_and_stable_content():

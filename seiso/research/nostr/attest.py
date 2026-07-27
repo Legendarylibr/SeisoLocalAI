@@ -20,7 +20,11 @@ from seiso.research.nostr.policy import (
     nostr_auto_attest_enabled,
     relay_allowlist_from_env,
 )
-from seiso.research.nostr.relays import fetch_event_by_id, publish_event
+from seiso.research.nostr.relays import (
+    fetch_addressable_event,
+    fetch_event_by_id,
+    publish_event,
+)
 from seiso.research.provenance import (
     ATTESTATION_SCHEMA_V1,
     ATTESTATION_SCHEMA_V2,
@@ -169,16 +173,34 @@ def verify_attestation(
     normalized = normalize_relay_list(
         relay_urls, allowlist=host_allowlist, allow_loopback=allow_loopback
     )
+    expected_d = str(
+        receipt.get("d_tag")
+        or f"{attestation.get('pipeline')}:{attestation.get('run_id')}"
+    )
+    receipt_pubkey = str(receipt.get("pubkey") or "").strip().lower()
     event = fetch_event_by_id(
         str(receipt["event_id"]),
         normalized,
         allowlist=host_allowlist,
         allow_loopback=allow_loopback,
     )
+    fetch_mode = "id"
+    # Kind 31250 is addressable: relays may keep only the latest (pubkey, kind, d).
+    if event is None and receipt_pubkey and expected_d:
+        event = fetch_addressable_event(
+            pubkey=receipt_pubkey,
+            kind=SEISO_PROVENANCE_KIND,
+            d_tag=expected_d,
+            relays=normalized,
+            allowlist=host_allowlist,
+            allow_loopback=allow_loopback,
+        )
+        fetch_mode = "addressable"
     if event is None:
         report["ok"] = False
         report["error"] = "event not found on configured relays"
         return report
+    report["event_fetch"] = fetch_mode
 
     sig_ok = verify_event(event)
     content = str(event.get("content") or "")
@@ -198,7 +220,6 @@ def verify_attestation(
     if not remote_match:
         remote_match = content == attestation_content_json(attestation)
 
-    receipt_pubkey = str(receipt.get("pubkey") or "").strip().lower()
     event_pubkey = str(event.get("pubkey") or "").strip().lower()
     pubkey_ok = bool(receipt_pubkey) and receipt_pubkey == event_pubkey
     kind_raw = event.get("kind")
@@ -206,10 +227,6 @@ def verify_attestation(
         kind_ok = kind_raw is not None and int(kind_raw) == SEISO_PROVENANCE_KIND
     except (TypeError, ValueError):
         kind_ok = False
-    expected_d = str(
-        receipt.get("d_tag")
-        or f"{attestation.get('pipeline')}:{attestation.get('run_id')}"
-    )
     tags = event.get("tags") or []
     d_tags = [
         str(t[1])
