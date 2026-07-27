@@ -44,7 +44,8 @@ def export_actor_checkpoint(model, tokenizer, output_dir: Any) -> str:
             unwrapped.unmerge_adapter()
     if final.exists():
         _rm_tree(final)
-    partial.rename(final)
+    # ``replace`` overwrites atomically; ``rename`` can fail if ``final`` races back.
+    partial.replace(final)
     return str(final.resolve())
 
 
@@ -73,7 +74,7 @@ def export_actor_lora_adapter(model, tokenizer, output_dir: Any) -> str:
     tokenizer.save_pretrained(partial)
     if final.exists():
         _rm_tree(final)
-    partial.rename(final)
+    partial.replace(final)
     return str(final.resolve())
 
 

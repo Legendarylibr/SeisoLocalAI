@@ -7,7 +7,6 @@ import gc
 import inspect
 import json
 import logging
-import os
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -255,7 +254,9 @@ class SeisoTrainer:
                 nonlocal prepared
                 prepared = self._prepare_datasets(tokenizer)
                 current_cfg = self.config
-                emit_stdout = multi_gpu or bool(os.environ.get("SEISO_EMIT_METRICS_STDOUT"))
+                from seiso.env import env_bool
+
+                emit_stdout = multi_gpu or env_bool("SEISO_EMIT_METRICS_STDOUT", False)
                 metrics_cb = build_metrics_callback(
                     current_cfg.output_dir,
                     on_metric=self._on_metric,
@@ -1247,4 +1248,4 @@ class SeisoTrainer:
 
             maybe_auto_attest(manifest_path)
         except Exception:
-            pass
+            logger.exception("Nostr auto-attest failed for %s", manifest_path)

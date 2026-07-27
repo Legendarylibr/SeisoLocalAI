@@ -32,6 +32,7 @@ from seiso.security import SecurityError
         ("wss://metadata.google.internal", "not allowed"),
         ("wss://10.0.0.1", "not allowed|blocked|private"),
         ("wss://192.168.0.5", "not allowed|blocked|private"),
+        ("wss://100.64.0.1", "not allowed|blocked"),
         ("wss://[::1]", "not allowed|loopback|blocked"),
         ("ws://example.com", "loopback|ws"),
         ("wss://127.0.0.1", "not allowed|loopback|blocked"),
@@ -40,6 +41,12 @@ from seiso.security import SecurityError
 def test_validate_relay_url_rejects_dangerous(url: str, match: str):
     with pytest.raises(SecurityError, match=match):
         validate_relay_url(url)
+
+
+def test_validate_relay_url_blocks_cgnat_shared_address_space():
+    """RFC 6598 100.64.0.0/10 is not ipaddress.is_private but must be blocked."""
+    with pytest.raises(SecurityError, match="not allowed|blocked"):
+        validate_relay_url("wss://100.64.12.34")
 
 
 @pytest.fixture

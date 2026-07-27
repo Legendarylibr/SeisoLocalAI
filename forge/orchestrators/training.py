@@ -250,7 +250,22 @@ class TrainingOrchestrator(Orchestrator):
             if callback:
                 await callback(job_id, self.get_metrics(job_id), {})
 
-        self._metrics_persist_tasks[job_id] = loop.create_task(_persist())
+        task = loop.create_task(_persist())
+
+        def _log_persist_failure(done: asyncio.Task[None]) -> None:
+            try:
+                done.result()
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                import logging
+
+                logging.getLogger(__name__).exception(
+                    "Failed to persist training metrics for job %s", job_id
+                )
+
+        task.add_done_callback(_log_persist_failure)
+        self._metrics_persist_tasks[job_id] = task
 
     async def _poll_system_metrics(self, job_id: str, stop: asyncio.Event) -> None:
         while not stop.is_set():

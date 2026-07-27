@@ -74,6 +74,19 @@ async def durable_job_events(
 ) -> AsyncIterator[dict[str, str]]:
     """Replay persisted job events in SSE shape."""
     rows = await db.list_job_events(job_id, user_id, event_types=event_types)
+    # Prefer the latest status so a stale ``result`` row cannot look like success
+    # after a later cancel/fail (mirrors live job_log_event_gen).
+    terminal_status: str | None = None
+    for row in rows:
+        if str(row.get("event_type") or "") != "status":
+            continue
+        payload = row.get("payload") or {}
+        status = (
+            payload.get("status", "unknown")
+            if isinstance(payload, dict)
+            else payload
+        )
+        terminal_status = str(status).lower()
     for row in rows:
         event_type = str(row.get("event_type") or "message")
         payload = row.get("payload") or {}
@@ -90,6 +103,8 @@ async def durable_job_events(
             )
             yield {"event": "status", "data": str(status)}
         elif event_type == "result":
+            if terminal_status and terminal_status != "completed":
+                continue
             yield {"event": "result", "data": json.dumps(payload, default=str)}
         elif event_type in {"policy", "memory_policy"}:
             yield {"event": event_type, "data": json.dumps(payload, default=str)}

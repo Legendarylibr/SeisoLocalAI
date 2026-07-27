@@ -17,6 +17,11 @@ _BLOCKED_HOSTS = frozenset(
     }
 )
 _LOCAL_HTTP_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+# CGNAT / shared-address space (RFC 6598) — not covered by ipaddress.is_private.
+# Keep in sync with forge.security.url_policy._BLOCKED_NETWORKS.
+_BLOCKED_NETWORKS = (
+    ipaddress.ip_network("100.64.0.0/10"),
+)
 
 # Public relays used when SEISO_NOSTR_RELAYS is unset (digests-only attestations).
 _DEFAULT_RELAYS = ("wss://nos.lol", "wss://relay.damus.io")
@@ -64,7 +69,7 @@ def _is_blocked_ip(addr: str) -> bool:
         ip = ipaddress.ip_address(addr)
     except ValueError:
         return False
-    return (
+    if (
         ip.is_private
         or ip.is_loopback
         or ip.is_link_local
@@ -72,7 +77,9 @@ def _is_blocked_ip(addr: str) -> bool:
         or ip.is_reserved
         or ip.is_unspecified
         or str(ip) in _BLOCKED_HOSTS
-    )
+    ):
+        return True
+    return any(ip in network for network in _BLOCKED_NETWORKS)
 
 
 def _is_local_host(host: str) -> bool:

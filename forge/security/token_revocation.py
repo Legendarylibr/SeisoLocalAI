@@ -40,12 +40,20 @@ def _persist() -> None:
         return
     try:
         _store_path.parent.mkdir(parents=True, exist_ok=True)
-        _store_path.write_text(
-            json.dumps(_revoked, separators=(",", ":")), encoding="utf-8"
-        )
-        _store_path.chmod(0o600)
+        payload = json.dumps(_revoked, separators=(",", ":"))
+        # Atomic replace so a crash mid-write cannot leave a truncated store
+        # that would drop all logout revocations on the next process start.
+        tmp_path = _store_path.with_name(_store_path.name + ".tmp")
+        tmp_path.write_text(payload, encoding="utf-8")
+        tmp_path.chmod(0o600)
+        tmp_path.replace(_store_path)
     except OSError:
         logger.warning("Could not persist revoked JTIs")
+        try:
+            if _store_path is not None:
+                _store_path.with_name(_store_path.name + ".tmp").unlink(missing_ok=True)
+        except OSError:
+            pass
 
 
 def _prune(now: float | None = None) -> None:
