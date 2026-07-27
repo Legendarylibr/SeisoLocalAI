@@ -249,7 +249,10 @@ def train_slime(
                     )
                 _distributed_barrier(dist_ctx)
                 continue
-            if config.dynamic_sampling_filter != "none" and dist_ctx.enabled:
+            # Always equalize group counts under DDP — even filter=none drops
+            # groups with <2 valid rollouts, so ranks can otherwise desync
+            # on policy_micro_batch_size / no_sync collectives.
+            if dist_ctx.enabled:
                 target_groups = _distributed_min_int(local_groups, torch, dist_ctx)
                 rollouts = _truncate_rollout_groups(
                     rollouts, config.rollouts_per_prompt, target_groups
@@ -689,6 +692,13 @@ def _collect_rollouts(
         chunk_rollouts: list[Rollout] = []
         verifier_records: list[dict[str, Any]] = []
         total = len(completions)
+        expected = len(sample_chunk) * int(config.rollouts_per_prompt)
+        if total != expected:
+            raise RuntimeError(
+                f"rollout engine returned {total} completions for "
+                f"{len(sample_chunk)} prompts × {config.rollouts_per_prompt} "
+                f"rollouts_per_prompt (expected {expected})"
+            )
         for idx in range(total):
             sample_idx = idx // config.rollouts_per_prompt
             sample = sample_chunk[sample_idx]
@@ -987,7 +997,10 @@ def _sync_verifier_records_with_rollouts(
     """Refresh verifier JSONL fields after auto code-reward finalization."""
     del group_size
     if len(records) != len(rollouts):
-        return
+        raise RuntimeError(
+            "verifier record count drifted from rollouts after auto code-reward "
+            f"finalization ({len(records)} records vs {len(rollouts)} rollouts)"
+        )
     for record, rollout in zip(records, rollouts, strict=True):
         record["reward"] = float(rollout.reward)
         record["outcome_reward"] = float(rollout.outcome_reward)

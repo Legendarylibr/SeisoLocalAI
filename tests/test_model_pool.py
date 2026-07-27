@@ -128,6 +128,24 @@ def test_cancel_and_unload_defers_while_inference_active(tmp_path):
     assert pool.active_key is None
 
 
+def test_switch_preserves_pending_cancel_and_discards_load(tmp_path):
+    """cancel_and_unload during switch must win — do not clear unload_pending."""
+    pool = ModelPool()
+    first_path = tmp_path / "first"
+    second_path = tmp_path / "second"
+    first_path.mkdir()
+    second_path.mkdir()
+    first = object()
+    second = object()
+    pool.switch(str(first_path), BackendKind.MLX, lambda _path: first)
+    pool._unload_pending = True
+
+    with pytest.raises(RuntimeError, match="Model load cancelled"):
+        pool.switch(str(second_path), BackendKind.MLX, lambda _path: second)
+    assert pool.active_key is None
+    assert pool._unload_pending is False
+
+
 def test_llamaswap_release_attempts_external_unload(tmp_path):
     pool = ModelPool()
     model = tmp_path / "model.gguf"

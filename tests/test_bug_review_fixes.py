@@ -241,6 +241,24 @@ def test_resolve_distributed_env_rejects_master_leftover_without_worker_proof(
     assert env.stale is True
 
 
+def test_resolve_distributed_env_rejects_empty_group_rank(monkeypatch):
+    """Empty GROUP_RANK leftover must not count as worker proof."""
+    monkeypatch.delenv("SEISO_DISTRIBUTED_WORKER", raising=False)
+    monkeypatch.delenv("TORCHELASTIC_RUN_ID", raising=False)
+    monkeypatch.setenv("GROUP_RANK", "")
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    monkeypatch.setenv("RANK", "0")
+    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
+    monkeypatch.setenv("MASTER_PORT", "29500")
+
+    from seiso.training.multi_gpu import resolve_distributed_env
+
+    env = resolve_distributed_env(device_count=2)
+    assert env.enabled is False
+    assert env.stale is True
+
+
 def test_resolve_distributed_env_rejects_empty_master_marker(monkeypatch):
     monkeypatch.setenv("SEISO_DISTRIBUTED_WORKER", "1")
     monkeypatch.setenv("WORLD_SIZE", "2")
@@ -463,3 +481,130 @@ def test_knowledge_upload_refuses_symlink_destination(tmp_path: Path):
     assert exc.value.status_code == 400
     assert victim.read_text(encoding="utf-8") == "secret"
     assert dest.is_symlink()
+
+
+def test_resolve_distributed_artifact_prefers_slime_final(tmp_path: Path):
+    from forge.orchestrators.training import TrainingOrchestrator
+
+    out = tmp_path / "run"
+    out.mkdir()
+    (out / "adapter_config.json").write_text("{}", encoding="utf-8")
+    (out / "adapter_model.safetensors").write_bytes(b"weights")
+    older = out / "checkpoint-1"
+    older.mkdir()
+    (older / "adapter_config.json").write_text("{}", encoding="utf-8")
+    (out / "slime_training_state.json").write_text(
+        '{"final_checkpoint_dir": "%s", "best_checkpoint_dir": "%s"}\n'
+        % (out, older),
+        encoding="utf-8",
+    )
+
+    resolved = TrainingOrchestrator._resolve_distributed_artifact(out)
+    assert resolved == out
+
+
+def test_resolve_distributed_artifact_falls_back_to_checkpoint_glob(tmp_path: Path):
+    from forge.orchestrators.training import TrainingOrchestrator
+
+    out = tmp_path / "run"
+    out.mkdir()
+    ckpt = out / "checkpoint-3"
+    ckpt.mkdir()
+    (ckpt / "config.json").write_text("{}", encoding="utf-8")
+    (ckpt / "model.safetensors").write_bytes(b"w")
+
+    assert TrainingOrchestrator._resolve_distributed_artifact(out) == ckpt
+
+
+def test_resolve_distributed_artifact_prefers_newer_root_over_old_checkpoint(
+    tmp_path: Path,
+):
+    import os
+    import time
+
+    from forge.orchestrators.training import TrainingOrchestrator
+
+    out = tmp_path / "run"
+    out.mkdir()
+    older = out / "checkpoint-1"
+    older.mkdir()
+    (older / "adapter_config.json").write_text("{}", encoding="utf-8")
+    time.sleep(0.02)
+    (out / "adapter_config.json").write_text("{}", encoding="utf-8")
+    (out / "adapter_model.safetensors").write_bytes(b"final")
+    # Ensure root mtime is newer even on coarse filesystems.
+    os.utime(out, None)
+
+    assert TrainingOrchestrator._resolve_distributed_artifact(out) == out
+
+
+def test_broadcast_vllm_full_resumes_after_update_failure(monkeypatch):
+    from seiso.slime import rollout_sync
+    from seiso.slime.config import SingleGpuSlimeConfig
+
+    events: list[str] = []
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.base_url = ""
+
+        @classmethod
+        def from_config(cls, _config):
+            return cls()
+
+        def pause(self) -> None:
+            events.append("pause")
+
+        def update_weights_from_disk(self, *_a, **_k) -> None:
+            events.append("update")
+            raise RuntimeError("disk sync failed")
+
+        def resume(self) -> None:
+            events.append("resume")
+
+    monkeypatch.setattr(rollout_sync, "VLLMRolloutClient", FakeClient)
+    monkeypatch.setattr(
+        rollout_sync, "vllm_engine_urls", lambda *_a, **_k: ["http://127.0.0.1:8000"]
+    )
+    monkeypatch.setattr(rollout_sync, "resolve_vllm_base_url", lambda *_a, **_k: None)
+
+    cfg = SingleGpuSlimeConfig(
+        model_id="m",
+        dataset="d.jsonl",
+        output_dir="/tmp/out",
+        vllm_base_url="http://127.0.0.1:8000",
+    )
+    with pytest.raises(RuntimeError, match="vLLM full weight sync failed"):
+        rollout_sync._broadcast_vllm_full(cfg, model_path="/tmp/w", weight_version="v1")
+    assert events == ["pause", "update", "resume"]
+
+
+def test_keep_rollout_group_uses_sample_std():
+    """Filter std must match GRPO advantage unbiased std (n-1)."""
+    from seiso.slime.config import SingleGpuSlimeConfig
+    from seiso.slime.policy import _keep_rollout_group
+    from seiso.slime.types import Rollout
+
+    # Two rewards: mean 0.5, sample std = sqrt(0.5) ≈ 0.707; population ≈ 0.5.
+    cfg = SingleGpuSlimeConfig(
+        model_id="m",
+        dataset="d.jsonl",
+        output_dir="/tmp/out",
+        dynamic_sampling_filter="reward_nonzero_std",
+        dynamic_sampling_min_reward_std=0.6,
+        rollouts_per_prompt=2,
+    )
+
+    def _r(reward: float) -> Rollout:
+        return Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=reward,
+            outcome_reward=reward,
+            status="stop",
+        )
+
+    assert _keep_rollout_group([_r(0.0), _r(1.0)], cfg) is True

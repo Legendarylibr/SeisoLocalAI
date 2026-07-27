@@ -400,8 +400,12 @@ def _keep_rollout_group(
         values = [float(rollout.reward) for rollout in valid]
     else:
         return True
-    mean = sum(values) / len(values)
-    variance = sum((value - mean) ** 2 for value in values) / len(values)
+    n = len(values)
+    mean = sum(values) / n
+    # Match GRPO advantage std (unbiased / n-1) so keep/drop agrees with scaling.
+    if n <= 1:
+        return False
+    variance = sum((value - mean) ** 2 for value in values) / (n - 1)
     return math.sqrt(variance) > config.dynamic_sampling_min_reward_std
 
 

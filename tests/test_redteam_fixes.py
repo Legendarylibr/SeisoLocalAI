@@ -31,6 +31,14 @@ def test_provider_url_blocks_metadata_ip():
         validate_provider_base_url("http://169.254.169.254/latest/meta-data/", provider_type="vllm")
 
 
+def test_provider_url_blocks_cgnat_shared_address_space():
+    """RFC 6598 100.64.0.0/10 is not ipaddress.is_private but must be blocked."""
+    with pytest.raises(SecurityError):
+        validate_provider_base_url(
+            "https://100.64.0.1:443/v1", provider_type="remote_chat"
+        )
+
+
 def test_provider_url_blocks_http_non_local():
     with pytest.raises(SecurityError):
         validate_provider_base_url("http://example.com/v1", provider_type="vllm")
