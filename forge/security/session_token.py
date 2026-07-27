@@ -6,7 +6,7 @@ from fastapi import Request
 
 # Browser clients use HttpOnly cookies only. Non-browser clients that need a
 # Bearer JWT (tests, CLI scripts) opt in with this header.
-RETURN_TOKEN_HEADER = "X-Seiso-Return-Token"
+RETURN_TOKEN_HEADER = "X-Seiso-Return-Token"  # nosec B105 — header name, not a secret
 
 
 def maybe_access_token(request: Request, token: str) -> str | None:
