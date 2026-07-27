@@ -424,6 +424,8 @@ def test_vllm_engine_urls_strip_v1_and_dedupe(tmp_path: Path):
 
 
 def test_http_generate_round_robins_engine_urls(tmp_path: Path):
+    from collections import Counter
+
     from seiso.slime.rollout_clients import HttpCompletion
     from seiso.slime.rollout_generate import _generate_http_chunk
 
@@ -445,7 +447,8 @@ def test_http_generate_round_robins_engine_urls(tmp_path: Path):
     )
     assert chunk.completions == ["out:a", "out:a", "out:b", "out:b"]
     assert chunk.finish_reasons == ["stop", "stop", "stop", "stop"]
-    assert seen == ["http://e0", "http://e1", "http://e0", "http://e1"]
+    # Assignment is idx % engines; ThreadPoolExecutor may interleave call order.
+    assert Counter(seen) == Counter({"http://e0": 2, "http://e1": 2})
 
 
 def test_http_rollout_status_prefers_finish_reason():

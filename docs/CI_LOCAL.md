@@ -32,7 +32,7 @@ Or use the shell wrapper:
 | **deps** | lock digests/hashes + CVE floors + pyproject coverage + freshness recompile | no |
 | **lint** | `ruff check`, `ruff format --check`, `pylint` (E/F only) | no |
 | **types** | `mypy seiso forge seiso_cli` | no |
-| **test** | smoke imports + `pytest -m "not slow"` | no |
+| **test** | smoke imports + `pytest -m "not slow and not gpu"` | no |
 | **security** | `bandit`, `detect-secrets`, `pip check`, `pip-audit` | no |
 | **frontend** | `npm run typecheck` + `npm test` (vitest) + `npm run build` in `forge-ui/` | yes |
 | **imports** | optional-extra import smokes (`train`, `mlx` on macOS) | yes |
