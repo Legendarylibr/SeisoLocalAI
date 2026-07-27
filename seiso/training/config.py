@@ -91,6 +91,13 @@ class TrainConfig(BaseModel):
     )
     preprocess_dataset: bool = True
     deduplicate_dataset: bool = True
+    dataset_merkle: bool = Field(
+        default=True,
+        description=(
+            "Commit a Merkle root over final train-split row fingerprints for "
+            "Nostr membership provenance (skipped above SEISO_DATASET_MERKLE_MAX_ROWS)."
+        ),
+    )
     min_sample_chars: int = Field(default=1, ge=0)
     early_stopping: bool = True
     early_stopping_patience: int = Field(default=3, ge=1)

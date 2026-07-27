@@ -22,6 +22,7 @@ from seiso.research.nostr.policy import (
 from seiso.research.nostr.relays import fetch_event_by_id, publish_event
 from seiso.research.provenance import (
     ATTESTATION_SCHEMA_V1,
+    ATTESTATION_SCHEMA_V2,
     attestation_content_json,
     build_attestation_v1,
     content_fingerprint,
@@ -184,9 +185,12 @@ def verify_attestation(
         remote_attestation = json.loads(content)
     except json.JSONDecodeError:
         remote_attestation = None
+    remote_schema = (
+        remote_attestation.get("schema") if isinstance(remote_attestation, dict) else None
+    )
     remote_match = (
         isinstance(remote_attestation, dict)
-        and remote_attestation.get("schema") == ATTESTATION_SCHEMA_V1
+        and remote_schema in {ATTESTATION_SCHEMA_V1, ATTESTATION_SCHEMA_V2}
         and content_fingerprint(remote_attestation) == local_attestation_sha
     )
     # Also accept exact content string match against canonical local JSON.
