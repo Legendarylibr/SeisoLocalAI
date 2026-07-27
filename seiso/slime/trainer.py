@@ -228,24 +228,9 @@ def train_slime(
             rollouts = rollout_batch.rollouts
             total_groups_seen += float(rollout_batch.stats.get("rollout_groups_total", 0.0))
             total_groups_kept += float(rollout_batch.stats.get("rollout_groups_kept", 0.0))
-            if config.dynamic_sampling_filter != "none" and dist_ctx.enabled:
-                target_groups = _distributed_min_int(
-                    len(rollouts) // config.rollouts_per_prompt,
-                    torch,
-                    dist_ctx,
-                )
-                rollouts = _truncate_rollout_groups(
-                    rollouts, config.rollouts_per_prompt, target_groups
-                )
-                rollout_batch = _RolloutBatch(
-                    rollouts=rollouts,
-                    stats={
-                        **rollout_batch.stats,
-                        "distributed_kept_groups_min": float(target_groups),
-                    },
-                )
-            # DDP: all ranks must agree on whether this step has trainable data.
-            has_local = 1 if rollouts else 0
+            # DDP: agree on trainable data before truncating peers' groups to zero.
+            local_groups = len(rollouts) // config.rollouts_per_prompt
+            has_local = 1 if local_groups else 0
             if dist_ctx.enabled:
                 has_local = _distributed_min_int(has_local, torch, dist_ctx)
             if not has_local:
@@ -264,6 +249,18 @@ def train_slime(
                     )
                 _distributed_barrier(dist_ctx)
                 continue
+            if config.dynamic_sampling_filter != "none" and dist_ctx.enabled:
+                target_groups = _distributed_min_int(local_groups, torch, dist_ctx)
+                rollouts = _truncate_rollout_groups(
+                    rollouts, config.rollouts_per_prompt, target_groups
+                )
+                rollout_batch = _RolloutBatch(
+                    rollouts=rollouts,
+                    stats={
+                        **rollout_batch.stats,
+                        "distributed_kept_groups_min": float(target_groups),
+                    },
+                )
             trained_groups = len(rollouts) // config.rollouts_per_prompt
             rollout_batch = _RolloutBatch(
                 rollouts=rollouts,
@@ -307,7 +304,8 @@ def train_slime(
                 global_step += 1
                 _write_training_state(config, global_step, health_reason, auto_stop, dist_ctx)
                 _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
-                return final_output_dir
+                # Fail the job so Forge marks FAILED (not COMPLETED).
+                raise RuntimeError(f"Slime training stopped: {health_reason}")
 
             if pending_accumulation_steps >= config.gradient_accumulation_steps:
                 _optimizer_step(model, optimizer, torch, config)

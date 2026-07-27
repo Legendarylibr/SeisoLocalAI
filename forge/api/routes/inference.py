@@ -1008,6 +1008,8 @@ async def chat(
                 job = await orchestrator.wait_for(job_id)
                 if job and job.status.value == "failed":
                     yield {"event": "error", "data": job.error or "Inference failed"}
+                elif job and job.status.value == "cancelled":
+                    yield {"event": "error", "data": "Inference cancelled"}
                 elif job and job.result.get("content"):
                     content = sanitize_llm_output(
                         job.result["content"],
@@ -1025,11 +1027,13 @@ async def chat(
             except Exception as exc:
                 await orchestrator.cancel_generation_for_user(user_id)
                 yield {"event": "error", "data": str(exc)}
+            finally:
+                orchestrator.end_generation_for_user(user_id, epoch=gen_epoch)
 
         return EventSourceResponse(event_gen())
 
     job_id = orchestrator.create_job(user_id=user_id)
-    _begin_generation_or_raise(orchestrator, user_id)
+    gen_epoch = _begin_generation_or_raise(orchestrator, user_id)
     try:
         await orchestrator.start(job_id, payload)
         job = await orchestrator.wait_for(job_id)
@@ -1039,10 +1043,14 @@ async def chat(
     except Exception:
         await orchestrator.cancel_generation_for_user(user_id)
         raise
+    finally:
+        orchestrator.end_generation_for_user(user_id, epoch=gen_epoch)
     if not job:
         raise HTTPException(500, "Job lost")
     if job.status.value == "failed":
         raise HTTPException(500, job.error or "Inference failed")
+    if job.status.value == "cancelled":
+        raise HTTPException(409, "Inference cancelled")
     if body.thread_id and job.result.get("content"):
         content = sanitize_llm_output(job.result["content"], strip_tool_calls=not body.tools)
         await db.add_message(

@@ -459,7 +459,8 @@ async def publish_to_hub(
             token=token,
             metadata=meta,
             on_log=on_log,
-            skip_precheck=True,
+            # Re-precheck at push time (token/ownership can change after route check).
+            skip_precheck=False,
             data_dir=settings.data_dir,
         )
     except Exception as exc:

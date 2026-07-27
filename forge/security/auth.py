@@ -127,6 +127,9 @@ class RateLimiter:
         now = time.monotonic()
         cutoff = now - 60.0
         pruned = [t for t in self._hits.get(client_ip, []) if t > cutoff]
+        if not pruned:
+            # Drop idle keys so distinct client IPs cannot grow unbounded.
+            self._hits.pop(client_ip, None)
         if len(pruned) >= self.max_per_minute:
             self._hits[client_ip] = pruned
             raise HTTPException(
@@ -134,6 +137,15 @@ class RateLimiter:
             )
         pruned.append(now)
         self._hits[client_ip] = pruned
+        # Opportunistic sweep of other idle IPs (bounded work per request).
+        if len(self._hits) > 256:
+            stale = [
+                ip
+                for ip, hits in self._hits.items()
+                if ip != client_ip and (not hits or hits[-1] <= cutoff)
+            ]
+            for ip in stale[:64]:
+                self._hits.pop(ip, None)
 
     def reset(self) -> None:
         """Clear recorded hits (tests / process-local reloads)."""

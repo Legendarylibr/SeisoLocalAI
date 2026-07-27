@@ -19,7 +19,7 @@ class HubPublishMixin:
                 """INSERT INTO hub_publish_jobs
                    (id, user_id, status, config_json, created_at, updated_at)
                    VALUES (?, ?, ?, ?, ?, ?)""",
-                (jid, user_id, "pending", json.dumps(config), now, now),
+                (jid, user_id, "pending", self._enc(json.dumps(config)), now, now),
             )
             await conn.commit()
         return {"id": jid, "status": "pending", "config": config, "created_at": now}
@@ -33,7 +33,7 @@ class HubPublishMixin:
             ) as cur,
         ):
             row = await cur.fetchone()
-            return dict(row) if row else None
+            return self._decrypt_row("hub_publish_jobs", dict(row)) if row else None
 
     async def update_hub_publish_job_status(
         self,

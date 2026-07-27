@@ -135,7 +135,8 @@ def run_export_plan(
         hub_token=hub_token,
         hub_metadata=plan.hub_metadata,
         sandbox_root=sandbox_root,
-        skip_hub_precheck=plan.precheck is not None and plan.precheck.ok,
+        # Never skip push-time precheck: plan.precheck may be stale after long merge/GGUF.
+        skip_hub_precheck=False,
     )
     return export_checkpoint(options, on_log=on_log)
 

@@ -194,9 +194,13 @@ def apply_training_kernels(
                 # fused_mlp_swiglu also uses torch GEMM + fused_swiglu — same quality;
                 # prefer gate_proj/up_proj so LoRA/quant wrappers stay correct.
                 if hidden_states.is_cuda and _use_fused_cuda_kernels(hidden_states):
+                    gate_bias = getattr(self.gate_proj, "bias", None)
+                    up_bias = getattr(self.up_proj, "bias", None)
                     if (
                         not _is_peft_lora_linear(self.gate_proj)
                         and not _is_peft_lora_linear(self.up_proj)
+                        and gate_bias is None
+                        and up_bias is None
                         and _supports_einsum_batch((self.gate_proj, self.up_proj))
                     ):
                         flat = hidden_states.reshape(-1, hidden_states.shape[-1])
@@ -492,12 +496,20 @@ def _patch_fused_qkv_projections(
             for adapter in self.active_adapters:
                 if adapter not in self.lora_A:
                     continue
-                x_mod = x
-                if hasattr(self, "_cast_input_dtype"):
-                    x_mod = self._cast_input_dtype(x_mod, self.lora_A[adapter].weight.dtype)
-                dropout_p = _lora_dropout_p(self.lora_dropout[adapter])
-                if dropout_p > 0 and self.training:
-                    x_mod = F.dropout(x_mod, p=dropout_p)
+                # Reuse the shared QKV dropout mask when the fused path already
+                # sampled it (or a sibling proj fallback stored it).
+                x_mod = cache.get("x_mod")
+                if x_mod is None:
+                    x_mod = x
+                    if hasattr(self, "_cast_input_dtype"):
+                        x_mod = self._cast_input_dtype(
+                            x_mod, self.lora_A[adapter].weight.dtype
+                        )
+                    dropout_p = _lora_dropout_p(self.lora_dropout[adapter])
+                    if dropout_p > 0 and self.training:
+                        x_mod = F.dropout(x_mod, p=dropout_p)
+                    if len(tuple(self.active_adapters)) == 1:
+                        cache["x_mod"] = x_mod
                 flat_x = x_mod.reshape(-1, x_mod.shape[-1])
                 w = _get_active_lora_weights(self, adapter)
                 if w and w[0].size(0) <= max_rank:

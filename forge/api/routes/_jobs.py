@@ -117,12 +117,18 @@ def validate_pipeline_paths(
         assert_user_path,
     )
 
+    from forge.services.user_paths import is_local_filesystem_path
+
     try:
         if config_file:
             assert_user_config_file(data_dir, user_id, config_file)
         for key in path_keys:
-            if config.get(key):
-                assert_user_path(data_dir, user_id, config[key])
+            value = config.get(key)
+            if not value:
+                continue
+            # Hub repo ids (org/model) are left alone; only local paths are sandboxed.
+            if is_local_filesystem_path(value):
+                assert_user_path(data_dir, user_id, value)
         if llama_cpp_binary and config.get("llama_cpp_binary"):
             assert_llama_cpp_binary(config["llama_cpp_binary"])
     except SecurityError as exc:
