@@ -36,3 +36,6 @@ logs/
 .seiso-install.log
 .cache/
 .test_outputs/
+# Lean / Lake
+formal/**/.lake/
+formal/**/lake-packages/

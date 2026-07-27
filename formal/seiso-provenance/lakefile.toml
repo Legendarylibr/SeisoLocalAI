@@ -1,0 +1,10 @@
+name = "SeisoProvenance"
+version = "0.1.0"
+defaultTargets = ["seisoprovenance"]
+
+[[lean_lib]]
+name = "SeisoProvenance"
+
+[[lean_exe]]
+name = "seisoprovenance"
+root = "Main"
