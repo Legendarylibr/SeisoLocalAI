@@ -3,10 +3,16 @@
 from __future__ import annotations
 
 import re
+import sys
 from pathlib import Path
 
 import pytest
-import tomllib
+
+# CI runs on Python 3.10; tomllib is stdlib only from 3.11+.
+if sys.version_info >= (3, 11):
+    import tomllib
+else:
+    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 
