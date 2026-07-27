@@ -213,6 +213,7 @@ def test_compat_tools_allow_seiso_registry_names():
 def test_detect_training_layout_ignores_stale_world_size(monkeypatch):
     monkeypatch.setenv("WORLD_SIZE", "8")
     monkeypatch.setenv("LOCAL_RANK", "3")
+    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
 
     class _Cuda:
         @staticmethod
@@ -238,6 +239,38 @@ def test_detect_training_layout_ignores_stale_world_size(monkeypatch):
     layout = detect_training_layout()
     assert layout.world_size == 1
     assert layout.use_ddp is False
+
+
+def test_detect_training_layout_keeps_multi_node(monkeypatch):
+    monkeypatch.setenv("WORLD_SIZE", "16")
+    monkeypatch.setenv("LOCAL_WORLD_SIZE", "8")
+    monkeypatch.setenv("LOCAL_RANK", "1")
+    monkeypatch.setenv("RANK", "9")
+    monkeypatch.setenv("MASTER_ADDR", "10.0.0.1")
+    monkeypatch.setenv("MASTER_PORT", "29500")
+
+    class _Cuda:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def device_count():
+            return 8
+
+    import sys
+    from types import ModuleType
+
+    fake = ModuleType("torch")
+    fake.cuda = _Cuda()
+    monkeypatch.setitem(sys.modules, "torch", fake)
+
+    from seiso.training.multi_gpu import detect_training_layout
+
+    layout = detect_training_layout()
+    assert layout.world_size == 16
+    assert layout.local_rank == 1
+    assert layout.use_ddp is True
 
 
 def test_managed_vllm_tp_respects_cuda_visible_devices(monkeypatch):

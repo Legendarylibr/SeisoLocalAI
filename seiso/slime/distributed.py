@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 import random
 from collections.abc import Iterable
 from pathlib import Path
@@ -107,18 +106,16 @@ def _save_distributed(
 
 
 def _distributed_context(torch, config: SingleGpuSlimeConfig) -> _DistributedSlimeContext:
-    world_size = int(os.environ.get("WORLD_SIZE", "1") or 1)
-    rank = int(os.environ.get("RANK", os.environ.get("LOCAL_RANK", "0")) or 0)
-    local_rank = int(os.environ.get("LOCAL_RANK", "0") or 0)
-    # Ignore stale Accelerate/Forge env left in the parent process (mirror
-    # seiso.training.multi_gpu.detect_training_layout).
+    from seiso.training.multi_gpu import resolve_distributed_env
+
+    device_count = 0
     if _is_cuda_device(config.device) and torch.cuda.is_available():
         device_count = int(torch.cuda.device_count())
-        if world_size > device_count or local_rank >= device_count or world_size < 1:
-            world_size = 1
-            rank = 0
-            local_rank = 0
-    if world_size <= 1:
+    dist_env = resolve_distributed_env(device_count)
+    world_size = dist_env.world_size
+    rank = dist_env.rank
+    local_rank = dist_env.local_rank
+    if not dist_env.enabled:
         return _DistributedSlimeContext(
             enabled=False,
             world_size=1,

@@ -73,7 +73,13 @@ class RLQuantStartRequest(BaseModel):
     training_episodes: int | None = None
     evaluation_episodes: int | None = None
     seed: int = 13
-    backend: str = Field(default="simulator", description="simulator | llama_cpp")
+    backend: str = Field(
+        default="simulator",
+        description=(
+            "simulator (research/smoke metrics only — not deploy-claimable) | "
+            "llama_cpp (GGUF path required for exportable recommendations)"
+        ),
+    )
     training_backend: str = Field(default="stdlib", description="stdlib | pytorch")
     checkpoint_path: str | None = None
     gguf_path: str | None = None
@@ -149,6 +155,9 @@ async def start_rl_quant(
         )
 
     config = _prepare_rl_quant_config(body, user_id, settings, config=config)
+    # Simulator evidence is research-only; never schedule GGUF export from it.
+    if str(config.get("backend") or "").lower() == "simulator":
+        config["gguf_export"] = False
 
     await db.create_rl_quant_job(user_id, config, job_id=job_id)
     orchestrator.create_job(job_id=job_id, user_id=user_id)

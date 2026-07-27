@@ -167,6 +167,7 @@ def test_slime_distributed_context_ignores_stale_world_size(monkeypatch):
     monkeypatch.setenv("WORLD_SIZE", "8")
     monkeypatch.setenv("LOCAL_RANK", "3")
     monkeypatch.setenv("RANK", "3")
+    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
 
     class _Cuda:
         @staticmethod
@@ -202,9 +203,27 @@ def test_slime_distributed_context_ignores_stale_world_size(monkeypatch):
     assert ctx.world_size == 1
 
 
+def test_resolve_distributed_env_keeps_multi_node(monkeypatch):
+    """Global WORLD_SIZE > local GPU count is multi-node, not stale."""
+    monkeypatch.setenv("WORLD_SIZE", "16")
+    monkeypatch.setenv("LOCAL_WORLD_SIZE", "8")
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    monkeypatch.setenv("RANK", "0")
+    monkeypatch.setenv("MASTER_ADDR", "10.0.0.1")
+    monkeypatch.setenv("MASTER_PORT", "29500")
+
+    from seiso.training.multi_gpu import resolve_distributed_env
+
+    env = resolve_distributed_env(device_count=8)
+    assert env.enabled is True
+    assert env.world_size == 16
+    assert env.local_rank == 0
+
+
 def test_resolve_training_device_map_ignores_stale_world_size(monkeypatch):
     monkeypatch.setenv("WORLD_SIZE", "8")
     monkeypatch.setenv("LOCAL_RANK", "3")
+    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
 
     class _Cuda:
         @staticmethod
@@ -227,8 +246,44 @@ def test_resolve_training_device_map_ignores_stale_world_size(monkeypatch):
     assert resolve_training_device_map("cuda") == "auto"
 
 
+def test_resolve_training_device_map_pins_multi_node_rank(monkeypatch):
+    monkeypatch.setenv("WORLD_SIZE", "8")
+    monkeypatch.setenv("LOCAL_WORLD_SIZE", "4")
+    monkeypatch.setenv("LOCAL_RANK", "2")
+    monkeypatch.setenv("RANK", "6")
+    monkeypatch.setenv("MASTER_ADDR", "10.0.0.1")
+
+    class _Cuda:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def device_count():
+            return 4
+
+    import sys
+    from types import ModuleType
+
+    fake = ModuleType("torch")
+    fake.cuda = _Cuda()
+    monkeypatch.setitem(sys.modules, "torch", fake)
+
+    from seiso.memory.protection.device_map import resolve_training_device_map
+
+    assert resolve_training_device_map("cuda") == {"": "cuda:2"}
+
+
 def test_slime_manifest_uses_runtime_world_size(monkeypatch, tmp_path: Path):
-    monkeypatch.setenv("WORLD_SIZE", "1")
+    for key in (
+        "WORLD_SIZE",
+        "LOCAL_RANK",
+        "RANK",
+        "MASTER_ADDR",
+        "MASTER_PORT",
+        "LOCAL_WORLD_SIZE",
+    ):
+        monkeypatch.delenv(key, raising=False)
     from seiso.training.config import TrainConfig, _write_slime_manifest
 
     cfg = TrainConfig.model_validate(
@@ -253,9 +308,22 @@ def test_slime_manifest_uses_runtime_world_size(monkeypatch, tmp_path: Path):
     assert payload["post_training_algorithm"] == "single_gpu_slime_grpo"
 
     monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    monkeypatch.setenv("RANK", "0")
+    monkeypatch.setenv("LOCAL_WORLD_SIZE", "2")
+    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
+    monkeypatch.setenv("MASTER_PORT", "29500")
     _write_slime_manifest(cfg, tmp_path)
     payload = json.loads((tmp_path / "seiso_manifest.json").read_text(encoding="utf-8"))
     assert payload["post_training_algorithm"] == "distributed_slime_grpo"
+
+
+def test_forge_pipeline_defaults_are_product_presets():
+    from forge.api.routes.compress import CompressStartRequest
+    from forge.api.routes.distill_rl import DistillRLStartRequest
+
+    assert DistillRLStartRequest().preset == "reproducible"
+    assert CompressStartRequest().preset == "full"
 
 
 def test_emit_standard_artifacts_skips_orphan_distill_by_default(tmp_path: Path):

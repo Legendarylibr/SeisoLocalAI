@@ -22,6 +22,7 @@ const COMPRESS_PIPELINE = {
   listJobs: api.listCompressJobs,
   startJob: api.startCompress,
   streamPath: (jobId: string) => `/compress/jobs/${jobId}/stream`,
+  initialPreset: "full",
 };
 
 export function CompressPage() {

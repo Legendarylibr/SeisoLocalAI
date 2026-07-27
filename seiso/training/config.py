@@ -986,12 +986,10 @@ def run_training(
 
 
 def _write_slime_manifest(config: TrainConfig, output_dir: Path) -> None:
-    # Label from the process that actually trained (Accelerate sets WORLD_SIZE).
-    try:
-        runtime_world = int(os.environ.get("WORLD_SIZE", "1") or 1)
-    except ValueError:
-        runtime_world = 1
-    distributed = runtime_world > 1
+    # Same resolver as layout / slime DDP / device_map (multi-node safe).
+    from seiso.training.multi_gpu import resolve_distributed_env
+
+    distributed = resolve_distributed_env().enabled
     payload = {
         "model_id": config.model_id,
         "original_model_id": str(config.extra.get("original_model_id") or config.model_id),

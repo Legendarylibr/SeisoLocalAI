@@ -168,7 +168,7 @@ Invoke-RestMethod http://127.0.0.1:8765/v1/chat/completions `
 
 1. Open **Training Studio** (`/train`)
 2. Pick a **safetensors** base model (from Model Hub — not a GGUF-only mirror)
-3. Pick a dataset (Hugging Face hub ID, upload JSONL, or `data/sample.jsonl`)
+3. Pick a dataset (Hugging Face hub ID such as `HuggingFaceH4/no_robots`, or upload JSONL). `data/sample.jsonl` is a 4-row CI format smoke only.
 4. Wait for **dataset analysis** — Seiso scans the full corpus and suggests format, epochs, and seq length from the schema
 5. Review hardware-tuned settings (quant, batch size, fused kernels) and click **Start training** — logs stream over SSE
 

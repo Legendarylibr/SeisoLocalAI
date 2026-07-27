@@ -90,7 +90,7 @@ def build_pipeline_config(
         merge_dataclass,
     )
 
-    preset_name, preset = resolve_preset(PRESETS, str(payload.get("preset", "smoke")))
+    preset_name, preset = resolve_preset(PRESETS, str(payload.get("preset", "full")))
 
     config_blob: dict[str, Any] = {}
     if path := resolve_config_file_path(
