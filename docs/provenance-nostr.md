@@ -78,6 +78,19 @@ corpus — without putting the row text on Nostr.
 
 Corpus membership ≠ gradient provenance.
 
+### Lean formalization
+
+The membership path algorithm and its binding to a Nostr-sealed root are modeled in
+Lean 4 under [`formal/seiso-provenance/`](../formal/seiso-provenance/README.md):
+
+- **Completeness** — an honestly opened path always verifies against the corpus root
+- **Nostr binding** — if a valid kind-`31250` event seals that root, the opened proof
+  satisfies the Nostr-backed verifier
+
+Build with `cd formal/seiso-provenance && lake build` (requires [elan](https://github.com/leanprover/elan)).
+SHA-256 and BIP-340 are opaque; the proofs cover the Merkle/path scheme and attestation
+root binding, not a full mechanization of secp256k1.
+
 ### End-to-end CLI
 
 ```bash
