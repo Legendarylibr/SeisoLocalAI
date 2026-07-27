@@ -208,12 +208,15 @@ checks = {
     "hf_xet": "recommended for faster Hugging Face downloads",
     "fastapi": "required for Forge",
     "uvicorn": "required for Forge",
+    "websockets": "required for Nostr provenance relays (included in [forge])",
     "torch": "required for training / safetensors workflows",
     "llama_cpp": "required for GGUF chat",
     "mlx_lm": "recommended on macOS Apple Silicon",
 }
 for module, hint in checks.items():
-    level = "OK" if has(module) else ("WARN" if module in {"hf_xet", "llama_cpp", "mlx_lm", "torch"} else "FAIL")
+    level = "OK" if has(module) else (
+        "WARN" if module in {"hf_xet", "llama_cpp", "mlx_lm", "torch"} else "FAIL"
+    )
     line(level, f"python package {module}: {'found' if has(module) else 'missing'} ({hint})")
 
 python_bin = Path(sys.executable).parent

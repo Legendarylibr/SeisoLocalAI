@@ -86,6 +86,8 @@ SEISO_INSTALL_PROFILE=macos curl -fsSL https://raw.githubusercontent.com/Legenda
 git clone https://github.com/Legendarylibr/SeisoLocalAI.git "$env:USERPROFILE\Seiso"; cd "$env:USERPROFILE\Seiso"; python -m venv .venv; .\.venv\Scripts\Activate.ps1; pip install -U pip wheel setuptools; pip install -e ".[forge,train,dev]"; if (-not (Test-Path .env)) { Copy-Item .env.example .env }; cd forge-ui; npm ci; npm run build; cd ..; seiso forge
 ```
 
+`[forge]` includes `websockets` for Nostr provenance relays (same as Linux/macOS `start`). Use `npm ci` here so `package-lock.json` stays the Windows/UI fallback lock (Bun uses `bun.lock` on other platforms).
+
 Forge starts when install finishes and your browser opens automatically at **http://127.0.0.1:8765**. You do **not** need to run `start` again immediately after a successful install. If anything fails, **doctor runs automatically** with a guided diagnosis.
 
 **Start Forge on later sessions:**
@@ -109,11 +111,14 @@ bash start
 1. **Clones** Seiso to `$HOME/Seiso` on Linux/macOS/WSL (override with `SEISO_INSTALL_DIR`; Windows uses manual clone — see below)
 2. **Creates** a Python virtualenv at `.venv`
 3. **Installs** platform extras with `uv` when available, or pip as a fallback (includes GGUF support; native Linux NVIDIA uses a sidecar by default):
-   - **Linux + NVIDIA** (`nvidia-smi` detected) → `[forge,train,cuda,llamacpp,dev]`
-   - **Linux (no NVIDIA)** → `[forge,train,llamacpp,dev]`
-   - **macOS** → `[forge,train,llamacpp,dev]` (optional: `[mlx]` for safetensors)
+   - **Linux + NVIDIA** (`nvidia-smi` detected) → `[forge,train,cuda,llamacpp]` (+ `dev` when `SEISO_INSTALL_DEV=1`)
+   - **Linux (no NVIDIA)** / **ROCm** → `[forge,train,llamacpp]`
+   - **WSL + NVIDIA** → `[forge,train,cuda,llamacpp]`
+   - **macOS** → `[forge,train,llamacpp,mlx]`
+   - **`chat` / fast** → `[forge,llamacpp]` (+ `mlx` on macOS)
+   - Every path above includes `[forge]`, which pulls Nostr provenance relay deps (`websockets`) plus Forge auth crypto. Auth signing itself is pure-Python in-tree.
 4. **Copies** `.env.example` → `.env` if missing
-5. **Builds** the Forge UI with Bun when available, or npm as a fallback (`forge-ui/dist`)
+5. **Builds** the Forge UI with Bun when available (`bun install --frozen-lockfile`), or npm (`npm ci`) when Bun is missing / `SEISO_USE_NPM=1` — both locks live in `forge-ui/` and must stay in sync with `package.json` on **all** OSes
 6. **Installs sidecar stack** on native Linux NVIDIA (`linux-nvidia` profile: Ollama + health gate)
 7. **Starts** Forge (unless `SEISO_START=0`)
 
