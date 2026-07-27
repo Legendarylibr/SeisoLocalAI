@@ -664,7 +664,7 @@ def _cmd_util_verify_artifact(args: argparse.Namespace) -> int:
     )
     inputs = tok(args.prompt, return_tensors="pt").to(model.device)
     with torch.inference_mode():
-        out = model.generate(
+        out = model.generate(  # type: ignore[misc]
             **inputs, max_new_tokens=args.max_new_tokens, do_sample=False
         )
     print(tok.decode(out[0], skip_special_tokens=True))
