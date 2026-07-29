@@ -651,6 +651,14 @@ class SingleGpuSlimeConfig:
             assert_relative_artifact_name(
                 self.final_checkpoint_dir, field="final_checkpoint_dir"
             )
+        # Weight-sync dirs are joined under output_dir during HTTP rollout sync —
+        # reject .. / absolute the same way as checkpoint artifact names.
+        assert_relative_artifact_name(
+            self.sglang_weight_dir, field="sglang_weight_dir"
+        )
+        assert_relative_artifact_name(
+            self.vllm_weight_dir, field="vllm_weight_dir"
+        )
         if self.write_verifier_data and not self.verifier_data_file:
             raise ValueError("verifier_data_file must not be empty")
         if self.verifier_data_file:

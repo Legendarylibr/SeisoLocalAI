@@ -451,6 +451,8 @@ class TrainConfig(BaseModel):
         "best_checkpoint_dir",
         "verifier_data_file",
         "data_gen_filename",
+        "sglang_weight_dir",
+        "vllm_weight_dir",
     )
     @classmethod
     def _validate_relative_artifact_name(cls, v: str) -> str:

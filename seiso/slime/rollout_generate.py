@@ -131,6 +131,37 @@ def generate_data_gen_chunk(
     )
 
 
+def truncate_prompt_texts(
+    tokenizer,
+    prompts: list[str],
+    *,
+    max_prompt_tokens: int,
+) -> list[str]:
+    """Token-truncate prompt strings to ``max_prompt_tokens``.
+
+    HTTP rollout engines receive full text; actor logprobs in
+    ``build_sequence_tensors`` truncate at encode time. Truncating here first
+    keeps generate and importance-sampling prefixes aligned (same rule as the
+    HF colocated path).
+    """
+    if max_prompt_tokens < 1:
+        raise ValueError("max_prompt_tokens must be >= 1")
+    out: list[str] = []
+    for prompt in prompts:
+        enc = tokenizer(
+            prompt,
+            add_special_tokens=False,
+            truncation=True,
+            max_length=max_prompt_tokens,
+        )
+        ids = enc["input_ids"]
+        # Batch vs single encodings depending on tokenizer wrapper.
+        if ids and isinstance(ids[0], list):
+            ids = ids[0]
+        out.append(tokenizer.decode(ids, skip_special_tokens=False))
+    return out
+
+
 def generate_sglang_chunk(
     *,
     tokenizer,
@@ -138,9 +169,12 @@ def generate_sglang_chunk(
     config: SingleGpuSlimeConfig,
 ) -> GeneratedChunk:
     """Generate ``rollouts_per_prompt`` completions per prompt via SGLang HTTP."""
-    del tokenizer  # prompts are already formatted strings
     from seiso.slime.rollout_http import sglang_engine_urls
 
+    # Truncate before the engine sees the prompt so logprobs match.
+    prompts = truncate_prompt_texts(
+        tokenizer, prompts, max_prompt_tokens=config.max_prompt_tokens
+    )
     client = SGLangRolloutClient.from_config(config)
     return _generate_http_chunk(
         client=client,
@@ -158,9 +192,11 @@ def generate_vllm_chunk(
     config: SingleGpuSlimeConfig,
 ) -> GeneratedChunk:
     """Generate ``rollouts_per_prompt`` completions per prompt via vLLM HTTP."""
-    del tokenizer  # prompts are already formatted strings
     from seiso.slime.rollout_http import resolve_vllm_base_url, vllm_engine_urls
 
+    prompts = truncate_prompt_texts(
+        tokenizer, prompts, max_prompt_tokens=config.max_prompt_tokens
+    )
     client = VLLMRolloutClient.from_config(config)
     engines = vllm_engine_urls(config, allow_empty_primary=True)
     if not engines:
