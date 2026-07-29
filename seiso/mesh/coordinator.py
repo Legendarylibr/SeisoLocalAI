@@ -304,6 +304,7 @@ def worker_train_config_overlay(plan: dict[str, Any], *, node_rank: int) -> dict
 
 
 def buzz_heartbeat(plan: dict[str, Any], *, node_rank: int, status: str) -> dict[str, Any]:
+    """Signed heartbeat for relay; receipts are local pointers (same event)."""
     pair = require_buzz_nsec(feature="Mesh heartbeat")
     nostr = sign_mesh_heartbeat(
         plan=plan, node_rank=node_rank, status=status, pair=pair
@@ -318,10 +319,9 @@ def buzz_heartbeat(plan: dict[str, Any], *, node_rank: int, status: str) -> dict
         world_size_nodes=plan.get("distributed_num_nodes"),
         **receipt_nostr_fields(nostr),
     )
-    # Heartbeat return includes the signed event for relay; receipt is local pointer.
-    receipt_with_event = {
-        **receipt,
+    return {
+        "buzz_receipt": receipt,
+        "agent_receipt": receipt,
         "nostr_event": relay_signed_event(nostr),
         "note": relay_policy_note(),
     }
-    return receipt_with_event

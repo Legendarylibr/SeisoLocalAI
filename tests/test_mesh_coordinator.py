@@ -65,9 +65,12 @@ def test_announce_plan_worker(mesh_env: Path) -> None:
     assert plan_out["plan"]["market"] is False
     assert plan_out["plan"]["distributed_nproc_per_node"] == 2
     assert plan_out["plan"]["token_fingerprint"]
+    assert "token_fingerprint" not in plan_out["plan"]["nostr"]["event"]["content"]
     assert plan_out["plan"]["nostr"]["event_id"]
     assert verify_event(plan_out["plan"]["nostr"]["event"])
+    assert verify_event(plan_out["nostr_event"])
     assert "token_fingerprint" not in plan_out["plan_public"]
+    assert "token_fingerprint" not in (plan_out["nostr_event"].get("content") or "")
     assert "event" not in (plan_out["plan_public"].get("nostr") or {})
     assert plan_out["buzz_receipt"]["world_size"] == 2
     assert plan_out["buzz_receipt"]["npub"].startswith("npub1")
@@ -83,6 +86,29 @@ def test_announce_plan_worker(mesh_env: Path) -> None:
     overlay = worker_train_config_overlay(plan, node_rank=1)
     assert overlay["distributed_nproc_per_node"] == 2
     assert overlay["distributed_node_rank"] == 1
+
+    from seiso.mesh.coordinator import buzz_heartbeat
+
+    hb = buzz_heartbeat(plan, node_rank=1, status="joining")
+    assert hb["buzz_receipt"]["nostr_event_id"] == hb["agent_receipt"]["nostr_event_id"]
+    assert hb["nostr_event"]["id"] == hb["buzz_receipt"]["nostr_event_id"]
+    assert "nostr_event" not in hb["buzz_receipt"]
+
+
+def test_event_id_wrapper_mismatch_refused(mesh_env: Path) -> None:
+    from seiso.mesh.coordinator import build_plan, worker_env
+
+    plan_out = build_plan(
+        channel="ch-1",
+        job_type="finetune",
+        nodes=2,
+        master_addr="10.0.0.2",
+        gpus_per_node=1,
+    )
+    plan = plan_out["plan"]
+    plan["nostr"]["event_id"] = "ab" * 32
+    with pytest.raises(RuntimeError, match="event_id"):
+        worker_env(plan, node_rank=0)
 
 
 def test_tampered_plan_nostr_refused(mesh_env: Path) -> None:

@@ -78,7 +78,7 @@ Plans are sandboxed under `mesh/plans/<job_id>.json` — absolute foreign paths 
 {"id":"…","pubkey":"…","created_at":0,"kind":31251,"tags":[…],"content":"{…}","sig":"…"}
 ```
 
-Publish that signed event via buzz-cli (or an allowlisted Nostr relay). Never post `SEISO_MESH_TOKEN`, `token_fingerprint`, nsecs, or unsigned plan JSON as authority.
+Publish that signed event via buzz-cli (or an allowlisted Nostr relay). Never post `SEISO_MESH_TOKEN`, local `token_fingerprint` (HMAC stays on disk only — not in signed event content), nsecs, or unsigned plan JSON as authority.
 
 ## Fallback
 

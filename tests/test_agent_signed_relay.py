@@ -26,8 +26,25 @@ def test_signed_agent_interaction_relay_only_with_signing(
     assert out["buzz_receipt"]["npub"] == pair.npub
     assert out["nostr_event"]["kind"] == 31254
     assert verify_event(out["nostr_event"])
+    d_tags = [t[1] for t in out["nostr_event"]["tags"] if t and t[0] == "d"]
+    assert d_tags == ["job-1:train:started"]
     assert "Relay policy" in out["note"]
     assert "nsec" not in str(out["buzz_receipt"]).lower()
+
+
+def test_receipt_allows_tokenizer_field() -> None:
+    from seiso.agent.receipts import agent_receipt
+
+    receipt = agent_receipt(
+        role="train",
+        status="started",
+        tokenizer="llama",
+        token_count=12,
+        mesh_token="should-drop",
+    )
+    assert receipt["tokenizer"] == "llama"
+    assert receipt["token_count"] == 12
+    assert "mesh_token" not in receipt
 
 
 def test_signed_agent_interaction_local_unsigned_without_nsec(

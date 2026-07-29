@@ -79,12 +79,13 @@ def mesh_plan(
     except Exception as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
-    # Never print token_fingerprint to stdout (agents paste CLI JSON into Buzz).
+    # Relay-ready signed event + local pointers (never token_fingerprint).
     safe = {
         "plan_public": out.get("plan_public"),
         "plan_path": out.get("plan_path"),
         "buzz_receipt": out.get("buzz_receipt"),
         "agent_receipt": out.get("agent_receipt"),
+        "nostr_event": out.get("nostr_event"),
         "note": out.get("note"),
         "job_id": (out.get("plan") or {}).get("job_id"),
     }
@@ -122,27 +123,27 @@ def mesh_worker(
         p = load_plan(plan)
         env = worker_env(p, node_rank=rank)
         overlay = worker_train_config_overlay(p, node_rank=rank)
+        heartbeat = buzz_heartbeat(p, node_rank=rank, status="joining")
     except Exception as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
     out = {
         "env": env,
         "train_config_overlay": overlay,
-        "buzz_receipt": buzz_heartbeat(p, node_rank=rank, status="joining"),
-        "agent_receipt": buzz_heartbeat(p, node_rank=rank, status="joining"),
+        "buzz_receipt": heartbeat["buzz_receipt"],
+        "agent_receipt": heartbeat["agent_receipt"],
+        "nostr_event": heartbeat["nostr_event"],
+        "note": heartbeat["note"],
         "surface": "agent",
         "next": (
             "Apply train_config_overlay to your train YAML / Accelerate launch "
             "(Seiso honors the overlay, not env-only NNODES). "
-            "Relay only the signed nostr_event (NIP-01 + BIP-340) via buzz-cli — "
+            "Relay only the top-level signed nostr_event via buzz-cli — "
             "unsigned receipts are local pointers, not channel authority. "
             "Mesh does not charge protocol fees. Not functional for real multi-node yet."
         ),
     }
-    if print_env:
-        _print_json(out)
-    else:
-        _print_json(out)
+    _print_json(out)
 
 
 @mesh_app.command("status")

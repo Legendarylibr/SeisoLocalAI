@@ -46,7 +46,7 @@ _SIGNED_PLAN_KEYS = (
     "multi_gpu",
     "protocol_fee_sats",
     "market",
-    "token_fingerprint",
+    # token_fingerprint stays local-only (HMAC check) — never in signed/relayed content.
 )
 
 
@@ -135,6 +135,9 @@ def verify_mesh_plan_nostr(plan: dict[str, Any]) -> None:
     pubkey = str(event.get("pubkey") or "").lower()
     if pubkey != str(nostr.get("pubkey") or "").lower():
         raise RuntimeError("Mesh plan nostr.pubkey does not match event.pubkey")
+    event_id = str(nostr.get("event_id") or "").lower()
+    if event_id and event_id != str(event.get("id") or "").lower():
+        raise RuntimeError("Mesh plan nostr.event_id does not match signed event id")
     trusted = _trusted_pubkey_hexes()
     if trusted and pubkey not in trusted:
         raise RuntimeError(

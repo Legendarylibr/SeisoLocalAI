@@ -30,7 +30,6 @@ _FORBIDDEN_KEYS = frozenset(
     }
 )
 _FORBIDDEN_SUBSTR = (
-    "token",
     "nsec",
     "secret",
     "password",
@@ -42,6 +41,9 @@ _FORBIDDEN_SUBSTR = (
 def _is_forbidden_field(key: str) -> bool:
     lowered = key.strip().lower()
     if lowered in _FORBIDDEN_KEYS:
+        return True
+    # Exact/suffix forms only — do not scrub benign keys like "tokenizer".
+    if lowered.endswith("_token") or lowered.endswith("_secret"):
         return True
     return any(part in lowered for part in _FORBIDDEN_SUBSTR)
 

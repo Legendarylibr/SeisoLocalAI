@@ -119,7 +119,9 @@ def signed_agent_interaction(
     if channel is not None:
         payload["channel"] = channel
 
-    d_value = d_tag or str(fields.get("job_id") or uuid.uuid4().hex)
+    d_value = d_tag or (
+        f"{fields.get('job_id') or uuid.uuid4().hex}:{role}:{status}"
+    )
     tags = [
         ["d", d_value],
         ["t", "seiso-agent-status"],
