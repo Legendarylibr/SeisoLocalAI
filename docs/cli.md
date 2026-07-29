@@ -313,6 +313,8 @@ See [provenance-nostr.md](provenance-nostr.md) for Forge UI settings, auto-attes
 
 ## `seiso pay` (opt-in marketplace)
 
+> **Not functional yet — do not use.** Scaffolding only. Do not run for production or real funds.
+
 Remote sats marketplace for inference / finetune / RL. **Self-hosted stays free** —
 do not enable this for local-only use. Requires `SEISO_ALLOW_PAY=1`.
 
@@ -335,6 +337,8 @@ Default protocol fee is 5% (`SEISO_PROTOCOL_FEE_BPS=500`) added on top of comput
 See [pay/marketplace.md](pay/marketplace.md).
 
 ## `seiso mesh` (experimental)
+
+> **Not functional yet — do not use.** Experimental scaffolding — do not rely on it for real multi-node jobs yet.
 
 Buzz-coordinated multi-node / shared training. Opt-in (`SEISO_ALLOW_MESH=1`); **no** protocol fee.
 Share `SEISO_MESH_TOKEN` out-of-band (never post to Buzz). Post announce/plan/worker receipts to the channel.

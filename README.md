@@ -47,8 +47,8 @@ Seiso combines a **web workspace (Forge)** and a **Python core (CLI + library)**
 | RL quant + CUDA kernel policy | RL Quant | `seiso rl-quant run` |
 | Visual data/recipe pipelines | Recipe Studio | — |
 | RAG knowledge bases | Knowledge | — |
-| Opt-in remote sats marketplace (Ark) | — | `seiso pay` ([docs](docs/pay/marketplace.md)) |
-| Experimental Buzz shared / multi-node train | — | `seiso mesh` ([docs](docs/training/mesh.md)) |
+| Opt-in remote sats marketplace (Ark) — **not functional, do not use yet** | — | `seiso pay` ([docs](docs/pay/marketplace.md)) |
+| Experimental Buzz shared / multi-node train — **not functional, do not use yet** | — | `seiso mesh` ([docs](docs/training/mesh.md)) |
 
 **Why local-first?**
 

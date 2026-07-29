@@ -312,6 +312,8 @@ Default data dir: `$HOME/.seiso` on Linux/macOS/WSL, `%USERPROFILE%\.seiso` on W
 
 ## Opt-in pay marketplace / Ark
 
+> **Not functional yet — do not use.** Live Ark settlement is not wired; faucet/sim only for local smoke tests.
+
 | Symptom | Check |
 |---------|--------|
 | `seiso pay` refuses to run | `SEISO_ALLOW_PAY=1` must be set |
@@ -323,6 +325,8 @@ Default data dir: `$HOME/.seiso` on Linux/macOS/WSL, `%USERPROFILE%\.seiso` on W
 Full guide: [pay/marketplace.md](pay/marketplace.md).
 
 ## Opt-in Buzz mesh
+
+> **Not functional yet — do not use.** Experimental scaffolding only.
 
 | Symptom | Check |
 |---------|--------|

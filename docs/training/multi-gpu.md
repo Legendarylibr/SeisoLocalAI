@@ -137,4 +137,6 @@ Multi-GPU checkbox is disabled when `training_defaults.multi_gpu_available` is f
 
 ## Buzz mesh (experimental)
 
+> **Not functional yet — do not use.**
+
 For trusted peers coordinating multi-node jobs over a Buzz channel (no marketplace fee), see [mesh.md](mesh.md) (`SEISO_ALLOW_MESH=1`). Mesh plans map onto the same `distributed_*` / Accelerate knobs documented above.
