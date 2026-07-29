@@ -705,13 +705,13 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 
 Self-hosted Forge/CLI remain **free** and unchanged unless you opt in. Two optional surfaces:
 
-> **Not functional yet (Ark):** Real on-chain / Bark–Second Ark settlement is **not wired**. Quotes, faucet/simulated ledgers, and the pay sidecar smoke path exist; do not expect live Ark pay-in or treasury sweeps until `SEISO_ARK_BACKEND` ships a client. Use `SEISO_PAY_FAUCET=1` for local tests only.
+> **Not functional yet — do not use.** Opt-in **Ark marketplace** (`seiso pay`) and **Buzz mesh** (`seiso mesh`) are **not ready for real use**. Treat them as docs / scaffolding only: do not run them for production work, real funds, or trusted multi-node jobs. Live Ark pay-in / Bark–Second settlement is **not wired** (quotes + faucet/simulated ledgers exist for smoke tests). Use `SEISO_PAY_FAUCET=1` for local experiments only — never with real money or a public market.
 
 | Mode | Flag | Settlement | Protocol fee | Docs |
 |------|------|------------|--------------|------|
 | **Self-hosted** (default) | — | None | None | this README |
-| **Sats marketplace** | `SEISO_ALLOW_PAY=1` | Opt-in **Ark** (**not functional yet** — faucet/sim only; see note above) | Default **5%** on top of compute | [pay/marketplace.md](docs/pay/marketplace.md) |
-| **Buzz mesh** (experimental) | `SEISO_ALLOW_MESH=1` | Reciprocal peers; `SEISO_MESH_TOKEN` out-of-band | **None** | [training/mesh.md](docs/training/mesh.md) |
+| **Sats marketplace** | `SEISO_ALLOW_PAY=1` | Opt-in **Ark** (**not functional — do not use yet**; faucet/sim only) | Default **5%** on top of compute | [pay/marketplace.md](docs/pay/marketplace.md) |
+| **Buzz mesh** (experimental) | `SEISO_ALLOW_MESH=1` | Reciprocal peers (**not functional — do not use yet**); `SEISO_MESH_TOKEN` out-of-band | **None** | [training/mesh.md](docs/training/mesh.md) |
 
 ```bash
 # Marketplace operator (Forge stays on localhost; expose pay sidecar + TLS only)

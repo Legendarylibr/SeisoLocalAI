@@ -1,5 +1,7 @@
 # Experimental Buzz mesh training
 
+> **Not functional yet — do not use.** Mesh coordination is experimental scaffolding. Do not rely on it for real multi-node jobs until it is declared ready.
+
 Opt-in **shared / multi-node** coordination via a [Buzz](https://github.com/block/buzz) channel. Peers announce capacity, agree a plan, and apply Seiso’s existing Accelerate `distributed_*` knobs.
 
 **Not** a marketplace — **no** protocol fee. Requires `SEISO_ALLOW_MESH=1` and a shared out-of-band `SEISO_MESH_TOKEN` (never post the token to Buzz).

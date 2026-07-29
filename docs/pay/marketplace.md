@@ -1,5 +1,7 @@
 # Seiso sats marketplace (opt-in)
 
+> **Not functional yet — do not use.** This surface is scaffolding / docs only. Do not run it for production work or real funds. Live Ark settlement is not wired; faucet/sim only for local smoke tests.
+
 Remote **finetune / RL / inference** priced in sats. Self-hosted Seiso stays **free** and never pays a protocol fee.
 
 Requires explicit `SEISO_ALLOW_PAY=1`. Leave unset for normal local Forge/CLI use.
@@ -65,7 +67,7 @@ seiso train -c configs/smoke_train_cpu.yaml
 
 Marketplace funding and fee splits are designed around **Ark** addresses (operator + protocol treasury). This is **opt-in** with the pay flag — local Seiso never needs Ark.
 
-> **Status: not functional currently.** Live Ark pay-in / Bark–Second backend settlement is **not implemented**. Selecting `SEISO_ARK_BACKEND=bark|second|ark` errors until a client is bundled. Dev/smoke only: faucet (`SEISO_PAY_FAUCET=1`) or simulated ledger receipts.
+> **Status: not functional currently — do not use.** Live Ark pay-in / Bark–Second backend settlement is **not implemented**. Selecting `SEISO_ARK_BACKEND=bark|second|ark` errors until a client is bundled. Dev/smoke only: faucet (`SEISO_PAY_FAUCET=1`) or simulated ledger receipts. Do not run this marketplace for production or real funds.
 
 | Variable | Role |
 |----------|------|

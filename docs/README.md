@@ -39,8 +39,8 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Enable fused GPU kernels | [training/kernels.md](training/kernels.md) |
 | Read kernel shape / intensity estimates | [training/kernel-shape.md](training/kernel-shape.md) · `seiso-bench-kernels --roofline-only` |
 | Train on multiple GPUs | [training/multi-gpu.md](training/multi-gpu.md) |
-| Opt-in sats marketplace (remote finetune/RL/inference) | [pay/marketplace.md](pay/marketplace.md) |
-| Experimental Buzz mesh training | [training/mesh.md](training/mesh.md) |
+| Opt-in sats marketplace (**not functional — do not use yet**) | [pay/marketplace.md](pay/marketplace.md) |
+| Experimental Buzz mesh training (**not functional — do not use yet**) | [training/mesh.md](training/mesh.md) |
 | Deploy with HTTPS | [deployment/reverse-proxy.md](deployment/reverse-proxy.md) |
 | Fix a problem | [troubleshooting.md](troubleshooting.md) |
 | Run tests before a PR | [CI_LOCAL.md](CI_LOCAL.md) |
@@ -115,6 +115,8 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 4. [SECURITY.md](../SECURITY.md) — vulnerability reporting (GitHub private advisories)
 
 ### Path E — Opt-in marketplace & Buzz mesh
+
+> **Not functional yet — do not use.** Pay, mesh, and live Ark settlement are scaffolding only until wired.
 
 1. [pay/marketplace.md](pay/marketplace.md) — sats marketplace, Ark treasury/operator, faucet vs real settles
 2. [training/mesh.md](training/mesh.md) — Buzz-coordinated shared / multi-node training (no fee)
