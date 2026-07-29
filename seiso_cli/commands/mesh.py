@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any, Optional
+from typing import Annotated, Any
 
 import typer
 
@@ -50,14 +50,17 @@ def mesh_announce(
 def mesh_plan(
     channel: Annotated[str, typer.Option()],
     type_: Annotated[str, typer.Option("--type", help="finetune|slime")],
+    gpus_per_node: Annotated[
+        int,
+        typer.Option(
+            "--gpus-per-node",
+            help="Pin distributed_nproc_per_node on every worker (required)",
+        ),
+    ],
     nodes: Annotated[int, typer.Option(help="World size (machines)")] = 2,
     preset: Annotated[str | None, typer.Option()] = "smoke",
     master_addr: Annotated[str, typer.Option()] = "10.0.0.1",
     master_port: Annotated[int, typer.Option()] = 29500,
-    gpus_per_node: Annotated[
-        Optional[int],
-        typer.Option(help="Pin distributed_nproc_per_node on every worker"),
-    ] = None,
 ) -> None:
     from seiso.mesh.coordinator import build_plan
     from seiso.mesh.flags import require_mesh_allowed

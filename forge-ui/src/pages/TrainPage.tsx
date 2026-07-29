@@ -91,7 +91,6 @@ export function TrainPage() {
   const [distributedNproc, setDistributedNproc] = useState("");
   // Frontend surface is single-host only (nnodes=1). Multi-node / mesh is Buzz-agent-only.
   const distributedNodes = 1;
-  const distributedNodeRank = 0;
   const [distributedMasterAddr, setDistributedMasterAddr] = useState("127.0.0.1");
   const [distributedMasterPort, setDistributedMasterPort] = useState(29500);
   const [trainingSurface, setTrainingSurface] = useState<TrainingSurface | null>(null);

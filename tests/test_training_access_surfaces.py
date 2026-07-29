@@ -44,7 +44,18 @@ def test_frontend_refuses_multinode_config() -> None:
     )
 
 
-def test_agent_surface_allows_multinode_config() -> None:
+def test_agent_surface_allows_multinode_only_with_mesh_and_buzz(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("SEISO_ALLOW_MESH", raising=False)
+    monkeypatch.delenv("BUZZ_PRIVATE_KEY", raising=False)
+    with pytest.raises(ValueError, match="Buzz-agent/mesh-only"):
+        assert_surface_distributed_config(
+            TrainingSurface.AGENT,
+            {"distributed_num_nodes": 4},
+        )
+    monkeypatch.setenv("SEISO_ALLOW_MESH", "1")
+    monkeypatch.setenv("BUZZ_PRIVATE_KEY", "nsec1test")
     assert_surface_distributed_config(
         TrainingSurface.AGENT,
         {"distributed_num_nodes": 4},

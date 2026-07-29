@@ -54,7 +54,7 @@ def assert_surface_distributed_config(
     surface: TrainingSurface | str,
     config: dict[str, Any] | Any,
 ) -> None:
-    """Refuse multi-node on the frontend surface; agents may proceed to mesh."""
+    """Refuse multi-node on the frontend surface; agents need Buzz+mesh."""
     surface_val = (
         surface
         if isinstance(surface, TrainingSurface)
@@ -75,6 +75,24 @@ def assert_surface_distributed_config(
             "The Forge UI exposes full local training config with nodes=1 "
             "(including local multi-GPU DDP). Use a Buzz agent + `seiso mesh` "
             "for multi-node coordination."
+        )
+    if nnodes > FRONTEND_MAX_NODES:
+        require_multinode_mesh_agent(nnodes)
+
+
+def require_multinode_mesh_agent(nnodes: int) -> None:
+    """Fail closed: multi-node only under Buzz agent + SEISO_ALLOW_MESH."""
+    if nnodes <= FRONTEND_MAX_NODES:
+        return
+    from seiso.agent.surface import buzz_agent_present
+    from seiso.mesh.flags import mesh_allowed
+
+    if not mesh_allowed() or not buzz_agent_present():
+        raise ValueError(
+            "Multi-node training (distributed_num_nodes>1) is Buzz-agent/mesh-only. "
+            "Set SEISO_ALLOW_MESH=1 and BUZZ_PRIVATE_KEY (or BUZZ_AUTH_TAG), "
+            "or keep distributed_num_nodes=1 for local multi-GPU. "
+            "Not functional for real multi-node yet."
         )
 
 

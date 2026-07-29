@@ -66,6 +66,18 @@ def test_announce_plan_worker(mesh_env: Path) -> None:
     assert overlay["distributed_node_rank"] == 1
 
 
+def test_build_plan_requires_gpus_per_node(mesh_env: Path) -> None:
+    from seiso.mesh.coordinator import build_plan
+
+    with pytest.raises(ValueError, match="gpus_per_node is required"):
+        build_plan(
+            channel="ch-1",
+            job_type="finetune",
+            nodes=2,
+            master_addr="10.0.0.2",
+        )
+
+
 def test_mesh_token_mismatch_refused(mesh_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from seiso.mesh.coordinator import build_plan, worker_env
 
@@ -74,6 +86,7 @@ def test_mesh_token_mismatch_refused(mesh_env: Path, monkeypatch: pytest.MonkeyP
         job_type="finetune",
         nodes=2,
         master_addr="10.0.0.2",
+        gpus_per_node=1,
     )
     monkeypatch.setenv("SEISO_MESH_TOKEN", "other-token")
     with pytest.raises(RuntimeError, match="does not match"):
@@ -100,6 +113,7 @@ def test_build_plan_refuses_localhost_multinode(mesh_env: Path) -> None:
             job_type="finetune",
             nodes=2,
             master_addr="127.0.0.1",
+            gpus_per_node=1,
         )
 
 

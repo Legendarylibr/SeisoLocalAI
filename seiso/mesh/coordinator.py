@@ -118,6 +118,11 @@ def build_plan(
             "Mesh plans require nodes>=2 (single-node training uses Forge UI / "
             "`seiso train` without mesh)"
         )
+    if gpus_per_node is None:
+        raise ValueError(
+            "gpus_per_node is required so every worker pins the same "
+            "distributed_nproc_per_node (heterogeneous defaults disagree on world size)"
+        )
     token = mesh_token()
     if not token:
         raise RuntimeError(
@@ -132,8 +137,8 @@ def build_plan(
     jt = job_type.strip().lower()
     if jt not in {"finetune", "slime"}:
         raise ValueError("mesh v1 supports job_type finetune|slime only")
-    nproc = int(gpus_per_node) if gpus_per_node is not None else None
-    if nproc is not None and nproc < 1:
+    nproc = int(gpus_per_node)
+    if nproc < 1:
         raise ValueError("gpus_per_node must be >= 1")
     plan: dict[str, Any] = {
         "job_id": job_id,
@@ -143,6 +148,7 @@ def build_plan(
         # Buzz receipt "world_size" = nodes; Accelerate world_size = nproc * nodes.
         "world_size_nodes": int(nodes),
         "distributed_num_nodes": int(nodes),
+        "distributed_nproc_per_node": nproc,
         "distributed_master_addr": master_addr,
         "distributed_master_port": int(master_port),
         "distributed_strategy": "ddp",
@@ -160,8 +166,6 @@ def build_plan(
             for i in range(int(nodes))
         ],
     }
-    if nproc is not None:
-        plan["distributed_nproc_per_node"] = nproc
     path = safe_join(mesh_root(data_dir), "plans", f"{job_id}.json")
     path.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
     receipt = agent_receipt(
@@ -193,10 +197,7 @@ def load_plan(plan_path: str | Path, data_dir: Path | None = None) -> dict[str, 
     if not raw:
         raise FileNotFoundError(plan_path)
     name = Path(raw).name
-    if name.endswith(".json"):
-        job_key = name[: -len(".json")]
-    else:
-        job_key = name
+    job_key = name[: -len(".json")] if name.endswith(".json") else name
     if not job_key or job_key in {".", ".."}:
         raise FileNotFoundError(plan_path)
     try:
