@@ -30,6 +30,10 @@ export SEISO_INSTALL_DIR="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
 export SEISO_DATA_DIR="${SEISO_DATA_DIR:-$HOME/.seiso}"
 export SEISO_FORGE_URL="${SEISO_FORGE_URL:-http://127.0.0.1:8765}"
 
+# Optional remote marketplace (pay only for someone else's GPU — never for local)
+# export SEISO_PAY_URL="https://pay.example.com"
+# export SEISO_PAY_TOKEN="seiso_pay_…"   # after session create; never post to Buzz
+
 # Activate Seiso venv before every seiso command
 source "$SEISO_INSTALL_DIR/.venv/bin/activate"
 ```
@@ -38,7 +42,8 @@ Hard rules:
 
 - Prefer `start` / `seiso` / `scripts/doctor.sh` over raw `python …`.
 - Never delete `$SEISO_DATA_DIR` or its subdirs.
-- Never put Seiso `nsec` / HF tokens in Buzz messages; post `npub` + job receipts only.
+- Never put Seiso `nsec` / HF tokens / `SEISO_PAY_TOKEN` / `SEISO_MESH_TOKEN` in Buzz messages; post `npub` + job receipts only.
+- **Self-hosted is always free** (local Forge/CLI). Do not use the sats marketplace against localhost.
 - **Never automate Forge keygen.** Do not `POST /api/auth/register` with `generate`, drive the AuthPage, click **Download encrypted .txt**, read `seiso-ncryptsec-backup.txt`, collect backup passphrases, or scrape `sessionStorage` / DOM for `nsec1…` / `ncryptsec1…`. Onboarding backup is human-only.
 - Default Forge bind is localhost. Do not enable `SEISO_ALLOW_REMOTE` unless the operator asks.
 - Smoke configs first (`configs/*_smoke.*`) before long GPU jobs.
@@ -111,6 +116,15 @@ Post only the **npub** (public identity) to the channel if needed.
 **Prefer CLI for agent loops** (JSON-friendly, no CSRF). Prefer Forge API when the
 human is watching the UI / SSE.
 
+**Compute decision (do not charge local):**
+
+```
+local Forge/CLI healthy? → self-hosted (free, 0% fee)
+else SEISO_PAY_URL set? → marketplace quote → fund → job|/v1 (sats + protocol fee)
+else mesh peers enough + SEISO_ALLOW_MESH? → seiso mesh (experimental, no fee)
+else → ask human
+```
+
 | Goal | Command / API |
 |------|----------------|
 | Train (LoRA/QLoRA/slime) | `seiso train --config configs/…yaml` |
@@ -118,8 +132,12 @@ human is watching the UI / SSE.
 | Distill-RL | `seiso distill-rl --config …` |
 | RL quant | `seiso rl-quant --config …` |
 | Export / GGUF | `seiso export …` |
-| Chat smoke | `seiso chat …` or `POST $SEISO_FORGE_URL/v1/chat/completions` |
+| Chat smoke (local free) | `seiso chat …` or `POST $SEISO_FORGE_URL/v1/chat/completions` |
+| Remote marketplace | `seiso pay quote\|session\|job …` or `$SEISO_PAY_URL` (see [docs/pay/marketplace.md](../../../docs/pay/marketplace.md)) |
+| Mesh (experimental) | `seiso mesh announce\|plan\|worker` ([docs/training/mesh.md](../../../docs/training/mesh.md)) |
 | Provenance | `seiso provenance attest\|verify path/to/manifest.json` |
+
+Paid Buzz receipt fields: `compute_sats`, `protocol_fee_sats`, `total_sats`, `job_id` (default protocol fee 5% on top of compute).
 
 Smoke first:
 

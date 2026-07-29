@@ -1,0 +1,291 @@
+"""Marketplace job runner — wraps existing Seiso CLI trainers in a pay sandbox."""
+
+from __future__ import annotations
+
+import json
+import os
+import subprocess
+import sys
+import threading
+import time
+from pathlib import Path
+from typing import Any
+
+from seiso.pay.ark import settle_split
+from seiso.pay.flags import require_pay_allowed
+from seiso.pay.pricing import quote_job
+from seiso.pay.store import (
+    create_job,
+    escrow_hold,
+    escrow_release_refund,
+    load_job,
+    pay_root,
+    save_job,
+)
+from seiso.security import resolve_data_dir, safe_join
+
+_JOB_LOCK = threading.Lock()
+_RUNNING = False
+
+# Allowlisted job types → CLI argv builder
+_RL_TYPES = frozenset({"slime", "distill_rl", "rl_quant", "nemo_rl"})
+
+
+def _append_log(job: dict[str, Any], line: str, data_dir: Path | None) -> None:
+    tail = list(job.get("log_tail") or [])
+    tail.append(line.rstrip()[:2000])
+    job["log_tail"] = tail[-200:]
+    save_job(job, data_dir)
+
+
+def start_job(
+    *,
+    session_id: str,
+    job_type: str,
+    preset: str | None = None,
+    config: str | None = None,
+    data_dir: Path | None = None,
+    dry_run: bool = False,
+) -> dict[str, Any]:
+    """Quote, escrow, and run (or dry-run) a marketplace job."""
+    require_pay_allowed()
+    jt = job_type.strip().lower()
+    quote = quote_job(jt, preset=preset)
+    job = create_job(
+        session_id=session_id,
+        job_type=jt,
+        quote=quote,
+        preset=preset,
+        config_path=config,
+        data_dir=data_dir,
+    )
+    total = int(quote["total_sats"])
+    escrow_hold(
+        session_id,
+        total_sats=total,
+        data_dir=data_dir,
+        job_id=job["job_id"],
+    )
+    job["status"] = "running"
+    save_job(job, data_dir)
+
+    if dry_run:
+        return _complete_job(job, data_dir=data_dir, dry_run=True)
+
+    global _RUNNING
+    with _JOB_LOCK:
+        if _RUNNING:
+            job["status"] = "failed"
+            job["error"] = "another marketplace GPU job is already running"
+            save_job(job, data_dir)
+            escrow_release_refund(
+                session_id,
+                amount_sats=total,
+                data_dir=data_dir,
+                job_id=job["job_id"],
+            )
+            return job
+        _RUNNING = True
+
+    try:
+        return _execute_job(job, data_dir=data_dir)
+    finally:
+        with _JOB_LOCK:
+            _RUNNING = False
+
+
+def _artifact_dir(job: dict[str, Any], data_dir: Path | None) -> Path:
+    root = pay_root(data_dir)
+    path = safe_join(
+        root, "artifacts", str(job["session_id"]), str(job["job_id"])
+    )
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _cli_command(job: dict[str, Any], artifact: Path) -> list[str]:
+    jt = job["job_type"]
+    preset = (job.get("preset") or "smoke").strip().lower()
+    config = job.get("config_path")
+    py = sys.executable
+
+    if jt == "finetune":
+        cfg = config or "configs/smoke_train_cpu.yaml"
+        return [py, "-m", "seiso_cli.main", "train", "-c", cfg]
+
+    if jt == "slime":
+        cfg = config or "configs/smoke_train_cpu.yaml"
+        return [py, "-m", "seiso_cli.main", "slime", "-c", cfg]
+
+    if jt == "distill_rl":
+        args = [py, "-m", "seiso_cli.main", "distill-rl", "run", "--preset", preset]
+        return args
+
+    if jt == "rl_quant":
+        p = "minimal" if preset in {"smoke", "minimal", ""} else preset
+        return [py, "-m", "seiso_cli.main", "rl-quant", "run", "--preset", p]
+
+    if jt == "nemo_rl":
+        if not (os.environ.get("SEISO_NEMO_RL_ROOT") or "").strip():
+            raise RuntimeError(
+                "nemo_rl requires SEISO_NEMO_RL_ROOT on the operator host"
+            )
+        cfg = config or "configs/smoke_nemo_rl.yaml"
+        return [py, "-m", "seiso_cli.main", "nemo-rl", "-c", cfg]
+
+    raise ValueError(f"unsupported job type: {jt}")
+
+
+def _execute_job(job: dict[str, Any], *, data_dir: Path | None) -> dict[str, Any]:
+    artifact = _artifact_dir(job, data_dir)
+    job["artifact_dir"] = str(artifact)
+    save_job(job, data_dir)
+    try:
+        cmd = _cli_command(job, artifact)
+    except Exception as exc:
+        return _fail_job(job, str(exc), data_dir=data_dir)
+
+    _append_log(job, f"$ {' '.join(cmd)}", data_dir)
+    env = os.environ.copy()
+    # Isolate marketplace artifacts under pay sandbox when possible
+    env.setdefault("SEISO_DATA_DIR", str(resolve_data_dir(data_dir)))
+    try:
+        proc = subprocess.run(
+            cmd,
+            capture_output=True,
+            text=True,
+            env=env,
+            cwd=str(Path.cwd()),
+            check=False,
+            timeout=int(os.environ.get("SEISO_PAY_JOB_TIMEOUT_S") or 3600),
+        )
+    except subprocess.TimeoutExpired:
+        return _fail_job(job, "job wall-clock timeout", data_dir=data_dir)
+    except FileNotFoundError as exc:
+        return _fail_job(job, f"runner missing: {exc}", data_dir=data_dir)
+
+    if proc.stdout:
+        for line in proc.stdout.splitlines()[-50:]:
+            _append_log(job, line, data_dir)
+    if proc.stderr:
+        for line in proc.stderr.splitlines()[-50:]:
+            _append_log(job, line, data_dir)
+
+    if proc.returncode != 0:
+        return _fail_job(
+            job,
+            f"exit {proc.returncode}",
+            data_dir=data_dir,
+            refund=True,
+        )
+
+    manifest = {
+        "job_id": job["job_id"],
+        "job_type": job["job_type"],
+        "artifact_dir": str(artifact),
+        "quote": job.get("quote"),
+    }
+    (artifact / "manifest.json").write_text(
+        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
+    )
+    return _complete_job(job, data_dir=data_dir, dry_run=False)
+
+
+def _complete_job(
+    job: dict[str, Any], *, data_dir: Path | None, dry_run: bool
+) -> dict[str, Any]:
+    quote = job["quote"]
+    receipt = settle_split(
+        compute_sats=int(quote["compute_sats"]),
+        protocol_fee_sats=int(quote["protocol_fee_sats"]),
+        job_id=job["job_id"],
+        session_id=job["session_id"],
+    )
+    # Escrow already removed total from balance; record spend split on session.
+    from seiso.pay.store import append_ledger, record_session_spend
+
+    record_session_spend(
+        job["session_id"],
+        compute_sats=int(quote["compute_sats"]),
+        protocol_fee_sats=int(quote["protocol_fee_sats"]),
+        data_dir=data_dir,
+    )
+    append_ledger(
+        {
+            "event": "job_settle",
+            "job_id": job["job_id"],
+            "session_id": job["session_id"],
+            "settlement": receipt.as_dict(),
+            "dry_run": dry_run,
+            "ts": time.time(),
+        },
+        data_dir=data_dir,
+    )
+    job["status"] = "completed"
+    job["settlement"] = receipt.as_dict()
+    if dry_run:
+        job["artifact_dir"] = job.get("artifact_dir") or str(
+            _artifact_dir(job, data_dir)
+        )
+        _append_log(job, "dry_run complete (no trainer invoked)", data_dir)
+    save_job(job, data_dir)
+    return job
+
+
+def _fail_job(
+    job: dict[str, Any],
+    error: str,
+    *,
+    data_dir: Path | None,
+    refund: bool = True,
+) -> dict[str, Any]:
+    job["status"] = "failed"
+    job["error"] = error
+    _append_log(job, f"ERROR: {error}", data_dir)
+    if refund:
+        total = int((job.get("quote") or {}).get("total_sats") or 0)
+        if total:
+            escrow_release_refund(
+                job["session_id"],
+                amount_sats=total,
+                data_dir=data_dir,
+                job_id=job["job_id"],
+            )
+    save_job(job, data_dir)
+    return job
+
+
+def cancel_job(job_id: str, *, data_dir: Path | None = None) -> dict[str, Any]:
+    require_pay_allowed()
+    job = load_job(job_id, data_dir)
+    if job.get("status") in {"completed", "failed", "cancelled"}:
+        return job
+    total = int((job.get("quote") or {}).get("total_sats") or 0)
+    prev = job.get("status")
+    job["status"] = "cancelled"
+    job["error"] = "cancelled by client"
+    if total and prev in {"pending", "running"}:
+        escrow_release_refund(
+            job["session_id"],
+            amount_sats=total,
+            data_dir=data_dir,
+            job_id=job_id,
+        )
+    save_job(job, data_dir)
+    return job
+
+
+def job_receipt(job: dict[str, Any]) -> dict[str, Any]:
+    q = job.get("quote") or {}
+    return {
+        "mode": "paid",
+        "type": job.get("job_type"),
+        "status": job.get("status"),
+        "job_id": job.get("job_id"),
+        "compute_sats": q.get("compute_sats"),
+        "protocol_fee_sats": q.get("protocol_fee_sats"),
+        "total_sats": q.get("total_sats"),
+        "artifacts": job.get("artifact_dir"),
+        "settlement": job.get("settlement"),
+        "error": job.get("error"),
+    }

@@ -311,6 +311,37 @@ See [provenance-nostr.md](provenance-nostr.md) for Forge UI settings, auto-attes
 (`SEISO_NOSTR_ATTEST=1`), privacy limits / non-goals, and how this relates to
 `seiso compress manifest-verify`.
 
+## `seiso pay` (opt-in marketplace)
+
+Remote sats marketplace for inference / finetune / RL. **Self-hosted stays free** —
+do not enable this for local-only use. Requires `SEISO_ALLOW_PAY=1`.
+
+```bash
+export SEISO_ALLOW_PAY=1
+export SEISO_PAY_FAUCET=1   # dev
+seiso pay quote --type finetune --preset smoke
+seiso pay session create --sats 20000 --scopes inference,finetune,rl
+seiso pay job start --type finetune --preset smoke --dry-run
+seiso pay serve --host 127.0.0.1 --port 8787   # operator sidecar
+```
+
+Default protocol fee is 5% (`SEISO_PROTOCOL_FEE_BPS=500`) added on top of compute.
+See [pay/marketplace.md](pay/marketplace.md).
+
+## `seiso mesh` (experimental)
+
+Buzz-coordinated multi-node training. Opt-in (`SEISO_ALLOW_MESH=1`); no protocol fee.
+
+```bash
+export SEISO_ALLOW_MESH=1
+export SEISO_MESH_TOKEN=…   # out-of-band; never post to Buzz
+seiso mesh announce --channel "$CHANNEL" --gpus 2
+seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2
+seiso mesh worker --plan plan.json --rank 0
+```
+
+See [training/mesh.md](training/mesh.md).
+
 ## External Smart Router
 
 The router backend service now lives in [Legendarylibr/SeisoModelRouter](https://github.com/Legendarylibr/SeisoModelRouter). Run that service separately when you want multi-specialist routing.
