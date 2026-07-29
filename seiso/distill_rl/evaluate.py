@@ -232,11 +232,12 @@ def _format_eval_prompt(tokenizer, prompt: str, *, use_chat_template: bool) -> s
     apply_template = getattr(tokenizer, "apply_chat_template", None)
     if apply_template is None:
         return prompt
-    return apply_template(
+    formatted = apply_template(
         [{"role": "user", "content": prompt}],
         tokenize=False,
         add_generation_prompt=True,
     )
+    return str(formatted)
 
 
 def _sequence_logprob(
