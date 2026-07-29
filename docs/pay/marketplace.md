@@ -65,19 +65,21 @@ seiso train -c configs/smoke_train_cpu.yaml
 
 Marketplace funding and fee splits are designed around **Ark** addresses (operator + protocol treasury). This is **opt-in** with the pay flag — local Seiso never needs Ark.
 
+> **Status: not functional currently.** Live Ark pay-in / Bark–Second backend settlement is **not implemented**. Selecting `SEISO_ARK_BACKEND=bark|second|ark` errors until a client is bundled. Dev/smoke only: faucet (`SEISO_PAY_FAUCET=1`) or simulated ledger receipts.
+
 | Variable | Role |
 |----------|------|
 | `SEISO_OPERATOR_ARK` | Operator receive address (buyer funding destination) |
 | `SEISO_PROTOCOL_TREASURY_ARK` | Protocol fee destination; **required** for real settles (fail-closed) |
 | `SEISO_ARK_NETWORK` | Default `signet` (or mainnet when you mean it) |
-| `SEISO_ARK_BACKEND` | Empty / unset = simulated or faucet settlement; `bark` / `second` reserved for a future SDK wire |
+| `SEISO_ARK_BACKEND` | Empty / unset = simulated or faucet; `bark` / `second` **not functional yet** |
 | `SEISO_PAY_FAUCET` | Dev faucet — credits sessions without chain IO; **never** enable publicly |
 
 Behavior today (`seiso/pay/ark.py`):
 
 1. **Faucet / simulated** — ledger-shaped receipts with operator + protocol split when faucet is on or treasury is set for simulation.
 2. **Fail closed** — without `SEISO_PROTOCOL_TREASURY_ARK` and without faucet, paid settles refuse.
-3. **`SEISO_ARK_BACKEND=bark|second|ark`** — selected but not bundled yet; raises a clear error until the Bark/Second client is installed. Prefer faucet for tests.
+3. **`SEISO_ARK_BACKEND=bark|second|ark`** — **not functional currently**; raises a clear error until the Bark/Second client is installed. Prefer faucet for tests.
 
 Quotes always show the fee split (`payee_operator_sats`, `payee_protocol_sats`).
 

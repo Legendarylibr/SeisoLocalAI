@@ -705,10 +705,12 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 
 Self-hosted Forge/CLI remain **free** and unchanged unless you opt in. Two optional surfaces:
 
+> **Not functional yet (Ark):** Real on-chain / Bark–Second Ark settlement is **not wired**. Quotes, faucet/simulated ledgers, and the pay sidecar smoke path exist; do not expect live Ark pay-in or treasury sweeps until `SEISO_ARK_BACKEND` ships a client. Use `SEISO_PAY_FAUCET=1` for local tests only.
+
 | Mode | Flag | Settlement | Protocol fee | Docs |
 |------|------|------------|--------------|------|
 | **Self-hosted** (default) | — | None | None | this README |
-| **Sats marketplace** | `SEISO_ALLOW_PAY=1` | Opt-in **Ark** (`SEISO_OPERATOR_ARK` / `SEISO_PROTOCOL_TREASURY_ARK`; faucet for dev) | Default **5%** on top of compute | [pay/marketplace.md](docs/pay/marketplace.md) |
+| **Sats marketplace** | `SEISO_ALLOW_PAY=1` | Opt-in **Ark** (**not functional yet** — faucet/sim only; see note above) | Default **5%** on top of compute | [pay/marketplace.md](docs/pay/marketplace.md) |
 | **Buzz mesh** (experimental) | `SEISO_ALLOW_MESH=1` | Reciprocal peers; `SEISO_MESH_TOKEN` out-of-band | **None** | [training/mesh.md](docs/training/mesh.md) |
 
 ```bash
@@ -728,7 +730,7 @@ seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2
 
 Buzz agents should follow [`.agents/skills/seiso-orchestrate/`](.agents/skills/seiso-orchestrate/SKILL.md): prefer local free compute → mesh peers → paid marketplace → ask a human. Post receipts (job ids, fee split, mesh plan ids) to the channel; never post `SEISO_PAY_TOKEN`, `SEISO_MESH_TOKEN`, or `nsec`.
 
-`SEISO_ARK_BACKEND=bark|second` is reserved for a future Bark/Second client wire; until then use faucet/simulated settlement or leave the backend unset.
+`SEISO_ARK_BACKEND=bark|second` is **not functional currently** (reserved for a future Bark/Second client wire). Until then use faucet/simulated settlement or leave the backend unset.
 
 ---
 ## RL Stack

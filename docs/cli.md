@@ -318,7 +318,7 @@ do not enable this for local-only use. Requires `SEISO_ALLOW_PAY=1`.
 
 Settlement uses **opt-in Ark** addresses (`SEISO_OPERATOR_ARK`, `SEISO_PROTOCOL_TREASURY_ARK`).
 Without a treasury Ark and without `SEISO_PAY_FAUCET=1`, paid settles fail closed.
-`SEISO_ARK_BACKEND=bark|second` is reserved for a future client wire — leave unset or use faucet for smoke tests.
+**Ark chain settlement is not functional currently** — `SEISO_ARK_BACKEND=bark|second` is reserved for a future client wire; leave unset or use faucet for smoke tests.
 
 ```bash
 export SEISO_ALLOW_PAY=1
