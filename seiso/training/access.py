@@ -67,14 +67,19 @@ def assert_surface_distributed_config(
     else:
         cfg = {
             "distributed_num_nodes": getattr(config, "distributed_num_nodes", 1),
+            "nemo_rl_num_nodes": getattr(config, "nemo_rl_num_nodes", 1),
         }
-    nnodes = int(cfg.get("distributed_num_nodes", 1) or 1)
+    # Cover Accelerate + NeMo RL cluster node counts (UI pins both to 1).
+    nnodes = max(
+        int(cfg.get("distributed_num_nodes", 1) or 1),
+        int(cfg.get("nemo_rl_num_nodes", 1) or 1),
+    )
     if surface_val == TrainingSurface.FRONTEND and nnodes > FRONTEND_MAX_NODES:
         raise ValueError(
-            "Multi-node training (distributed_num_nodes>1) is Buzz-agent/mesh-only. "
-            "The Forge UI exposes full local training config with nodes=1 "
-            "(including local multi-GPU DDP). Use a Buzz agent + `seiso mesh` "
-            "for multi-node coordination."
+            "Multi-node training (distributed_num_nodes>1 or nemo_rl_num_nodes>1) "
+            "is Buzz-agent/mesh-only. The Forge UI exposes full local training "
+            "config with nodes=1 (including local multi-GPU DDP). Use a Buzz "
+            "agent + `seiso mesh` for multi-node coordination."
         )
     if nnodes > FRONTEND_MAX_NODES:
         require_multinode_mesh_agent(nnodes)

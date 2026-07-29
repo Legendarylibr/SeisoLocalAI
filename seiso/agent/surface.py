@@ -97,7 +97,12 @@ def resolve_training_surface(*, explicit: str | None = None) -> TrainingSurface:
 
 
 def require_buzz_agent(*, feature: str = "Mesh") -> None:
-    """Refuse features that must only run under a Buzz agent identity marker."""
+    """Refuse features that need a Buzz agent identity marker.
+
+    Note: mesh *crypto* (plan/announce/heartbeat) requires ``require_buzz_nsec`` —
+    a managed ``BUZZ_AUTH_TAG`` alone cannot BIP-340-sign. Prefer
+    ``require_buzz_nsec`` for any signing path.
+    """
     key = (os.environ.get("BUZZ_PRIVATE_KEY") or "").strip()
     if key:
         if _valid_buzz_private_key(key):
@@ -115,12 +120,14 @@ def require_buzz_agent(*, feature: str = "Mesh") -> None:
         raise RuntimeError(
             f"{feature} requires a non-trivial BUZZ_AUTH_TAG from a managed "
             f"Buzz Desktop agent session (min {_MIN_AUTH_TAG_LEN} chars). "
-            "A trivial tag like '1'/'true' is refused."
+            "A trivial tag like '1'/'true' is refused. "
+            "Mesh signing still needs BUZZ_PRIVATE_KEY (nsec)."
         )
     raise RuntimeError(
         f"{feature} is Buzz-agent-only. "
         "Configure a valid BUZZ_PRIVATE_KEY (nsec) or a managed BUZZ_AUTH_TAG, "
         "and opt in with SEISO_ALLOW_MESH=1. "
         "Seiso does not NIP-98-auth to the Buzz relay; peer binding uses "
-        "SEISO_MESH_TOKEN. Forge UI cannot start mesh or multi-node plans."
+        "SEISO_MESH_TOKEN + Nostr signatures. Forge UI cannot start mesh or "
+        "multi-node plans."
     )

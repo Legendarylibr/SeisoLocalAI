@@ -46,9 +46,14 @@ def test_frontend_refuses_multinode_config() -> None:
             FRONTEND_SURFACE,
             {"distributed_num_nodes": 2},
         )
+    with pytest.raises(ValueError, match="Buzz-agent/mesh-only|nemo_rl"):
+        assert_surface_distributed_config(
+            FRONTEND_SURFACE,
+            {"distributed_num_nodes": 1, "nemo_rl_num_nodes": 2},
+        )
     assert_surface_distributed_config(
         FRONTEND_SURFACE,
-        {"distributed_num_nodes": 1, "multi_gpu": True},
+        {"distributed_num_nodes": 1, "multi_gpu": True, "nemo_rl_num_nodes": 1},
     )
 
 

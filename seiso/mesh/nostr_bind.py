@@ -135,8 +135,11 @@ def verify_mesh_plan_nostr(plan: dict[str, Any]) -> None:
     pubkey = str(event.get("pubkey") or "").lower()
     if pubkey != str(nostr.get("pubkey") or "").lower():
         raise RuntimeError("Mesh plan nostr.pubkey does not match event.pubkey")
-    event_id = str(nostr.get("event_id") or "").lower()
-    if event_id and event_id != str(event.get("id") or "").lower():
+    event_id = str(nostr.get("event_id") or "").strip().lower()
+    signed_id = str(event.get("id") or "").strip().lower()
+    if not event_id:
+        raise RuntimeError("Mesh plan is missing nostr.event_id")
+    if event_id != signed_id:
         raise RuntimeError("Mesh plan nostr.event_id does not match signed event id")
     trusted = _trusted_pubkey_hexes()
     if trusted and pubkey not in trusted:

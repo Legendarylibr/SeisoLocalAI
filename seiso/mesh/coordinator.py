@@ -304,7 +304,12 @@ def worker_train_config_overlay(plan: dict[str, Any], *, node_rank: int) -> dict
 
 
 def buzz_heartbeat(plan: dict[str, Any], *, node_rank: int, status: str) -> dict[str, Any]:
-    """Signed heartbeat for relay; receipts are local pointers (same event)."""
+    """Signed heartbeat for relay; receipts are local pointers (same event).
+
+    Fail closed: plan must pass mesh allow + Nostr/HMAC bindings before signing.
+    """
+    require_mesh_allowed()
+    _verify_plan_bindings(plan)
     pair = require_buzz_nsec(feature="Mesh heartbeat")
     nostr = sign_mesh_heartbeat(
         plan=plan, node_rank=node_rank, status=status, pair=pair

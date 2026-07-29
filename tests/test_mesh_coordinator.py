@@ -111,6 +111,38 @@ def test_event_id_wrapper_mismatch_refused(mesh_env: Path) -> None:
         worker_env(plan, node_rank=0)
 
 
+def test_missing_event_id_refused(mesh_env: Path) -> None:
+    from seiso.mesh.coordinator import build_plan, worker_env
+
+    plan_out = build_plan(
+        channel="ch-1",
+        job_type="finetune",
+        nodes=2,
+        master_addr="10.0.0.2",
+        gpus_per_node=1,
+    )
+    plan = plan_out["plan"]
+    plan["nostr"]["event_id"] = ""
+    with pytest.raises(RuntimeError, match="missing nostr.event_id"):
+        worker_env(plan, node_rank=0)
+
+
+def test_heartbeat_requires_verified_plan(mesh_env: Path) -> None:
+    from seiso.mesh.coordinator import build_plan, buzz_heartbeat
+
+    plan_out = build_plan(
+        channel="ch-1",
+        job_type="finetune",
+        nodes=2,
+        master_addr="10.0.0.2",
+        gpus_per_node=1,
+    )
+    plan = dict(plan_out["plan"])
+    plan["distributed_num_nodes"] = 99
+    with pytest.raises(RuntimeError, match="tamper|Nostr|signature|match"):
+        buzz_heartbeat(plan, node_rank=0, status="joining")
+
+
 def test_tampered_plan_nostr_refused(mesh_env: Path) -> None:
     from seiso.mesh.coordinator import build_plan, worker_env
 
