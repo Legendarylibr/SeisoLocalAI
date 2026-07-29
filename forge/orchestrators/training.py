@@ -109,7 +109,20 @@ class TrainingOrchestrator(Orchestrator):
         )
 
         layout = detect_training_layout()
+        # Defense in depth: Forge jobs are frontend-surface (no multi-node mesh).
+        from seiso.training.access import (
+            FRONTEND_SURFACE,
+            assert_surface_distributed_config,
+        )
+
+        assert_surface_distributed_config(FRONTEND_SURFACE, config)
         distributed_plan = resolve_distributed_plan(config, layout)
+        if distributed_plan.nnodes > 1:
+            raise ValueError(
+                "Forge refuses multi-node Accelerate launches (nnodes>1). "
+                "Use local multi-GPU (nnodes=1) from the UI, or a Buzz agent + "
+                "`seiso mesh` for multi-node (experimental, not functional yet)."
+            )
         self._emit_log(job_id, f"Starting training: {config.model_id}")
         if resolved := config.extra.get("resolved_model_path"):
             self._emit_log(job_id, f"Using cached weights: {resolved}")

@@ -1,9 +1,9 @@
-"""Experimental Buzz mesh CLI (SEISO_ALLOW_MESH=1)."""
+"""Experimental Buzz-agent mesh CLI (SEISO_ALLOW_MESH=1 + Buzz agent identity)."""
 
 from __future__ import annotations
 
 import json
-from typing import Annotated, Any
+from typing import Annotated, Any, Optional
 
 import typer
 
@@ -11,7 +11,11 @@ from seiso_cli.console import console
 
 mesh_app = typer.Typer(
     name="mesh",
-    help="Experimental Buzz-coordinated multi-node mesh (opt-in).",
+    help=(
+        "Experimental Buzz-agent multi-node mesh (opt-in). "
+        "Requires SEISO_ALLOW_MESH=1 and BUZZ_PRIVATE_KEY. "
+        "Not available from the Forge UI. Not functional for real multi-node yet."
+    ),
     no_args_is_help=True,
 )
 
@@ -48,8 +52,12 @@ def mesh_plan(
     type_: Annotated[str, typer.Option("--type", help="finetune|slime")],
     nodes: Annotated[int, typer.Option(help="World size (machines)")] = 2,
     preset: Annotated[str | None, typer.Option()] = "smoke",
-    master_addr: Annotated[str, typer.Option()] = "127.0.0.1",
+    master_addr: Annotated[str, typer.Option()] = "10.0.0.1",
     master_port: Annotated[int, typer.Option()] = 29500,
+    gpus_per_node: Annotated[
+        Optional[int],
+        typer.Option(help="Pin distributed_nproc_per_node on every worker"),
+    ] = None,
 ) -> None:
     from seiso.mesh.coordinator import build_plan
     from seiso.mesh.flags import require_mesh_allowed
@@ -63,6 +71,7 @@ def mesh_plan(
             preset=preset,
             master_addr=master_addr,
             master_port=master_port,
+            gpus_per_node=gpus_per_node,
         )
     except Exception as exc:
         console.print(f"[red]{exc}[/]")
@@ -72,8 +81,17 @@ def mesh_plan(
 
 @mesh_app.command("worker")
 def mesh_worker(
-    plan: Annotated[str, typer.Option(help="Plan JSON path or job_id")],
-    rank: Annotated[int, typer.Option(help="This node's rank")] = 0,
+    plan: Annotated[str, typer.Option(help="Plan job_id (sandboxed under mesh/plans/)")],
+    rank: Annotated[
+        int,
+        typer.Option(
+            "--rank",
+            help=(
+                "This node's rank (required; omitting used to default to 0 and "
+                "collide every machine onto machine_rank=0)"
+            ),
+        ),
+    ],
     print_env: Annotated[
         bool, typer.Option("--print-env", help="Print env/config only")
     ] = True,
@@ -99,9 +117,13 @@ def mesh_worker(
         "env": env,
         "train_config_overlay": overlay,
         "buzz_receipt": buzz_heartbeat(p, node_rank=rank, status="joining"),
+        "agent_receipt": buzz_heartbeat(p, node_rank=rank, status="joining"),
+        "surface": "agent",
         "next": (
-            "Apply overlay to your train YAML / accelerate launch; "
-            "post buzz_receipt to the channel. Mesh does not charge protocol fees."
+            "Apply train_config_overlay to your train YAML / Accelerate launch "
+            "(Seiso honors the overlay, not env-only NNODES). "
+            "Post buzz_receipt to the channel. Mesh does not charge protocol fees. "
+            "Not functional for real multi-node yet."
         ),
     }
     if print_env:
@@ -112,7 +134,7 @@ def mesh_worker(
 
 @mesh_app.command("status")
 def mesh_status(
-    plan: Annotated[str, typer.Option(help="Plan JSON path or job_id")],
+    plan: Annotated[str, typer.Option(help="Plan job_id")],
 ) -> None:
     from seiso.mesh.coordinator import load_plan
     from seiso.mesh.flags import require_mesh_allowed

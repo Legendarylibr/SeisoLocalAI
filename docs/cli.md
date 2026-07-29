@@ -348,18 +348,21 @@ See [pay/marketplace.md](pay/marketplace.md).
 
 > **Not functional yet — do not use.** Experimental scaffolding — do not rely on it for real multi-node jobs yet.
 
-Buzz-coordinated multi-node / shared training. Opt-in (`SEISO_ALLOW_MESH=1`); **no** protocol fee.
+Buzz-**agent**-only multi-node / shared training. Opt-in (`SEISO_ALLOW_MESH=1` +
+`BUZZ_PRIVATE_KEY`); **no** protocol fee. Forge UI keeps full local training
+config (`nnodes=1`) and refuses mesh — see `GET /api/training/surface`.
 Share `SEISO_MESH_TOKEN` out-of-band (never post to Buzz). Post announce/plan/worker receipts to the channel.
 
 ```bash
 export SEISO_ALLOW_MESH=1
 export SEISO_MESH_TOKEN=…   # out-of-band; never post to Buzz
+export BUZZ_PRIVATE_KEY=nsec1…   # required Buzz agent identity
 seiso mesh announce --channel "$CHANNEL" --gpus 2
-seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2
-seiso mesh worker --plan plan.json --rank 0
+seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2 --master-addr 10.0.0.1 --gpus-per-node 2
+seiso mesh worker --plan "$JOB_ID" --rank 0   # --rank required
 ```
 
-Prefer local → mesh → paid marketplace when orchestrating from Buzz
+Prefer local → mesh → paid marketplace when orchestrating from a Buzz agent
 ([seiso-orchestrate skill](../.agents/skills/seiso-orchestrate/SKILL.md)).
 See [training/mesh.md](training/mesh.md).
 
