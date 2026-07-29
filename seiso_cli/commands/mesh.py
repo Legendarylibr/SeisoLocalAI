@@ -1,4 +1,4 @@
-"""Experimental Buzz mesh CLI (SEISO_ALLOW_MESH=1)."""
+"""Experimental Buzz-agent mesh CLI (SEISO_ALLOW_MESH=1 + Buzz agent identity)."""
 
 from __future__ import annotations
 
@@ -11,7 +11,11 @@ from seiso_cli.console import console
 
 mesh_app = typer.Typer(
     name="mesh",
-    help="Experimental Buzz-coordinated multi-node mesh (opt-in).",
+    help=(
+        "Experimental Buzz-agent multi-node mesh (opt-in). "
+        "Requires SEISO_ALLOW_MESH=1 and BUZZ_PRIVATE_KEY. "
+        "Not available from the Forge UI. Not functional for real multi-node yet."
+    ),
     no_args_is_help=True,
 )
 
@@ -46,9 +50,16 @@ def mesh_announce(
 def mesh_plan(
     channel: Annotated[str, typer.Option()],
     type_: Annotated[str, typer.Option("--type", help="finetune|slime")],
+    gpus_per_node: Annotated[
+        int,
+        typer.Option(
+            "--gpus-per-node",
+            help="Pin distributed_nproc_per_node on every worker (required)",
+        ),
+    ],
     nodes: Annotated[int, typer.Option(help="World size (machines)")] = 2,
     preset: Annotated[str | None, typer.Option()] = "smoke",
-    master_addr: Annotated[str, typer.Option()] = "127.0.0.1",
+    master_addr: Annotated[str, typer.Option()] = "10.0.0.1",
     master_port: Annotated[int, typer.Option()] = 29500,
 ) -> None:
     from seiso.mesh.coordinator import build_plan
@@ -63,20 +74,38 @@ def mesh_plan(
             preset=preset,
             master_addr=master_addr,
             master_port=master_port,
+            gpus_per_node=gpus_per_node,
         )
     except Exception as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
-    _print_json(out)
+    # Relay-ready signed event + local pointers (never token_fingerprint).
+    safe = {
+        "plan_public": out.get("plan_public"),
+        "plan_path": out.get("plan_path"),
+        "buzz_receipt": out.get("buzz_receipt"),
+        "agent_receipt": out.get("agent_receipt"),
+        "nostr_event": out.get("nostr_event"),
+        "note": out.get("note"),
+        "job_id": (out.get("plan") or {}).get("job_id"),
+    }
+    _print_json(safe)
 
 
 @mesh_app.command("worker")
 def mesh_worker(
-    plan: Annotated[str, typer.Option(help="Plan JSON path or job_id")],
-    rank: Annotated[int, typer.Option(help="This node's rank")] = 0,
-    print_env: Annotated[
-        bool, typer.Option("--print-env", help="Print env/config only")
-    ] = True,
+    plan: Annotated[str, typer.Option(help="Plan job_id (sandboxed under mesh/plans/)")],
+    rank: Annotated[
+        int,
+        typer.Option(
+            "--rank",
+            help=(
+                "This node's rank (required; omitting used to default to 0 and "
+                "collide every machine onto machine_rank=0)"
+            ),
+        ),
+    ],
+    print_env: Annotated[bool, typer.Option("--print-env", help="Print env/config only")] = True,
 ) -> None:
     """Prepare worker env for Accelerate multi-node (does not auto-launch GPU job)."""
     from seiso.mesh.coordinator import (
@@ -92,34 +121,43 @@ def mesh_worker(
         p = load_plan(plan)
         env = worker_env(p, node_rank=rank)
         overlay = worker_train_config_overlay(p, node_rank=rank)
+        heartbeat = buzz_heartbeat(p, node_rank=rank, status="joining")
     except Exception as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
     out = {
         "env": env,
         "train_config_overlay": overlay,
-        "buzz_receipt": buzz_heartbeat(p, node_rank=rank, status="joining"),
+        "buzz_receipt": heartbeat["buzz_receipt"],
+        "agent_receipt": heartbeat["agent_receipt"],
+        "nostr_event": heartbeat["nostr_event"],
+        "note": heartbeat["note"],
+        "surface": "agent",
         "next": (
-            "Apply overlay to your train YAML / accelerate launch; "
-            "post buzz_receipt to the channel. Mesh does not charge protocol fees."
+            "Apply train_config_overlay to your train YAML / Accelerate launch "
+            "(Seiso honors the overlay, not env-only NNODES). "
+            "Relay only the top-level signed nostr_event: "
+            "`jq -c .nostr_event <this.json> | buzz messages send --channel $CHANNEL --content -` "
+            "(Buzz kind-9 embed; do not --kind 31251). "
+            "Unsigned receipts are local pointers, not channel authority. "
+            "Mesh does not charge protocol fees. Not functional for real multi-node yet."
         ),
     }
-    if print_env:
-        _print_json(out)
-    else:
-        _print_json(out)
+    _print_json(out)
 
 
 @mesh_app.command("status")
 def mesh_status(
-    plan: Annotated[str, typer.Option(help="Plan JSON path or job_id")],
+    plan: Annotated[str, typer.Option(help="Plan job_id")],
 ) -> None:
     from seiso.mesh.coordinator import load_plan
     from seiso.mesh.flags import require_mesh_allowed
 
     require_mesh_allowed()
     try:
-        _print_json(load_plan(plan))
+        from seiso.agent.receipts import channel_safe_plan_view
+
+        _print_json(channel_safe_plan_view(load_plan(plan)))
     except Exception as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc

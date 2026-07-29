@@ -309,14 +309,15 @@ class SeisoTrainer:
             from seiso.training.metrics import is_main_process
 
             def _ddp_barrier() -> None:
-                """Sync ranks so non-main teardown cannot race main's final save."""
-                try:
-                    import torch.distributed as dist
+                """Sync ranks so non-main teardown cannot race main's final save.
 
-                    if dist.is_available() and dist.is_initialized():
-                        dist.barrier()
-                except Exception:
-                    logger.debug("DDP barrier skipped", exc_info=True)
+                Fail closed when the process group is initialized — swallowing
+                all exceptions hid teardown races the barrier exists to prevent.
+                """
+                import torch.distributed as dist
+
+                if dist.is_available() and dist.is_initialized():
+                    dist.barrier()
 
             _ddp_barrier()
             out = cfg.output_dir

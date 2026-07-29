@@ -230,6 +230,11 @@ def resolve_distributed_plan(
     nproc = getattr(config, "distributed_nproc_per_node", None)
     nproc_per_node = int(nproc or max(layout.device_count, 1))
 
+    if nnodes > 1:
+        from seiso.training.access import require_multinode_mesh_agent
+
+        require_multinode_mesh_agent(nnodes)
+
     if strategy == "none" or not requested:
         return DistributedPlan(
             enabled=False,

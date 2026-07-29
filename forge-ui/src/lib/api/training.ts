@@ -8,9 +8,12 @@ import type {
   TrainingJob,
   TrainingMetricsPayload,
   TrainingRecommendations,
+  TrainingSurface,
 } from "./types";
 
 export const trainingApi = {
+  getTrainingSurface: () =>
+    cachedGet<TrainingSurface>("/training/surface", 60_000),
   startTraining: (
     config: Record<string, unknown>,
     multi_gpu = false,

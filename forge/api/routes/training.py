@@ -53,11 +53,30 @@ from seiso.models.hf_env import configure_hf_hub_cache
 from seiso.models.hub_quant import native_quant_training_block_reason
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
 from seiso.security import SecurityError, safe_join
+from seiso.training.access import (
+    FRONTEND_SURFACE,
+    assert_surface_distributed_config,
+    frontend_training_surface,
+)
 from seiso.training.config import DatasetFormat, TrainConfig
 from seiso.training.recommendations import recommend_training_config
 
 router = APIRouter(prefix="/training", tags=["training"])
 logger = logging.getLogger(__name__)
+
+
+@router.get("/surface")
+async def training_surface(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> dict:
+    """Frontend training surface: full local config exposed; mesh/multi-node off.
+
+    The Forge UI must keep showing proper training settings (method, quant,
+    local multi-GPU DDP, hyperparams). Multi-node / mesh is Buzz-agent-only.
+    """
+    _ = user_id
+    return frontend_training_surface()
+
 
 
 def _resolve_dataset_for_user(
@@ -313,6 +332,12 @@ async def start_training(
         assert_user_training_config(settings.data_dir, user_id, training_config)
     except SecurityError as exc:
         raise_forbidden(exc)
+
+    # Forge HTTP is the frontend surface: full local training config, no mesh.
+    try:
+        assert_surface_distributed_config(FRONTEND_SURFACE, training_config)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
 
     try:
         TrainConfig.model_validate(training_config)

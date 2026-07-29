@@ -87,7 +87,11 @@ def test_resolve_distributed_plan_rejects_more_processes_than_visible_gpus():
         resolve_distributed_plan(cfg, layout)
 
 
-def test_launch_worker_command_includes_multinode_args():
+def test_launch_worker_command_includes_multinode_args(monkeypatch: pytest.MonkeyPatch):
+    from seiso.research.nostr.keys import generate_keypair
+
+    monkeypatch.setenv("SEISO_ALLOW_MESH", "1")
+    monkeypatch.setenv("BUZZ_PRIVATE_KEY", generate_keypair().nsec)
     cfg = TrainConfig(
         model_id="m",
         dataset="/tmp/data.jsonl",
@@ -112,6 +116,26 @@ def test_launch_worker_command_includes_multinode_args():
     assert "--machine_rank=1" in cmd
     assert "--main_process_ip=10.0.0.2" in cmd
     assert "--main_process_port=29555" in cmd
+
+
+def test_resolve_distributed_plan_refuses_multinode_without_buzz_mesh(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    monkeypatch.delenv("SEISO_ALLOW_MESH", raising=False)
+    monkeypatch.delenv("BUZZ_PRIVATE_KEY", raising=False)
+    cfg = TrainConfig(
+        model_id="m",
+        dataset="/tmp/data.jsonl",
+        multi_gpu=True,
+        distributed_nproc_per_node=2,
+        distributed_num_nodes=2,
+        distributed_master_addr="10.0.0.2",
+    )
+    layout = GpuLayout(
+        world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2
+    )
+    with pytest.raises(ValueError, match="Buzz-agent/mesh-only"):
+        resolve_distributed_plan(cfg, layout)
 
 
 def test_configure_distributed_training_args_honors_ddp_options(monkeypatch):
