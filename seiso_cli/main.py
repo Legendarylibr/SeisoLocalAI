@@ -5,12 +5,12 @@ from __future__ import annotations
 import typer
 
 from seiso_cli.bootstrap import bootstrap_runtime
+from seiso_cli.commands.agent import agent_app
 from seiso_cli.commands.chat import bench_inference_cmd, chat, inference_cmd
 from seiso_cli.commands.experiment import experiment_app
 from seiso_cli.commands.export import export_cmd
 from seiso_cli.commands.forge import doctor, forge
 from seiso_cli.commands.mesh import mesh_app
-from seiso_cli.commands.agent import agent_app
 from seiso_cli.commands.nemo_rl import nemo_rl
 from seiso_cli.commands.pay import pay_app
 from seiso_cli.commands.pipelines import compress_app, distill_rl_app, rl_quant_app

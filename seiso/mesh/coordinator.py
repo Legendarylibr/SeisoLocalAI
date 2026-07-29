@@ -61,8 +61,8 @@ def _require_strong_mesh_token(token: str) -> str:
 def _token_fingerprint(token: str, *, job_id: str, pubkey_hex: str) -> str:
     """Per-plan HMAC bound to job id + signing pubkey."""
     return hmac.new(
-        token.encode("utf-8"),
-        f"seiso-mesh-plan:{job_id}:{pubkey_hex.lower()}".encode("utf-8"),
+        token.encode(),
+        f"seiso-mesh-plan:{job_id}:{pubkey_hex.lower()}".encode(),
         hashlib.sha256,
     ).hexdigest()
 
@@ -85,9 +85,7 @@ def _verify_plan_bindings(plan: dict[str, Any]) -> None:
         raise RuntimeError("Plan is missing nostr.pubkey")
     actual = _token_fingerprint(token, job_id=job_id, pubkey_hex=pubkey)
     if not hmac.compare_digest(expected, actual):
-        raise RuntimeError(
-            "SEISO_MESH_TOKEN does not match this plan (shared-secret mismatch)"
-        )
+        raise RuntimeError("SEISO_MESH_TOKEN does not match this plan (shared-secret mismatch)")
 
 
 def announce(
@@ -191,9 +189,7 @@ def build_plan(
         "multi_gpu": True,
         "protocol_fee_sats": 0,
         "market": False,
-        "token_fingerprint": _token_fingerprint(
-            token, job_id=job_id, pubkey_hex=pair.public_hex
-        ),
+        "token_fingerprint": _token_fingerprint(token, job_id=job_id, pubkey_hex=pair.public_hex),
         "created_at": time.time(),
         "ranks": [
             {
@@ -225,8 +221,7 @@ def build_plan(
         "agent_receipt": receipt,
         "nostr_event": relay_signed_event(nostr),
         "note": (
-            f"{relay_policy_note()} "
-            "Keep token_fingerprint, SEISO_MESH_TOKEN, and nsecs local-only."
+            f"{relay_policy_note()} Keep token_fingerprint, SEISO_MESH_TOKEN, and nsecs local-only."
         ),
     }
 
@@ -311,9 +306,7 @@ def buzz_heartbeat(plan: dict[str, Any], *, node_rank: int, status: str) -> dict
     require_mesh_allowed()
     _verify_plan_bindings(plan)
     pair = require_buzz_nsec(feature="Mesh heartbeat")
-    nostr = sign_mesh_heartbeat(
-        plan=plan, node_rank=node_rank, status=status, pair=pair
-    )
+    nostr = sign_mesh_heartbeat(plan=plan, node_rank=node_rank, status=status, pair=pair)
     receipt = agent_receipt(
         role="heartbeat",
         status=status,

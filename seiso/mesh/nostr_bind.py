@@ -129,9 +129,7 @@ def verify_mesh_plan_nostr(plan: dict[str, Any]) -> None:
         raise RuntimeError("Mesh plan Nostr event content is not JSON") from exc
     expected = plan_signed_payload(plan)
     if body != expected:
-        raise RuntimeError(
-            "Mesh plan body does not match Nostr-signed content (tamper detected)"
-        )
+        raise RuntimeError("Mesh plan body does not match Nostr-signed content (tamper detected)")
     pubkey = str(event.get("pubkey") or "").lower()
     if pubkey != str(nostr.get("pubkey") or "").lower():
         raise RuntimeError("Mesh plan nostr.pubkey does not match event.pubkey")
@@ -144,14 +142,11 @@ def verify_mesh_plan_nostr(plan: dict[str, Any]) -> None:
     trusted = _trusted_pubkey_hexes()
     if trusted and pubkey not in trusted:
         raise RuntimeError(
-            "Mesh plan author pubkey is not in SEISO_MESH_TRUSTED_NPUBS/"
-            "SEISO_MESH_TRUSTED_PUBKEYS"
+            "Mesh plan author pubkey is not in SEISO_MESH_TRUSTED_NPUBS/SEISO_MESH_TRUSTED_PUBKEYS"
         )
 
 
-def sign_mesh_announce(
-    record: dict[str, Any], pair: NostrKeyPair
-) -> dict[str, Any]:
+def sign_mesh_announce(record: dict[str, Any], pair: NostrKeyPair) -> dict[str, Any]:
     """Sign an announce record (local + receipt metadata)."""
     payload = {
         "channel": record.get("channel"),

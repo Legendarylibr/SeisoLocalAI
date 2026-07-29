@@ -47,9 +47,7 @@ def _valid_buzz_auth_tag(raw: str) -> bool:
     tag = (raw or "").strip()
     if len(tag) < _MIN_AUTH_TAG_LEN:
         return False
-    if tag.lower() in _TRIVIAL_AUTH_TAGS:
-        return False
-    return True
+    return tag.lower() not in _TRIVIAL_AUTH_TAGS
 
 
 def buzz_agent_present() -> bool:

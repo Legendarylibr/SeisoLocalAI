@@ -49,8 +49,7 @@ def relay_signed_event(event: dict[str, Any] | None) -> dict[str, Any]:
     """Return a verified NIP-01 event or refuse (relay only with signing)."""
     if not isinstance(event, dict) or not verify_event(event):
         raise RuntimeError(
-            "Refusing to relay: Nostr event missing or signature invalid. "
-            "Relay only with signing."
+            "Refusing to relay: Nostr event missing or signature invalid. Relay only with signing."
         )
     return dict(event)
 
@@ -88,8 +87,8 @@ def signed_agent_interaction(
     if require_nsec:
         keypair = pair or require_buzz_nsec(feature="Agent signed status")
     else:
-        keypair = pair or get_buzz_keypair()
-        if keypair is None:
+        resolved = pair or get_buzz_keypair()
+        if resolved is None:
             receipt = agent_receipt(
                 role=role,
                 status=status,
@@ -105,6 +104,7 @@ def signed_agent_interaction(
                     "Set BUZZ_PRIVATE_KEY to emit a signed nostr_event for Buzz."
                 ),
             }
+        keypair = resolved
 
     payload = _scrub_payload(
         {
@@ -119,9 +119,7 @@ def signed_agent_interaction(
     if channel is not None:
         payload["channel"] = channel
 
-    d_value = d_tag or (
-        f"{fields.get('job_id') or uuid.uuid4().hex}:{role}:{status}"
-    )
+    d_value = d_tag or (f"{fields.get('job_id') or uuid.uuid4().hex}:{role}:{status}")
     tags = [
         ["d", d_value],
         ["t", "seiso-agent-status"],

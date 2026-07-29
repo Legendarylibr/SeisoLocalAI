@@ -105,9 +105,7 @@ def mesh_worker(
             ),
         ),
     ],
-    print_env: Annotated[
-        bool, typer.Option("--print-env", help="Print env/config only")
-    ] = True,
+    print_env: Annotated[bool, typer.Option("--print-env", help="Print env/config only")] = True,
 ) -> None:
     """Prepare worker env for Accelerate multi-node (does not auto-launch GPU job)."""
     from seiso.mesh.coordinator import (

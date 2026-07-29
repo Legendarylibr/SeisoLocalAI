@@ -11,10 +11,7 @@ from seiso_cli.console import console
 
 agent_app = typer.Typer(
     name="agent",
-    help=(
-        "Buzz-compatible agent helpers. "
-        "Relay only signed NIP-01 / BIP-340 events via buzz-cli."
-    ),
+    help=("Buzz-compatible agent helpers. Relay only signed NIP-01 / BIP-340 events via buzz-cli."),
     no_args_is_help=True,
 )
 
