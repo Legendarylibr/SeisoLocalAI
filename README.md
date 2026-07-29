@@ -476,8 +476,8 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 - **Formats:** JSONL chat datasets with auto format detection
 - **Optimizations:** gradient checkpointing, packing, RSLoRA, train-on-responses-only
 - **Multi-GPU:** `torchrun` distributed workers; rank-0 checkpoint writes ([multi-gpu](docs/training/multi-gpu.md))
-- **Buzz mesh (experimental):** opt-in peer coordination for shared / multi-node jobs ([mesh](docs/training/mesh.md))
-- **Opt-in sats marketplace:** remote finetune/RL/inference with Ark settlement + protocol fee ([marketplace](docs/pay/marketplace.md))
+- **Buzz mesh (experimental) — not functional, do not use yet:** opt-in peer coordination for shared / multi-node jobs ([mesh](docs/training/mesh.md))
+- **Opt-in sats marketplace — not functional, do not use yet:** remote finetune/RL/inference with Ark settlement + protocol fee ([marketplace](docs/pay/marketplace.md))
 - **Fused kernels:** RMSNorm, SwiGLU MLP, cross-entropy, fused LoRA delta ([kernels](docs/training/kernels.md))
 - **Release-style post-training:** `method: slime` adds rollout rewards, verifier data, best/final checkpoints, and plateau auto-stop; multi-GPU rollouts can use **vLLM** (`rollout_backend: vllm`) or SGLang ([training](docs/training/quickstart.md#slime-post-training))
 - **External NeMo RL:** `method: nemo_rl` shells out to a local [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL) checkout via `uv run` (not vendored); see [NeMo RL](docs/training/quickstart.md#nemo-rl)
