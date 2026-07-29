@@ -20,7 +20,9 @@ def pay_allowed() -> bool:
 def require_pay_allowed() -> None:
     if not pay_allowed():
         raise RuntimeError(
-            "Marketplace pay is disabled. Set SEISO_ALLOW_PAY=1 to opt in. "
+            "Marketplace pay is disabled (experimental). "
+            "Set SEISO_ALLOW_PAY=1 to opt in. "
+            "Not functional for real funds yet — faucet/sim only. "
             "Self-hosted Forge/CLI remain free and do not need this flag."
         )
 

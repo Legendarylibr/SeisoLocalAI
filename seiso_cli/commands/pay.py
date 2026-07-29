@@ -1,4 +1,4 @@
-"""CLI for the opt-in Seiso sats marketplace (remote only)."""
+"""CLI for the experimental opt-in Seiso sats marketplace (remote only)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,10 @@ from seiso_cli.console import console
 
 pay_app = typer.Typer(
     name="pay",
-    help="Opt-in sats marketplace client/operator tools (SEISO_ALLOW_PAY=1).",
+    help=(
+        "Experimental sats marketplace client/operator tools "
+        "(opt-in: SEISO_ALLOW_PAY=1; not functional for real funds yet)."
+    ),
     no_args_is_help=True,
 )
 
@@ -24,7 +27,11 @@ def _print_json(data: Any) -> None:
 def _require_allow() -> None:
     from seiso.pay.flags import require_pay_allowed
 
-    require_pay_allowed()
+    try:
+        require_pay_allowed()
+    except RuntimeError as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
 
 
 @pay_app.command("quote")
@@ -38,7 +45,8 @@ def pay_quote(
     completion_tokens: Annotated[int, typer.Option(help="For inference quotes")] = 0,
     flat_call: Annotated[bool, typer.Option(help="Flat sats/call inference")] = False,
 ) -> None:
-    """Show compute + protocol fee split (no charge)."""
+    """Show compute + protocol fee split (no charge). Requires SEISO_ALLOW_PAY=1."""
+    _require_allow()
     from seiso.pay.pricing import quote_inference_tokens, quote_job
 
     if type_.strip().lower() == "inference":

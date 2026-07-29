@@ -28,6 +28,30 @@ def test_pay_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
         require_pay_allowed()
 
 
+def test_pay_quote_cli_requires_opt_in(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """``seiso pay quote`` must refuse without SEISO_ALLOW_PAY (experimental)."""
+    monkeypatch.delenv("SEISO_ALLOW_PAY", raising=False)
+    import typer
+
+    from seiso_cli.commands.pay import pay_quote
+
+    with pytest.raises(typer.Exit) as exc_info:
+        pay_quote(
+            type_="finetune",
+            preset="smoke",
+            prompt_tokens=0,
+            completion_tokens=0,
+            flat_call=False,
+        )
+    assert exc_info.value.exit_code == 1
+    captured = capsys.readouterr()
+    err = captured.out + captured.err
+    assert "SEISO_ALLOW_PAY" in err
+    assert "experimental" in err.lower()
+
+
 def test_fee_split_five_percent(pay_env: Path) -> None:
     from seiso.pay.pricing import fee_split, quote_job
 

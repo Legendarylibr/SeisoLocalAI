@@ -50,7 +50,10 @@ def build_app():
     app = FastAPI(
         title="Seiso Pay Marketplace",
         version="0.1.0",
-        description="Opt-in sats marketplace for remote inference / finetune / RL",
+        description=(
+            "Experimental opt-in sats marketplace for remote inference / "
+            "finetune / RL (SEISO_ALLOW_PAY=1; not functional for real funds yet)"
+        ),
     )
 
     def _bearer_session(
