@@ -23,9 +23,7 @@ DEFAULT_PRICES_SATS: dict[str, int] = {
     "nemo_rl_smoke": 4_000,
 }
 
-JOB_TYPES = frozenset(
-    {"finetune", "slime", "distill_rl", "rl_quant", "nemo_rl", "inference"}
-)
+JOB_TYPES = frozenset({"finetune", "slime", "distill_rl", "rl_quant", "nemo_rl", "inference"})
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,10 +75,6 @@ def price_for_job(
     preset_l = (preset or "").strip().lower()
     if preset_l in {"smoke", "minimal"}:
         key = f"{jt}_smoke" if jt != "rl_quant" else "rl_quant_minimal"
-        if jt == "rl_quant" and preset_l == "minimal":
-            key = "rl_quant_minimal"
-        elif jt == "rl_quant" and preset_l == "smoke":
-            key = "rl_quant_minimal"
         return int(table.get(key, table[jt]))
     return int(table[jt])
 

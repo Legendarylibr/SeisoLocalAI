@@ -57,6 +57,9 @@ def build_app():
         except KeyError as exc:
             raise HTTPException(401, "Invalid pay token") from exc
 
+    # Pre-bind Depends so defaults are not a call expression (ruff B008).
+    _bearer_dep = Depends(_bearer_session)
+
     @app.get("/health")
     def health() -> dict[str, Any]:
         return {
@@ -108,7 +111,7 @@ def build_app():
         }
 
     @app.get("/pay/v1/sessions/me")
-    def session_me(session: dict = Depends(_bearer_session)) -> dict[str, Any]:
+    def session_me(session: dict[str, Any] = _bearer_dep) -> dict[str, Any]:
         return public_session_view(session)
 
     @app.post("/pay/v1/quotes")
@@ -132,7 +135,7 @@ def build_app():
     @app.post("/pay/v1/jobs")
     def jobs_start(
         body: dict[str, Any],
-        session: dict = Depends(_bearer_session),
+        session: dict[str, Any] = _bearer_dep,
     ) -> dict[str, Any]:
         if session.get("status") != "active":
             raise HTTPException(402, "session not funded/active")
@@ -158,11 +161,11 @@ def build_app():
         return {"job": job, "receipt": job_receipt(job)}
 
     @app.get("/pay/v1/jobs")
-    def jobs_list(session: dict = Depends(_bearer_session)) -> dict[str, Any]:
+    def jobs_list(session: dict[str, Any] = _bearer_dep) -> dict[str, Any]:
         return {"jobs": list_jobs(session_id=str(session["session_id"]))}
 
     @app.get("/pay/v1/jobs/{job_id}")
-    def jobs_get(job_id: str, session: dict = Depends(_bearer_session)) -> dict[str, Any]:
+    def jobs_get(job_id: str, session: dict[str, Any] = _bearer_dep) -> dict[str, Any]:
         try:
             job = load_job(job_id)
         except KeyError as exc:
@@ -172,9 +175,7 @@ def build_app():
         return {"job": job, "receipt": job_receipt(job)}
 
     @app.post("/pay/v1/jobs/{job_id}/cancel")
-    def jobs_cancel(
-        job_id: str, session: dict = Depends(_bearer_session)
-    ) -> dict[str, Any]:
+    def jobs_cancel(job_id: str, session: dict[str, Any] = _bearer_dep) -> dict[str, Any]:
         try:
             job = load_job(job_id)
         except KeyError as exc:
@@ -201,17 +202,13 @@ def build_app():
         key = (os.environ.get("SEISO_INFERENCE_API_KEY") or "").strip()
         if not key:
             # Best-effort read local key file
-            from pathlib import Path
-
             from seiso.security import resolve_data_dir
 
             key_path = resolve_data_dir() / ".inference_api_key"
             if key_path.is_file():
                 key = key_path.read_text(encoding="utf-8").strip()
         if not key:
-            raise HTTPException(
-                503, "operator inference key unavailable on marketplace host"
-            )
+            raise HTTPException(503, "operator inference key unavailable on marketplace host")
 
         base = forge_base_url()
         headers = {
@@ -246,9 +243,7 @@ def build_app():
 
                 return StreamingResponse(gen(), media_type="text/event-stream")
 
-            resp = await client.post(
-                f"{base}/v1/chat/completions", json=body, headers=headers
-            )
+            resp = await client.post(f"{base}/v1/chat/completions", json=body, headers=headers)
             if resp.status_code >= 400:
                 raise HTTPException(resp.status_code, resp.text)
             data = resp.json()
@@ -260,9 +255,7 @@ def build_app():
                 or 64
             )
             prompt_toks = int(
-                usage.get("prompt_tokens")
-                or usage.get("prompt_token_estimate")
-                or prompt_est
+                usage.get("prompt_tokens") or usage.get("prompt_token_estimate") or prompt_est
             )
             try:
                 meter = debit_inference(
@@ -276,12 +269,10 @@ def build_app():
             return JSONResponse(data)
 
     @app.get("/v1/models")
-    async def list_models(session: dict = Depends(_bearer_session)) -> Any:
+    async def list_models(session: dict[str, Any] = _bearer_dep) -> Any:
         if "inference" not in set(session.get("scopes") or []):
             raise HTTPException(403, "scope inference required")
         key = (os.environ.get("SEISO_INFERENCE_API_KEY") or "").strip()
-        from pathlib import Path
-
         from seiso.security import resolve_data_dir
 
         if not key:
@@ -296,9 +287,7 @@ def build_app():
             return JSONResponse(resp.json(), status_code=resp.status_code)
 
     @app.post("/v1/chat/completions")
-    async def chat_completions(
-        request: Request, session: dict = Depends(_bearer_session)
-    ) -> Any:
+    async def chat_completions(request: Request, session: dict[str, Any] = _bearer_dep) -> Any:
         return await _proxy_chat(request, session)
 
     return app

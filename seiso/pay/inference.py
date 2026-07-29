@@ -13,10 +13,7 @@ def estimate_tokens_from_messages(messages: list[Any]) -> int:
     """Rough prompt token estimate (word-ish); billing may use response usage."""
     total = 0
     for msg in messages or []:
-        if isinstance(msg, dict):
-            content = msg.get("content") or ""
-        else:
-            content = str(msg)
+        content = (msg.get("content") or "") if isinstance(msg, dict) else str(msg)
         total += max(1, len(str(content).split()))
     return total
 

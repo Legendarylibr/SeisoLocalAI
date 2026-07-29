@@ -10,8 +10,8 @@ from typing import Any, Literal
 from seiso.pay.flags import (
     faucet_enabled,
     operator_ark,
-    protocol_treasury_ark,
     pay_settle_ready,
+    protocol_treasury_ark,
 )
 
 SettleMode = Literal["faucet", "ark", "simulated"]
@@ -46,9 +46,7 @@ def funding_instructions(session_id: str, amount_sats: int) -> dict[str, Any]:
         "status": "pending",
     }
     if faucet_enabled():
-        out["faucet_hint"] = (
-            "Dev faucet: seiso pay session fund --session ID --sats N --faucet"
-        )
+        out["faucet_hint"] = "Dev faucet: seiso pay session fund --session ID --sats N --faucet"
     return out
 
 

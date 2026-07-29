@@ -9,11 +9,11 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from seiso.security import resolve_data_dir, safe_join
 
-_TOKEN_PREFIX = "seiso_pay_"
+_TOKEN_PREFIX = "seiso_pay_"  # nosec B105 — public token namespace prefix, not a secret
 _lock = threading.RLock()
 
 
@@ -43,7 +43,7 @@ def create_session(
     token = new_token()
     session_id = uuid.uuid4().hex
     now = time.time()
-    record = {
+    record: dict[str, Any] = {
         "session_id": session_id,
         "token_hash": _hash_token(token),
         "token_prefix": token[:16] + "…",
@@ -83,7 +83,7 @@ def load_session(session_id: str, data_dir: Path | None = None) -> dict[str, Any
     path = _session_path(session_id, data_dir)
     if not path.is_file():
         raise KeyError(f"session not found: {session_id}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
 
 
 def _save_session(record: dict[str, Any], data_dir: Path | None = None) -> None:
@@ -92,9 +92,7 @@ def _save_session(record: dict[str, Any], data_dir: Path | None = None) -> None:
     path.write_text(json.dumps(record, indent=2) + "\n", encoding="utf-8")
 
 
-def resolve_session_by_token(
-    token: str, data_dir: Path | None = None
-) -> dict[str, Any]:
+def resolve_session_by_token(token: str, data_dir: Path | None = None) -> dict[str, Any]:
     token = (token or "").strip()
     if not token.startswith(_TOKEN_PREFIX):
         raise KeyError("invalid pay token")
@@ -102,7 +100,7 @@ def resolve_session_by_token(
     root = pay_root(data_dir) / "sessions"
     with _lock:
         for path in root.glob("*.json"):
-            record = json.loads(path.read_text(encoding="utf-8"))
+            record = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
             if record.get("token_hash") == digest:
                 return record
     raise KeyError("invalid pay token")
@@ -156,16 +154,14 @@ def debit_session(
             raise RuntimeError(f"session not active: {record.get('status')}")
         bal = int(record.get("balance_sats") or 0)
         if bal < total:
-            raise RuntimeError(
-                f"insufficient balance: need {total} sats, have {bal}"
-            )
+            raise RuntimeError(f"insufficient balance: need {total} sats, have {bal}")
         record["balance_sats"] = bal - total
         record["spent_compute_sats"] = int(record.get("spent_compute_sats") or 0) + int(
             compute_sats
         )
-        record["spent_protocol_fee_sats"] = int(
-            record.get("spent_protocol_fee_sats") or 0
-        ) + int(protocol_fee_sats)
+        record["spent_protocol_fee_sats"] = int(record.get("spent_protocol_fee_sats") or 0) + int(
+            protocol_fee_sats
+        )
         _save_session(record, data_dir)
         entry = {
             "event": "debit",
@@ -199,9 +195,7 @@ def escrow_hold(
             raise RuntimeError(f"session not active: {record.get('status')}")
         bal = int(record.get("balance_sats") or 0)
         if bal < total_sats:
-            raise RuntimeError(
-                f"insufficient balance for escrow: need {total_sats}, have {bal}"
-            )
+            raise RuntimeError(f"insufficient balance for escrow: need {total_sats}, have {bal}")
         record["balance_sats"] = bal - total_sats
         _save_session(record, data_dir)
         _append_ledger(
@@ -254,7 +248,7 @@ def create_job(
 ) -> dict[str, Any]:
     job_id = uuid.uuid4().hex
     now = time.time()
-    record = {
+    record: dict[str, Any] = {
         "job_id": job_id,
         "session_id": session_id,
         "job_type": job_type.strip().lower(),
@@ -290,7 +284,7 @@ def load_job(job_id: str, data_dir: Path | None = None) -> dict[str, Any]:
     path = safe_join(pay_root(data_dir), "jobs", f"{job_id}.json")
     if not path.is_file():
         raise KeyError(f"job not found: {job_id}")
-    return json.loads(path.read_text(encoding="utf-8"))
+    return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
 
 
 def save_job(record: dict[str, Any], data_dir: Path | None = None) -> None:
@@ -308,7 +302,7 @@ def list_jobs(
     root = pay_root(data_dir) / "jobs"
     jobs: list[dict[str, Any]] = []
     for path in sorted(root.glob("*.json")):
-        rec = json.loads(path.read_text(encoding="utf-8"))
+        rec = cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
         if session_id and rec.get("session_id") != session_id:
             continue
         jobs.append(rec)
@@ -339,9 +333,9 @@ def record_session_spend(
         record["spent_compute_sats"] = int(record.get("spent_compute_sats") or 0) + int(
             compute_sats
         )
-        record["spent_protocol_fee_sats"] = int(
-            record.get("spent_protocol_fee_sats") or 0
-        ) + int(protocol_fee_sats)
+        record["spent_protocol_fee_sats"] = int(record.get("spent_protocol_fee_sats") or 0) + int(
+            protocol_fee_sats
+        )
         _save_session(record, data_dir)
     return record
 

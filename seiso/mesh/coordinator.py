@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import json
-import os
 import socket
 import time
 import uuid
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from seiso.mesh.flags import mesh_token, require_mesh_allowed
 from seiso.security import resolve_data_dir, safe_join
@@ -78,9 +77,7 @@ def build_plan(
     if nodes < 1:
         raise ValueError("nodes must be >= 1")
     if not mesh_token():
-        raise RuntimeError(
-            "SEISO_MESH_TOKEN required out-of-band for workers (never post to Buzz)"
-        )
+        raise RuntimeError("SEISO_MESH_TOKEN required out-of-band for workers (never post to Buzz)")
     job_id = uuid.uuid4().hex
     jt = job_type.strip().lower()
     if jt not in {"finetune", "slime"}:
@@ -131,7 +128,7 @@ def load_plan(plan_path: str | Path, data_dir: Path | None = None) -> dict[str, 
             path = candidate
         else:
             raise FileNotFoundError(plan_path)
-    return json.loads(path.read_text(encoding="utf-8"))
+    return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
 
 
 def worker_env(plan: dict[str, Any], *, node_rank: int) -> dict[str, str]:
@@ -143,7 +140,8 @@ def worker_env(plan: dict[str, Any], *, node_rank: int) -> dict[str, str]:
         raise ValueError("node_rank out of range")
     return {
         "SEISO_MESH_JOB_ID": str(plan["job_id"]),
-        "SEISO_MESH_TOKEN_SET": "1",
+        # Flag presence only — not a secret (bandit B105 false positive).
+        "SEISO_MESH_TOKEN_SET": "1",  # nosec B105
         "MASTER_ADDR": str(plan["distributed_master_addr"]),
         "MASTER_PORT": str(plan["distributed_master_port"]),
         "NNODES": str(plan["distributed_num_nodes"]),
@@ -162,9 +160,7 @@ def worker_train_config_overlay(plan: dict[str, Any], *, node_rank: int) -> dict
     }
 
 
-def buzz_heartbeat(
-    plan: dict[str, Any], *, node_rank: int, status: str
-) -> dict[str, Any]:
+def buzz_heartbeat(plan: dict[str, Any], *, node_rank: int, status: str) -> dict[str, Any]:
     return {
         "role": "heartbeat",
         "job_id": plan.get("job_id"),
