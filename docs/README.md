@@ -114,6 +114,13 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 3. [README.md § Security](../README.md#security) — hardening checklist
 4. [SECURITY.md](../SECURITY.md) — vulnerability reporting (GitHub private advisories)
 
+### Path E — Opt-in marketplace & Buzz mesh
+
+1. [pay/marketplace.md](pay/marketplace.md) — sats marketplace, Ark treasury/operator, faucet vs real settles
+2. [training/mesh.md](training/mesh.md) — Buzz-coordinated shared / multi-node training (no fee)
+3. [cli.md § seiso pay / seiso mesh](cli.md#seiso-pay-opt-in-marketplace) — command cheat sheet
+4. [`.agents/skills/seiso-orchestrate/`](../.agents/skills/seiso-orchestrate/SKILL.md) — agent decision loop (local → mesh → pay)
+
 ---
 
 ## Platform guides

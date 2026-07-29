@@ -23,6 +23,7 @@
 - [Compat API](#compat-api)
 - [Development](#development)
 - [Security](#security)
+- [Opt-in marketplace & Buzz mesh](#opt-in-marketplace--buzz-mesh)
 - [Reporting vulnerabilities](SECURITY.md)
 - [Documentation index](#documentation-index)
 - [Inference stack](#inference-stack)
@@ -46,6 +47,8 @@ Seiso combines a **web workspace (Forge)** and a **Python core (CLI + library)**
 | RL quant + CUDA kernel policy | RL Quant | `seiso rl-quant run` |
 | Visual data/recipe pipelines | Recipe Studio | — |
 | RAG knowledge bases | Knowledge | — |
+| Opt-in remote sats marketplace (Ark) | — | `seiso pay` ([docs](docs/pay/marketplace.md)) |
+| Experimental Buzz shared / multi-node train | — | `seiso mesh` ([docs](docs/training/mesh.md)) |
 
 **Why local-first?**
 
@@ -388,11 +391,13 @@ Forge details: **[docs/forge.md](docs/forge.md)**
 | `seiso bench-inference` | Inference load / TTFT / tok/s benchmark |
 | `seiso-bench-kernels` | Benchmark fused GPU training kernels |
 | `seiso-train-worker` | Multi-GPU worker (via `torchrun`, see docs) |
+| `seiso pay` | Opt-in sats marketplace client / operator sidecar (`SEISO_ALLOW_PAY=1`) |
+| `seiso mesh` | Experimental Buzz-coordinated multi-node mesh (`SEISO_ALLOW_MESH=1`) |
+| `seiso provenance` | Nostr digest attestation / membership proofs |
 
 ```bash
 # Example: fine-tune Llama 3.2 3B on sample data (CLI → ./outputs/lora-run/)
 seiso train --config configs/example_lora.yaml
-
 # Example: export CLI checkpoint to GGUF
 seiso export --checkpoint ./outputs/lora-run/checkpoint-<timestamp> --formats merged,gguf
 
@@ -471,6 +476,8 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 - **Formats:** JSONL chat datasets with auto format detection
 - **Optimizations:** gradient checkpointing, packing, RSLoRA, train-on-responses-only
 - **Multi-GPU:** `torchrun` distributed workers; rank-0 checkpoint writes ([multi-gpu](docs/training/multi-gpu.md))
+- **Buzz mesh (experimental):** opt-in peer coordination for shared / multi-node jobs ([mesh](docs/training/mesh.md))
+- **Opt-in sats marketplace:** remote finetune/RL/inference with Ark settlement + protocol fee ([marketplace](docs/pay/marketplace.md))
 - **Fused kernels:** RMSNorm, SwiGLU MLP, cross-entropy, fused LoRA delta ([kernels](docs/training/kernels.md))
 - **Release-style post-training:** `method: slime` adds rollout rewards, verifier data, best/final checkpoints, and plateau auto-stop; multi-GPU rollouts can use **vLLM** (`rollout_backend: vllm`) or SGLang ([training](docs/training/quickstart.md#slime-post-training))
 - **External NeMo RL:** `method: nemo_rl` shells out to a local [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL) checkout via `uv run` (not vendored); see [NeMo RL](docs/training/quickstart.md#nemo-rl)
@@ -628,6 +635,8 @@ Deploy configs: [`deploy/`](deploy/) · Guide: [docs/deployment/reverse-proxy.md
 | `SEISO_ALLOW_TOOLS=true` | Web search, artifact writes |
 | `SEISO_ALLOW_CODE_EXEC=true` | Sandboxed `execute_code` tool |
 | `SEISO_ALLOW_COMPAT_TOOLS=true` | Tool calling on Compat API `/v1` (session JWT only; inference API key stays chat-only) |
+| `SEISO_ALLOW_PAY=1` | Opt-in sats marketplace sidecar (remote buyers; self-hosted stays free) |
+| `SEISO_ALLOW_MESH=1` | Experimental Buzz mesh coordination (trusted peers; no protocol fee) |
 
 ### Path sandbox & tenant isolation
 
@@ -652,6 +661,9 @@ export SEISO_ALLOW_TOOLS=false
 export SEISO_ALLOW_CODE_EXEC=false
 export SEISO_ALLOW_COMPAT_TOOLS=false
 export SEISO_SECRET_KEY="$(openssl rand -hex 32)"
+# If you run a public pay sidecar: leave SEISO_PAY_FAUCET unset/off;
+# require SEISO_PROTOCOL_TREASURY_ARK + TLS in front of seiso pay serve.
+# Leave SEISO_ALLOW_PAY / SEISO_ALLOW_MESH unset unless you intentionally opt in.
 ```
 
 ---
@@ -676,6 +688,9 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 | NeMo RL (external) | [docs/training/quickstart.md § NeMo RL](docs/training/quickstart.md#nemo-rl) |
 | GPU kernels | [docs/training/kernels.md](docs/training/kernels.md) |
 | Multi-GPU | [docs/training/multi-gpu.md](docs/training/multi-gpu.md) |
+| Opt-in sats marketplace (Ark) | [docs/pay/marketplace.md](docs/pay/marketplace.md) |
+| Buzz mesh shared training | [docs/training/mesh.md](docs/training/mesh.md) |
+| Buzz agent orchestration skill | [`.agents/skills/seiso-orchestrate/`](.agents/skills/seiso-orchestrate/SKILL.md) |
 | Inference backends | [docs/inference/backends.md](docs/inference/backends.md) |
 | Compression | [docs/compression.md](docs/compression.md) |
 | HTTPS deployment | [docs/deployment/reverse-proxy.md](docs/deployment/reverse-proxy.md) |
@@ -683,6 +698,37 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 | Local CI | [docs/CI_LOCAL.md](docs/CI_LOCAL.md) |
 | Security policy / reporting | [SECURITY.md](SECURITY.md) |
 | External Smart Router | [Legendarylibr/SeisoModelRouter](https://github.com/Legendarylibr/SeisoModelRouter) |
+
+---
+
+## Opt-in marketplace & Buzz mesh
+
+Self-hosted Forge/CLI remain **free** and unchanged unless you opt in. Two optional surfaces:
+
+| Mode | Flag | Settlement | Protocol fee | Docs |
+|------|------|------------|--------------|------|
+| **Self-hosted** (default) | — | None | None | this README |
+| **Sats marketplace** | `SEISO_ALLOW_PAY=1` | Opt-in **Ark** (`SEISO_OPERATOR_ARK` / `SEISO_PROTOCOL_TREASURY_ARK`; faucet for dev) | Default **5%** on top of compute | [pay/marketplace.md](docs/pay/marketplace.md) |
+| **Buzz mesh** (experimental) | `SEISO_ALLOW_MESH=1` | Reciprocal peers; `SEISO_MESH_TOKEN` out-of-band | **None** | [training/mesh.md](docs/training/mesh.md) |
+
+```bash
+# Marketplace operator (Forge stays on localhost; expose pay sidecar + TLS only)
+export SEISO_ALLOW_PAY=1
+export SEISO_PROTOCOL_TREASURY_ARK=ark1…   # required for real settles (fail-closed)
+export SEISO_OPERATOR_ARK=ark1…
+# export SEISO_PAY_FAUCET=1               # dev only — never on a public market
+seiso pay serve --host 127.0.0.1 --port 8787
+
+# Buzz shared / multi-node coordination (trusted peers)
+export SEISO_ALLOW_MESH=1
+export SEISO_MESH_TOKEN='…'               # never post to Buzz
+seiso mesh announce --channel "$CHANNEL" --gpus 2
+seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2
+```
+
+Buzz agents should follow [`.agents/skills/seiso-orchestrate/`](.agents/skills/seiso-orchestrate/SKILL.md): prefer local free compute → mesh peers → paid marketplace → ask a human. Post receipts (job ids, fee split, mesh plan ids) to the channel; never post `SEISO_PAY_TOKEN`, `SEISO_MESH_TOKEN`, or `nsec`.
+
+`SEISO_ARK_BACKEND=bark|second` is reserved for a future Bark/Second client wire; until then use faucet/simulated settlement or leave the backend unset.
 
 ---
 ## RL Stack
@@ -725,6 +771,10 @@ Seiso’s local chat builds on these inference projects:
 
 ## Distributed Training
 
-Distributed training integrates https://github.com/huggingface/accelerate to extend training configurations to multi-gpu distributed training.
+Distributed training integrates https://github.com/huggingface/accelerate to extend training configurations to multi-gpu distributed training. See [docs/training/multi-gpu.md](docs/training/multi-gpu.md).
+
+For **trusted peers** coordinating multi-node jobs over Buzz (opt-in, no marketplace fee), see [docs/training/mesh.md](docs/training/mesh.md) (`SEISO_ALLOW_MESH=1`). Remote paid capacity is separate: [docs/pay/marketplace.md](docs/pay/marketplace.md).
+
+For **Buzz-coordinated multi-node** (trusted peers, no marketplace fee), use experimental [`seiso mesh`](docs/training/mesh.md) with `SEISO_ALLOW_MESH=1`.
 
 Smart Router backend orchestration now lives in [SeisoModelRouter](https://github.com/Legendarylibr/SeisoModelRouter).

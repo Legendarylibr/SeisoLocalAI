@@ -316,9 +316,15 @@ See [provenance-nostr.md](provenance-nostr.md) for Forge UI settings, auto-attes
 Remote sats marketplace for inference / finetune / RL. **Self-hosted stays free** —
 do not enable this for local-only use. Requires `SEISO_ALLOW_PAY=1`.
 
+Settlement uses **opt-in Ark** addresses (`SEISO_OPERATOR_ARK`, `SEISO_PROTOCOL_TREASURY_ARK`).
+Without a treasury Ark and without `SEISO_PAY_FAUCET=1`, paid settles fail closed.
+`SEISO_ARK_BACKEND=bark|second` is reserved for a future client wire — leave unset or use faucet for smoke tests.
+
 ```bash
 export SEISO_ALLOW_PAY=1
-export SEISO_PAY_FAUCET=1   # dev
+export SEISO_PAY_FAUCET=1   # dev only — never on a public market
+# export SEISO_PROTOCOL_TREASURY_ARK=ark1…
+# export SEISO_OPERATOR_ARK=ark1…
 seiso pay quote --type finetune --preset smoke
 seiso pay session create --sats 20000 --scopes inference,finetune,rl
 seiso pay job start --type finetune --preset smoke --dry-run
@@ -330,7 +336,8 @@ See [pay/marketplace.md](pay/marketplace.md).
 
 ## `seiso mesh` (experimental)
 
-Buzz-coordinated multi-node training. Opt-in (`SEISO_ALLOW_MESH=1`); no protocol fee.
+Buzz-coordinated multi-node / shared training. Opt-in (`SEISO_ALLOW_MESH=1`); **no** protocol fee.
+Share `SEISO_MESH_TOKEN` out-of-band (never post to Buzz). Post announce/plan/worker receipts to the channel.
 
 ```bash
 export SEISO_ALLOW_MESH=1
@@ -340,6 +347,8 @@ seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2
 seiso mesh worker --plan plan.json --rank 0
 ```
 
+Prefer local → mesh → paid marketplace when orchestrating from Buzz
+([seiso-orchestrate skill](../.agents/skills/seiso-orchestrate/SKILL.md)).
 See [training/mesh.md](training/mesh.md).
 
 ## External Smart Router

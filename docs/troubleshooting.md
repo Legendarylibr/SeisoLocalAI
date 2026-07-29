@@ -309,3 +309,25 @@ python -c "from seiso.training.platform_caps import training_capabilities; impor
 ## Reset Seiso data
 
 Default data dir: `$HOME/.seiso` on Linux/macOS/WSL, `%USERPROFILE%\.seiso` on Windows (override with `SEISO_DATA_DIR`).
+
+## Opt-in pay marketplace / Ark
+
+| Symptom | Check |
+|---------|--------|
+| `seiso pay` refuses to run | `SEISO_ALLOW_PAY=1` must be set |
+| Settle / funding fails closed | Set `SEISO_PROTOCOL_TREASURY_ARK` (and operator Ark) **or** use `SEISO_PAY_FAUCET=1` for local tests only |
+| `SEISO_ARK_BACKEND=bark\|second` errors | Backend not bundled yet — leave unset / use faucet for smoke tests |
+| Buyer can’t reach operator | Hit `SEISO_PAY_URL` (pay sidecar), not Forge; check `GET /.well-known/seiso-pay.json` |
+| Accidentally exposed faucet | Turn `SEISO_PAY_FAUCET` **off** on any public market |
+
+Full guide: [pay/marketplace.md](pay/marketplace.md).
+
+## Opt-in Buzz mesh
+
+| Symptom | Check |
+|---------|--------|
+| `seiso mesh` refuses | `SEISO_ALLOW_MESH=1` and a shared `SEISO_MESH_TOKEN` (out-of-band — never post to Buzz) |
+| Peers don’t join | Same token + channel; master addr reachable; plan `world_size` / ranks match |
+| Confused with marketplace | Mesh has **no** protocol fee; paid remote compute is [pay/marketplace.md](pay/marketplace.md) |
+
+Full guide: [training/mesh.md](training/mesh.md).
