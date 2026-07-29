@@ -395,6 +395,12 @@ class TrainingOrchestrator(Orchestrator):
                 candidate = Path(str(raw))
                 if not candidate.is_absolute():
                     candidate = root / candidate
+                try:
+                    candidate = candidate.resolve()
+                    root.resolve()
+                    candidate.relative_to(root.resolve())
+                except ValueError:
+                    continue
                 if cls._looks_like_saved_model(candidate):
                     return candidate
 

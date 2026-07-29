@@ -253,6 +253,16 @@ async def reset_session(
             "Type RESET to confirm starting a new local session",
         )
 
+    # Fail closed before wiping anything when the Compat key cannot rotate
+    # (env-bound). Otherwise a prior /v1 holder keeps working for the next
+    # npub after forgotten-key wipe.
+    if "SEISO_INFERENCE_API_KEY" in os.environ:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Session reset refused: SEISO_INFERENCE_API_KEY is env-bound and "
+            "cannot rotate. Unset it (or use a disk-managed key) before wipe.",
+        )
+
     counts = await db.reset_local_session()
     from forge.services.nostr_settings import wipe_nostr_identity_material
 
@@ -268,6 +278,11 @@ async def reset_session(
     # the next npub after forgotten-key wipe + re-onboard.
     settings.clear_inference_api_key_owner()
     inference_key_rotated = settings.rotate_inference_api_key()
+    if not inference_key_rotated:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Session reset refused: Compat /v1 key could not be rotated",
+        )
 
     response.delete_cookie(
         "seiso_token",

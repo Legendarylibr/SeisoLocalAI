@@ -129,3 +129,24 @@ def sanitize_filename(name: str, max_len: int = 255) -> str:
     cleaned = re.sub(r"[^\w.\- ]", "_", name.strip())
     cleaned = cleaned.strip(". ") or "unnamed"
     return cleaned[:max_len]
+
+
+def assert_relative_artifact_name(name: str, *, field: str = "path") -> str:
+    """Reject empty, absolute, or ``..`` relative names under an output dir.
+
+    Used for trainer knobs like ``best_checkpoint_dir`` that are joined onto
+    a sandboxed ``output_dir`` — without this check, ``../../../other_user``
+    escapes the job directory.
+    """
+    raw = (name or "").strip()
+    if not raw:
+        raise ValueError(f"{field} must not be empty")
+    path = Path(raw)
+    if path.is_absolute():
+        raise ValueError(f"{field} must be a relative path, got {raw!r}")
+    if ".." in path.parts:
+        raise ValueError(f"{field} must not contain '..' path segments")
+    if any(not part or part == "." for part in path.parts):
+        raise ValueError(f"{field} has empty or '.' path segments")
+    return raw
+

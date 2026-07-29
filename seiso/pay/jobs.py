@@ -22,7 +22,7 @@ from seiso.pay.store import (
     pay_root,
     save_job,
 )
-from seiso.security import resolve_data_dir, safe_join
+from seiso.security import SecurityError, assert_within, resolve_data_dir, safe_join
 
 _JOB_LOCK = threading.Lock()
 _RUNNING = False
@@ -45,16 +45,42 @@ def _already_refunded(job: dict[str, Any]) -> bool:
     return int(job.get("refunded_sats") or 0) > 0
 
 
+def _reload_job(job: dict[str, Any], data_dir: Path | None) -> dict[str, Any]:
+    """Refresh job from disk (cancel may have raced the runner)."""
+    try:
+        return load_job(str(job["job_id"]), data_dir)
+    except KeyError:
+        return job
+
+
+def _is_cancelled_or_refunded(job: dict[str, Any]) -> bool:
+    if job.get("status") == "cancelled":
+        return True
+    return _already_refunded(job)
+
+
 def _refund_escrow(
     job: dict[str, Any],
     *,
     data_dir: Path | None,
     reason: str,
 ) -> int:
-    """Return escrowed sats to session balance; idempotent per job."""
-    if _already_refunded(job):
+    """Return escrowed sats to session balance; idempotent per job.
+
+    Session-level ``escrow_release_refund(..., job_id=)`` is the durable
+    anti-double-credit gate. Job markers are written after the credit so a
+    crash mid-refund retries safely (session no-ops; markers get filled in).
+
+    Mutates ``job`` in place (does not replace the dict) so callers that set
+    ``status``/``error`` before refunding do not lose those fields on save.
+    """
+    fresh = _reload_job(job, data_dir)
+    if _already_refunded(fresh):
+        job["refunded_sats"] = int(fresh.get("refunded_sats") or 0)
+        if fresh.get("settlement"):
+            job["settlement"] = fresh["settlement"]
         return int(job.get("refunded_sats") or 0)
-    total = int((job.get("quote") or {}).get("total_sats") or 0)
+    total = int((job.get("quote") or fresh.get("quote") or {}).get("total_sats") or 0)
     if total <= 0:
         return 0
     escrow_release_refund(
@@ -76,7 +102,42 @@ def _refund_escrow(
         ),
         "ts": time.time(),
     }
+    save_job(job, data_dir)
     return total
+
+
+def _sandbox_config_path(config: str | None) -> str | None:
+    """Restrict buyer ``-c`` paths to ``configs/`` under the process cwd."""
+    if not config:
+        return None
+    raw = str(config).strip()
+    if not raw:
+        return None
+    configs_root = (Path.cwd() / "configs").resolve()
+    candidate = Path(raw)
+    if not candidate.is_absolute():
+        # Allow both ``configs/foo.yaml`` and ``foo.yaml`` (under configs/).
+        parts = candidate.parts
+        if parts and parts[0] == "configs":
+            candidate = Path.cwd() / candidate
+        else:
+            try:
+                candidate = safe_join(configs_root, *parts)
+            except SecurityError as exc:
+                raise ValueError(
+                    "config must be a relative path under configs/ "
+                    f"(rejected: {raw!r})"
+                ) from exc
+            return str(candidate)
+    try:
+        resolved = assert_within(configs_root, candidate)
+    except SecurityError as exc:
+        raise ValueError(
+            "config must resolve under configs/ " f"(rejected: {raw!r})"
+        ) from exc
+    if not resolved.is_file():
+        raise ValueError(f"config not found under configs/: {raw}")
+    return str(resolved)
 
 
 def start_job(
@@ -92,12 +153,13 @@ def start_job(
     require_pay_allowed()
     jt = job_type.strip().lower()
     quote = quote_job(jt, preset=preset)
+    sandboxed = _sandbox_config_path(config)
     job = create_job(
         session_id=session_id,
         job_type=jt,
         quote=quote,
         preset=preset,
-        config_path=config,
+        config_path=sandboxed,
         data_dir=data_dir,
     )
     total = int(quote["total_sats"])
@@ -176,6 +238,11 @@ def _execute_job(job: dict[str, Any], *, data_dir: Path | None) -> dict[str, Any
     artifact = _artifact_dir(job, data_dir)
     job["artifact_dir"] = str(artifact)
     save_job(job, data_dir)
+
+    fresh = _reload_job(job, data_dir)
+    if _is_cancelled_or_refunded(fresh):
+        return fresh
+
     try:
         cmd = _cli_command(job, artifact)
     except Exception as exc:
@@ -199,6 +266,14 @@ def _execute_job(job: dict[str, Any], *, data_dir: Path | None) -> dict[str, Any
         return _fail_job(job, "job wall-clock timeout", data_dir=data_dir)
     except FileNotFoundError as exc:
         return _fail_job(job, f"runner missing: {exc}", data_dir=data_dir)
+
+    fresh = _reload_job(job, data_dir)
+    if _is_cancelled_or_refunded(fresh):
+        # Cancel won the race — do not settle as paid after refund.
+        if proc.stdout:
+            for line in proc.stdout.splitlines()[-20:]:
+                _append_log(fresh, line, data_dir)
+        return fresh
 
     if proc.stdout:
         for line in proc.stdout.splitlines()[-50:]:
@@ -230,13 +305,31 @@ def _execute_job(job: dict[str, Any], *, data_dir: Path | None) -> dict[str, Any
 def _complete_job(
     job: dict[str, Any], *, data_dir: Path | None, dry_run: bool
 ) -> dict[str, Any]:
+    fresh = _reload_job(job, data_dir)
+    if _is_cancelled_or_refunded(fresh):
+        return fresh
+
     quote = job["quote"]
-    receipt = settle_split(
-        compute_sats=int(quote["compute_sats"]),
-        protocol_fee_sats=int(quote["protocol_fee_sats"]),
-        job_id=job["job_id"],
-        session_id=job["session_id"],
-    )
+    try:
+        receipt = settle_split(
+            compute_sats=int(quote["compute_sats"]),
+            protocol_fee_sats=int(quote["protocol_fee_sats"]),
+            job_id=job["job_id"],
+            session_id=job["session_id"],
+        )
+    except Exception as exc:
+        return _fail_job(
+            job,
+            f"settle failed: {exc}",
+            data_dir=data_dir,
+            refund=True,
+        )
+
+    # Re-check cancel after settle_split (slow path) before recording spend.
+    fresh = _reload_job(job, data_dir)
+    if _is_cancelled_or_refunded(fresh):
+        return fresh
+
     # Escrow already removed total from balance; record spend split on session.
     from seiso.pay.store import append_ledger, record_session_spend
 
@@ -259,7 +352,7 @@ def _complete_job(
     )
     job["status"] = "completed"
     job["settlement"] = receipt.as_dict()
-    job["refunded_sats"] = 0
+    # Do not clear refunded_sats — a cancelled/refunded job must keep markers.
     if dry_run:
         job["artifact_dir"] = job.get("artifact_dir") or str(
             _artifact_dir(job, data_dir)
@@ -276,6 +369,13 @@ def _fail_job(
     data_dir: Path | None,
     refund: bool = True,
 ) -> dict[str, Any]:
+    fresh = _reload_job(job, data_dir)
+    if fresh.get("status") == "cancelled" or _already_refunded(fresh):
+        # Preserve cancel/refund outcome; attach error note if useful.
+        if error and not fresh.get("error"):
+            fresh["error"] = error
+            save_job(fresh, data_dir)
+        return fresh
     job["status"] = "failed"
     job["error"] = error
     _append_log(job, f"ERROR: {error}", data_dir)
@@ -293,10 +393,10 @@ def cancel_job(job_id: str, *, data_dir: Path | None = None) -> dict[str, Any]:
     prev = job.get("status")
     job["status"] = "cancelled"
     job["error"] = "cancelled by client"
+    save_job(job, data_dir)  # durable cancel flag before refund (runner races)
     if prev in {"pending", "running"}:
         _refund_escrow(job, data_dir=data_dir, reason="cancelled")
-    save_job(job, data_dir)
-    return job
+    return load_job(job_id, data_dir)
 
 
 def job_receipt(job: dict[str, Any]) -> dict[str, Any]:

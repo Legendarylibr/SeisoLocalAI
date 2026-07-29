@@ -448,6 +448,26 @@ class TrainConfig(BaseModel):
     )
 
     @field_validator(
+        "best_checkpoint_dir",
+        "verifier_data_file",
+        "data_gen_filename",
+    )
+    @classmethod
+    def _validate_relative_artifact_name(cls, v: str) -> str:
+        from seiso.security import assert_relative_artifact_name
+
+        return assert_relative_artifact_name(v, field="artifact_path")
+
+    @field_validator("final_checkpoint_dir")
+    @classmethod
+    def _validate_final_checkpoint_dir(cls, v: str) -> str:
+        if not (v or "").strip():
+            return ""
+        from seiso.security import assert_relative_artifact_name
+
+        return assert_relative_artifact_name(v, field="final_checkpoint_dir")
+
+    @field_validator(
         "output_dir",
         "dataset",
         "resume_from",

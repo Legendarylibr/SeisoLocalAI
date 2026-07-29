@@ -155,11 +155,22 @@ class ForgeSettings(BaseSettings):
         """Bind Compat key to ``pubkey_hex``; rotate when the owner changes.
 
         Returns whether the key was rotated.
+
+        When the Compat key is env-bound (``SEISO_INFERENCE_API_KEY``), rotation
+        is impossible. First bind (no prior owner) is allowed; rebinding to a
+        different owner is refused so a stale key cannot silently follow the
+        next npub.
         """
         pubkey = pubkey_hex.strip().lower()
         current = self.get_inference_api_key_owner()
         if current == pubkey:
             return False
+        if current is not None and "SEISO_INFERENCE_API_KEY" in os.environ:
+            raise RuntimeError(
+                "Cannot rebind Compat /v1 key owner while SEISO_INFERENCE_API_KEY "
+                "is env-bound (rotation impossible). Unset the env var or rotate "
+                "the key out-of-band before changing owners."
+            )
         rotated = self.rotate_inference_api_key()
         self.bind_inference_api_key_owner(pubkey)
         return rotated

@@ -642,8 +642,25 @@ class SingleGpuSlimeConfig:
             raise ValueError("verifier_max_text_chars must be non-negative")
         if not self.best_checkpoint_dir:
             raise ValueError("best_checkpoint_dir must not be empty")
+        from seiso.security import assert_relative_artifact_name
+
+        assert_relative_artifact_name(
+            self.best_checkpoint_dir, field="best_checkpoint_dir"
+        )
+        if self.final_checkpoint_dir:
+            assert_relative_artifact_name(
+                self.final_checkpoint_dir, field="final_checkpoint_dir"
+            )
         if self.write_verifier_data and not self.verifier_data_file:
             raise ValueError("verifier_data_file must not be empty")
+        if self.verifier_data_file:
+            assert_relative_artifact_name(
+                self.verifier_data_file, field="verifier_data_file"
+            )
+        if self.data_gen_filename:
+            assert_relative_artifact_name(
+                self.data_gen_filename, field="data_gen_filename"
+            )
         if self.data_gen_count < 0:
             raise ValueError("data_gen_count must be non-negative")
         if self.data_gen and self.data_gen_count < 1:
