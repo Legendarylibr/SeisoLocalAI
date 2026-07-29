@@ -70,11 +70,15 @@ Plans are sandboxed under `mesh/plans/<job_id>.json` — absolute foreign paths 
 
 ## Buzz / agent receipts (safe to post)
 
+**Relay only with signing.** Channel authority is the signed NIP-01 `nostr_event`
+(BIP-340). Unsigned `buzz_receipt` / `agent_receipt` JSON is a local pointer
+(`npub` + `event_id`) — do not treat it as proof by itself.
+
 ```json
-{"role":"plan","job_id":"…","npub":"npub1…","nostr_event_id":"…","nostr_kind":31251,"sig_alg":"bip340-schnorr","nip01":true,"buzz_compatible":true}
+{"id":"…","pubkey":"…","created_at":0,"kind":31251,"tags":[…],"content":"{…}","sig":"…"}
 ```
 
-Post **only** `buzz_receipt` / `agent_receipt` (includes `npub` + event id). Optionally publish the full `nostr_event` via buzz-cli. Never post `SEISO_MESH_TOKEN`, `token_fingerprint`, nsecs, or raw master addresses.
+Publish that signed event via buzz-cli (or an allowlisted Nostr relay). Never post `SEISO_MESH_TOKEN`, `token_fingerprint`, nsecs, or unsigned plan JSON as authority.
 
 ## Fallback
 

@@ -352,8 +352,9 @@ Buzz-**agent**-only multi-node / shared training. Opt-in (`SEISO_ALLOW_MESH=1` +
 valid `BUZZ_PRIVATE_KEY` nsec); plans are **NIP-01 / BIP-340** signed. **No**
 protocol fee. Forge UI keeps full local training config (`nnodes=1`) and refuses
 mesh — see `GET /api/training/surface`. Share `SEISO_MESH_TOKEN` (≥16 chars)
-out-of-band. Post **receipts** (npub + event id) to Buzz; optionally relay the
-signed `nostr_event` via buzz-cli. Seiso does not NIP-98 to the relay.
+out-of-band. **Relay only with signing:** publish the signed `nostr_event`
+(NIP-01 + BIP-340) via buzz-cli — unsigned receipts are local pointers.
+Seiso does not NIP-98 to the relay.
 
 ```bash
 export SEISO_ALLOW_MESH=1
@@ -363,6 +364,7 @@ export BUZZ_PRIVATE_KEY=nsec1…   # must be a valid Nostr secret (signing key)
 seiso mesh announce --channel "$CHANNEL" --gpus 2
 seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2 --master-addr 10.0.0.1 --gpus-per-node 2
 seiso mesh worker --plan "$JOB_ID" --rank 0   # --rank required; verifies Nostr sig
+# → relay the returned nostr_event via buzz-cli (signed event only)
 ```
 
 Prefer local → mesh → paid marketplace when orchestrating from a Buzz agent

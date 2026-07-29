@@ -47,7 +47,10 @@ def test_announce_plan_worker(mesh_env: Path) -> None:
     assert ann["buzz_receipt"]["npub"].startswith("npub1")
     assert ann["buzz_receipt"]["nostr_event_id"]
     assert ann["buzz_receipt"]["sig_alg"] == "bip340-schnorr"
+    assert ann["buzz_receipt"]["relay_policy"] == "signed_event_only"
+    assert "Relay policy" in ann["note"]
     assert verify_event(ann["nostr_event"])
+    assert ann["nostr_event"]["sig"]
     assert "test-mesh-token" not in json_dumps(ann["buzz_receipt"])
     assert "token" not in ann["buzz_receipt"]
 
@@ -118,6 +121,15 @@ def test_trusted_npub_allowlist(
     monkeypatch.setenv("SEISO_MESH_TRUSTED_NPUBS", other.npub)
     with pytest.raises(RuntimeError, match="TRUSTED"):
         worker_env(plan_out["plan"], node_rank=0)
+
+
+def test_relay_signed_event_refuses_unsigned() -> None:
+    from seiso.mesh.nostr_bind import relay_signed_event
+
+    with pytest.raises(RuntimeError, match="Relay only with signing"):
+        relay_signed_event({})
+    with pytest.raises(RuntimeError, match="Relay only with signing"):
+        relay_signed_event({"event": {"id": "ab" * 32, "sig": "00" * 64}})
 
 
 def test_build_plan_requires_gpus_per_node(mesh_env: Path) -> None:

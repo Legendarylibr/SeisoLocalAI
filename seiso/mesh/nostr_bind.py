@@ -5,8 +5,10 @@ Schnorr signature and that the event content matches the local plan body.
 Optional ``SEISO_MESH_TRUSTED_NPUBS`` / ``SEISO_MESH_TRUSTED_PUBKEYS`` allowlists
 restrict which agent keys may author plans.
 
-Seiso does not publish these events to a relay; agents may post the event id
-(or the full event) via buzz-cli if desired.
+**Relay policy:** publish only the signed NIP-01 ``event`` (via buzz-cli /
+allowlisted relays). Unsigned receipt JSON is local metadata — not authority
+and not what peers should trust from a channel. Seiso itself does not NIP-98
+to the Buzz relay.
 """
 
 from __future__ import annotations
@@ -24,6 +26,11 @@ from seiso.research.nostr.keys import NostrKeyPair, npub_from_hex
 SEISO_MESH_PLAN_KIND = 31251
 SEISO_MESH_ANNOUNCE_KIND = 31252
 SEISO_MESH_HEARTBEAT_KIND = 31253
+
+_RELAY_ONLY_WITH_SIGNING_NOTE = (
+    "Relay policy: post only the signed nostr_event (NIP-01 + BIP-340) via "
+    "buzz-cli. Do not treat unsigned receipt JSON as channel authority."
+)
 
 _SIGNED_PLAN_KEYS = (
     "job_id",
@@ -210,11 +217,27 @@ def sign_mesh_heartbeat(
 
 
 def receipt_nostr_fields(nostr: dict[str, Any]) -> dict[str, Any]:
-    """Channel-safe Nostr fields (no private key material)."""
+    """Local/agent receipt pointers (not a substitute for the signed event)."""
     return {
         "npub": nostr.get("npub") or npub_from_hex(str(nostr.get("pubkey") or "")),
         "nostr_event_id": nostr.get("event_id"),
         "nostr_kind": nostr.get("kind"),
         "sig_alg": nostr.get("alg") or "bip340-schnorr",
         "nip01": True,
+        "relay_policy": "signed_event_only",
     }
+
+
+def relay_signed_event(nostr: dict[str, Any]) -> dict[str, Any]:
+    """Return the only channel/relay-worthy payload: the verified NIP-01 event."""
+    event = nostr.get("event")
+    if not isinstance(event, dict) or not verify_event(event):
+        raise RuntimeError(
+            "Refusing to relay: mesh Nostr event missing or signature invalid. "
+            "Relay only with signing."
+        )
+    return dict(event)
+
+
+def relay_policy_note() -> str:
+    return _RELAY_ONLY_WITH_SIGNING_NOTE

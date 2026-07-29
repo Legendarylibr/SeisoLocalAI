@@ -5,8 +5,9 @@ a valid Buzz agent ``BUZZ_PRIVATE_KEY`` nsec. Plans/announces/heartbeats are
 NIP-01 events signed with BIP-340 Schnorr. Peers also share an out-of-band
 ``SEISO_MESH_TOKEN`` (HMAC-bound per job+pubkey). Forge UI cannot start mesh.
 
-Seiso does not NIP-98 to the Buzz relay (buzz-cli does). Post only
-``buzz_receipt`` / ``agent_receipt`` to channels — never tokens or nsecs.
+**Relay only with signing:** channel/relay authority is the signed
+``nostr_event``. Unsigned receipts are local pointers. Seiso does not NIP-98
+to the Buzz relay — buzz-cli publishes the signed event.
 """
 
 from __future__ import annotations
@@ -25,6 +26,8 @@ from seiso.agent.receipts import agent_receipt, channel_safe_plan_view
 from seiso.mesh.flags import mesh_token, require_mesh_allowed
 from seiso.mesh.nostr_bind import (
     receipt_nostr_fields,
+    relay_policy_note,
+    relay_signed_event,
     sign_mesh_announce,
     sign_mesh_heartbeat,
     sign_mesh_plan,
@@ -129,12 +132,8 @@ def announce(
         "buzz_receipt": receipt,
         "agent_receipt": receipt,
         "local_path": str(path),
-        "nostr_event": nostr.get("event"),
-        "note": (
-            "Post buzz_receipt / agent_receipt to the channel; "
-            "optionally post nostr_event via buzz-cli. "
-            "Keep SEISO_MESH_TOKEN and nsec out-of-band."
-        ),
+        "nostr_event": relay_signed_event(nostr),
+        "note": relay_policy_note(),
     }
 
 
@@ -224,11 +223,10 @@ def build_plan(
         "plan_path": str(path),
         "buzz_receipt": receipt,
         "agent_receipt": receipt,
-        "nostr_event": nostr.get("event"),
+        "nostr_event": relay_signed_event(nostr),
         "note": (
-            "Post buzz_receipt / agent_receipt only (includes npub + event id). "
-            "Optionally relay nostr_event via buzz-cli. Never post "
-            "token_fingerprint, SEISO_MESH_TOKEN, or nsecs."
+            f"{relay_policy_note()} "
+            "Keep token_fingerprint, SEISO_MESH_TOKEN, and nsecs local-only."
         ),
     }
 
@@ -320,4 +318,10 @@ def buzz_heartbeat(plan: dict[str, Any], *, node_rank: int, status: str) -> dict
         world_size_nodes=plan.get("distributed_num_nodes"),
         **receipt_nostr_fields(nostr),
     )
-    return receipt
+    # Heartbeat return includes the signed event for relay; receipt is local pointer.
+    receipt_with_event = {
+        **receipt,
+        "nostr_event": relay_signed_event(nostr),
+        "note": relay_policy_note(),
+    }
+    return receipt_with_event
