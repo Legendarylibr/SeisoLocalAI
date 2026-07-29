@@ -137,7 +137,13 @@ def test_well_known_and_app_health(pay_env: Path) -> None:
     assert h.json()["pay_allowed"] is True
     wk = client.get("/.well-known/seiso-pay.json")
     assert wk.status_code == 200
-    assert wk.json()["protocol_fee_bps"] == 500
+    body_wk = wk.json()
+    assert body_wk["protocol_fee_bps"] == 500
+    method_ids = {m["id"] for m in body_wk["payment_methods"]}
+    assert method_ids >= {"ark", "l402", "faucet"}
+    assert "L402" in body_wk["payment_methods_note"]
+    assert body_wk["l402_sim"] is True
+    assert "fund_l402" in body_wk["endpoints"]
 
     created = client.post(
         "/pay/v1/sessions",
@@ -147,6 +153,12 @@ def test_well_known_and_app_health(pay_env: Path) -> None:
     body = created.json()
     assert body["token"].startswith("seiso_pay_")
     assert body["session"]["status"] == "active"
+    funding = body["funding"]
+    assert "payment_methods" in funding
+    assert funding["l402"]["method"] == "l402"
+    assert funding["l402"]["status"] == "ready"
+    assert funding["l402"]["do_not_use_live_ln"] is True
+    assert "lightningfaucet.com" in funding["l402"]["reference"]
 
     q = client.post("/pay/v1/quotes", json={"type": "finetune", "preset": "smoke"})
     assert q.status_code == 200
@@ -159,3 +171,141 @@ def test_well_known_and_app_health(pay_env: Path) -> None:
     )
     assert job.status_code == 200
     assert job.json()["job"]["status"] == "completed"
+
+
+def test_l402_fund_exchange_and_job_failure_refund(
+    pay_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """L402 sim credits session; failed jobs restore escrow to balance."""
+    pytest.importorskip("fastapi")
+    monkeypatch.setenv("SEISO_PAY_L402_SIM", "1")
+    from fastapi.testclient import TestClient
+
+    from seiso.pay.app import build_app
+    from seiso.pay.jobs import _fail_job, job_receipt
+    from seiso.pay.pricing import quote_job
+    from seiso.pay.store import create_job, escrow_hold, load_session
+
+    client = TestClient(build_app())
+    created = client.post(
+        "/pay/v1/sessions",
+        json={"scopes": ["finetune"], "sats": 0},
+    )
+    assert created.status_code == 200
+    token = created.json()["token"]
+    session_id = created.json()["session"]["session_id"]
+    assert created.json()["session"]["status"] == "pending"
+
+    challenge = client.post(
+        "/pay/v1/sessions/fund/l402",
+        json={"session_id": session_id, "sats": 25_000},
+    )
+    assert challenge.status_code == 402
+    assert "WWW-Authenticate" in challenge.headers
+    assert challenge.headers["WWW-Authenticate"].startswith("L402 ")
+    ch = challenge.json()
+    assert ch["macaroon"]
+    assert ch["invoice"].startswith("lnbcsseisosim1")
+    assert ch["sim_preimage"]
+
+    done = client.post(
+        "/pay/v1/sessions/fund/l402/complete",
+        headers={"Authorization": f"L402 {ch['macaroon']}:{ch['sim_preimage']}"},
+    )
+    assert done.status_code == 200
+    assert done.json()["session"]["status"] == "active"
+    assert done.json()["session"]["balance_sats"] == 25_000
+    assert done.json()["funding_mode"] == "l402"
+
+    again = client.post(
+        "/pay/v1/sessions/fund/l402/complete",
+        headers={"Authorization": f"L402 {ch['macaroon']}:{ch['sim_preimage']}"},
+    )
+    assert again.status_code == 409
+
+    me = client.get(
+        "/pay/v1/sessions/me",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert me.json()["funding_mode"] == "l402"
+
+    quote = quote_job("finetune", preset="smoke")
+    held = create_job(
+        session_id=session_id,
+        job_type="finetune",
+        quote=quote,
+        preset="smoke",
+    )
+    escrow_hold(
+        session_id,
+        total_sats=int(quote["total_sats"]),
+        job_id=held["job_id"],
+    )
+    held["status"] = "running"
+    before = load_session(session_id)["balance_sats"]
+    failed = _fail_job(held, "simulated trainer crash", data_dir=None)
+    assert failed["status"] == "failed"
+    assert failed["refunded_sats"] == quote["total_sats"]
+    assert failed["settlement"]["status"] == "refunded"
+    assert job_receipt(failed)["refunded_sats"] == quote["total_sats"]
+    after = load_session(session_id)["balance_sats"]
+    assert after == before + int(quote["total_sats"])
+    assert load_session(session_id)["refunded_sats"] == quote["total_sats"]
+
+
+def test_l402_hide_and_fail_closed(pay_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from seiso.pay.ark import funding_instructions
+    from seiso.pay.flags import payment_methods
+    from seiso.pay.l402 import require_l402_ready
+
+    monkeypatch.setenv("SEISO_PAY_L402", "0")
+    ids = {m["id"] for m in payment_methods()}
+    assert "l402" not in ids
+    assert "ark" in ids
+    funding = funding_instructions("sess-test", 1000)
+    assert funding["l402"] is None
+
+    monkeypatch.delenv("SEISO_PAY_FAUCET", raising=False)
+    monkeypatch.setenv("SEISO_PAY_L402_SIM", "0")
+    monkeypatch.setenv("SEISO_PAY_L402", "1")
+    with pytest.raises(RuntimeError, match="not functional yet"):
+        require_l402_ready()
+
+
+def test_cancel_job_refunds(pay_env: Path) -> None:
+    from seiso.pay.jobs import cancel_job
+    from seiso.pay.pricing import quote_job
+    from seiso.pay.store import (
+        activate_session,
+        create_job,
+        create_session,
+        escrow_hold,
+        load_session,
+        save_job,
+    )
+
+    created = create_session(scopes=["finetune"])
+    activate_session(created["session_id"], amount_sats=50_000, funding_mode="faucet")
+    quote = quote_job("finetune", preset="smoke")
+    job = create_job(
+        session_id=created["session_id"],
+        job_type="finetune",
+        quote=quote,
+        preset="smoke",
+    )
+    escrow_hold(
+        created["session_id"],
+        total_sats=int(quote["total_sats"]),
+        job_id=job["job_id"],
+    )
+    job["status"] = "running"
+    save_job(job)
+    before = load_session(created["session_id"])["balance_sats"]
+    cancelled = cancel_job(job["job_id"])
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["refunded_sats"] == quote["total_sats"]
+    assert cancelled["settlement"]["status"] == "refunded"
+    again = cancel_job(job["job_id"])
+    assert again["refunded_sats"] == quote["total_sats"]
+    after = load_session(created["session_id"])["balance_sats"]
+    assert after == before + int(quote["total_sats"])

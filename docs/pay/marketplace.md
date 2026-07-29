@@ -1,6 +1,6 @@
 # Seiso sats marketplace (opt-in)
 
-> **Not functional yet — do not use.** This surface is scaffolding / docs only. Do not run it for production work or real funds. Live Ark settlement is not wired; faucet/sim only for local smoke tests.
+> **Not functional yet — do not use.** This surface is scaffolding / docs only. Do not run it for production work or real funds. Live **Ark** and **L402** settlement are not wired; faucet/sim only for local smoke tests.
 
 Remote **finetune / RL / inference** priced in sats. Self-hosted Seiso stays **free** and never pays a protocol fee.
 
@@ -14,6 +14,20 @@ Requires explicit `SEISO_ALLOW_PAY=1`. Leave unset for normal local Forge/CLI us
 | Marketplace | Operator `SEISO_PAY_URL` | Buyer pays quote | Default **5%** on top of compute |
 | Mesh (experimental) | Buzz peers | Usually none | None |
 
+## Payment methods
+
+Marketplace funding is designed to support multiple sats rails. **None of the live rails are functional yet — do not use for real funds.**
+
+| Method | How it works (when wired) | Status today |
+|--------|---------------------------|--------------|
+| **Ark** | Buyer pays into operator Ark address; fee split to operator + protocol treasury | **Not functional** — Bark/Second client not bundled; faucet/sim only |
+| **L402** ([Lightning HTTP 402](https://lightningfaucet.com/learn/l402-payments-explained/)) | Server returns `HTTP 402` + `WWW-Authenticate: L402` with a BOLT-11 invoice and macaroon; client pays Lightning, retries with `Authorization: L402 <macaroon>:<preimage>` → session credit | **Sim ready** with `SEISO_PAY_L402_SIM=1` (or faucet); **live LN not wired** — do not use for real funds |
+| **Dev faucet** | `SEISO_PAY_FAUCET=1` credits a session without chain IO | Smoke tests **only** — never on a public market |
+
+Discovery advertises these under `payment_methods` in `GET /.well-known/seiso-pay.json` and on session `funding` payloads. Hide L402 from discovery with `SEISO_PAY_L402=0` (Ark still listed).
+
+L402 fits agent/API buyers especially well: no accounts, machine-readable 402 challenge, sat-denominated per session or (later) per request. See the [L402 payments explained](https://lightningfaucet.com/learn/l402-payments-explained/) reference for the wire format.
+
 ## Operator (sell capacity)
 
 ```bash
@@ -22,6 +36,8 @@ export SEISO_PROTOCOL_TREASURY_ARK=ark1…           # required for non-faucet s
 export SEISO_OPERATOR_ARK=ark1…
 export SEISO_PROTOCOL_FEE_BPS=500                  # 5%
 # export SEISO_PAY_FAUCET=1                        # DEV ONLY — never on a public market
+# export SEISO_PAY_L402=0                          # optional: hide L402 from discovery
+# export SEISO_PAY_L402_SIM=1                      # sim L402 fund/exchange (also on with faucet)
 source .venv/bin/activate
 seiso forge --no-open &                            # localhost :8765
 seiso pay serve --host 127.0.0.1 --port 8787       # sidecar; put TLS in front for public
@@ -42,7 +58,9 @@ seiso pay quote --type finetune --preset smoke
 # → compute_sats, protocol_fee_sats, total_sats, …
 
 seiso pay session create --sats 20000 --scopes inference,finetune,rl
-# → token once; funding.ark_address for Ark pay-in (or faucet when enabled)
+# → token once; funding.payment_methods + funding.ark_address / funding.l402
+# Sim L402 top-up (or --faucet): 
+# seiso pay session fund --session ID --sats 20000 --l402
 export SEISO_PAY_TOKEN=seiso_pay_…
 
 # Inference (remote)
@@ -85,6 +103,34 @@ Behavior today (`seiso/pay/ark.py`):
 
 Quotes always show the fee split (`payee_operator_sats`, `payee_protocol_sats`).
 
+## Opt-in L402 settlement
+
+**L402** (Lightning HTTP 402) funds the same prepaid marketplace sessions (not per-request auth on every job poll).
+
+> **Live Lightning is not functional yet — do not use for real funds.** Challenge minting against a real LN node is not bundled. **Simulated** fund/exchange works with `SEISO_PAY_L402_SIM=1` (also enabled when `SEISO_PAY_FAUCET=1`).
+
+| Variable | Role |
+|----------|------|
+| `SEISO_PAY_L402` | Default `1` — advertise L402 in discovery/funding; set `0` to hide |
+| `SEISO_PAY_L402_SIM` | Enable simulated mint + preimage verify (credits session balance) |
+| `SEISO_PAY_L402_ROOT_KEY` | Optional HMAC seed for sim macaroons |
+| (future) Lightning node / custodian | Issue real BOLT-11 invoices + verify preimages |
+
+Client flow (sim today; live LN later):
+
+1. `POST /pay/v1/sessions/fund/l402` with `{session_id, sats}` → **HTTP 402** + `WWW-Authenticate: L402 …` + JSON challenge.
+2. Pay BOLT-11 (or use `sim_preimage` in sim) and capture preimage.
+3. `POST /pay/v1/sessions/fund/l402/complete` with `Authorization: L402 <macaroon>:<preimage>` → session credited; keep using `Bearer seiso_pay_*`.
+4. CLI: `seiso pay session fund --session ID --sats N --l402` (auto mint+complete in sim).
+
+Reference: [L402 payments explained](https://lightningfaucet.com/learn/l402-payments-explained/) (Lightning Faucet).
+
+## Job failure / cancel refunds
+
+Jobs escrow the full quote up front. On **failure**, **cancel**, or **GPU-busy** reject, escrow is restored to the **prepaid session balance** (`refunded_sats` on the job + session; ledger `escrow_refund`).
+
+Lightning/L402 pay-in is one-way — marketplace refunds do **not** send sats back over Lightning. Buyers reuse the restored session balance for later jobs/inference. Receipts include `refunded_sats` and `settlement.status=refunded`.
+
 ## Protocol fee
 
 - Default `SEISO_PROTOCOL_FEE_BPS=500` (5%), added **on top** of operator list price.
@@ -104,7 +150,7 @@ Agents orchestrating paid runs should post a short receipt to the Buzz channel (
 - job_id: …
 ```
 
-Never post `SEISO_PAY_TOKEN`, nsecs, HF tokens, or Ark private material to the channel.
+Never post `SEISO_PAY_TOKEN`, nsecs, HF tokens, Ark private material, L402 macaroons/preimages, or Lightning node credentials to the channel.
 
 ## Security notes (operators)
 

@@ -1,4 +1,9 @@
-"""Ark settlement interface — faucet now; Bark/Second wire when configured."""
+"""Ark settlement interface — faucet now; Bark/Second wire when configured.
+
+Also composes shared funding discovery (Ark + L402 + faucet). Live Ark and
+live Lightning L402 are **not functional yet** — do not use for real funds.
+``SEISO_PAY_L402_SIM=1`` (or faucet) enables simulated L402 fund/exchange.
+"""
 
 from __future__ import annotations
 
@@ -11,10 +16,12 @@ from seiso.pay.flags import (
     faucet_enabled,
     operator_ark,
     pay_settle_ready,
+    payment_methods,
     protocol_treasury_ark,
 )
+from seiso.pay.l402 import funding_l402_block, l402_sim_enabled
 
-SettleMode = Literal["faucet", "ark", "simulated"]
+SettleMode = Literal["faucet", "ark", "simulated", "l402"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,19 +41,37 @@ class SettlementReceipt:
 
 
 def funding_instructions(session_id: str, amount_sats: int) -> dict[str, Any]:
-    """Payment instructions for buyers (Ark address and/or faucet)."""
+    """Payment instructions for buyers (Ark, L402, and/or faucet)."""
     ark_addr = operator_ark() or f"ark:pending:{session_id[:12]}"
+    sim = l402_sim_enabled()
     out: dict[str, Any] = {
         "session_id": session_id,
         "amount_sats": amount_sats,
+        "payment_methods": payment_methods(),
         "ark_address": ark_addr,
         "ln_invoice": None,
+        "l402": funding_l402_block(session_id, amount_sats),
         "faucet_available": faucet_enabled(),
         "network": (os.environ.get("SEISO_ARK_NETWORK") or "signet").strip(),
         "status": "pending",
+        "do_not_use_live_rails": True,
+        "detail": (
+            "Live Ark and live Lightning L402 are not functional yet — do not "
+            "use for real funds. "
+            + (
+                "Simulated L402 fund/exchange is available "
+                "(POST /pay/v1/sessions/fund/l402)."
+                if sim
+                else "Faucet/sim only for local smoke tests."
+            )
+        ),
     }
     if faucet_enabled():
         out["faucet_hint"] = "Dev faucet: seiso pay session fund --session ID --sats N --faucet"
+    if sim:
+        out["l402_hint"] = (
+            "Sim L402: seiso pay session fund --session ID --sats N --l402"
+        )
     return out
 
 

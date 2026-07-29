@@ -53,6 +53,7 @@ def create_session(
         "funded_sats": 0,
         "spent_compute_sats": 0,
         "spent_protocol_fee_sats": 0,
+        "refunded_sats": 0,
         "funding_mode": funding_mode,
         "created_at": now,
         "updated_at": now,
@@ -218,10 +219,19 @@ def escrow_release_refund(
     amount_sats: int,
     data_dir: Path | None = None,
     job_id: str | None = None,
+    reason: str = "job_failure",
 ) -> dict[str, Any]:
+    """Credit escrow back to the prepaid session balance.
+
+    Lightning/L402 pay-in is one-way; marketplace refunds restore session
+    balance (not an on-chain/LN reverse payment).
+    """
+    if amount_sats <= 0:
+        return load_session(session_id, data_dir)
     with _lock:
         record = load_session(session_id, data_dir)
         record["balance_sats"] = int(record.get("balance_sats") or 0) + int(amount_sats)
+        record["refunded_sats"] = int(record.get("refunded_sats") or 0) + int(amount_sats)
         _save_session(record, data_dir)
         _append_ledger(
             {
@@ -229,6 +239,7 @@ def escrow_release_refund(
                 "session_id": session_id,
                 "job_id": job_id,
                 "amount_sats": amount_sats,
+                "reason": reason,
                 "balance_sats": record["balance_sats"],
                 "ts": time.time(),
             },
@@ -262,6 +273,7 @@ def create_job(
         "artifact_dir": None,
         "error": None,
         "settlement": None,
+        "refunded_sats": 0,
     }
     path = safe_join(pay_root(data_dir), "jobs", f"{job_id}.json")
     with _lock:
@@ -350,6 +362,7 @@ def public_session_view(record: dict[str, Any]) -> dict[str, Any]:
         "funded_sats": record.get("funded_sats"),
         "spent_compute_sats": record.get("spent_compute_sats"),
         "spent_protocol_fee_sats": record.get("spent_protocol_fee_sats"),
+        "refunded_sats": int(record.get("refunded_sats") or 0),
         "funding_mode": record.get("funding_mode"),
         "token_prefix": record.get("token_prefix"),
         "created_at": record.get("created_at"),

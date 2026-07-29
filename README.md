@@ -47,7 +47,7 @@ Seiso combines a **web workspace (Forge)** and a **Python core (CLI + library)**
 | RL quant + CUDA kernel policy | RL Quant | `seiso rl-quant run` |
 | Visual data/recipe pipelines | Recipe Studio | — |
 | RAG knowledge bases | Knowledge | — |
-| Opt-in remote sats marketplace (Ark) — **not functional, do not use yet** | — | `seiso pay` ([docs](docs/pay/marketplace.md)) |
+| Opt-in remote sats marketplace (Ark + L402) — **not functional, do not use yet** | — | `seiso pay` ([docs](docs/pay/marketplace.md)) |
 | Experimental Buzz shared / multi-node train — **not functional, do not use yet** | — | `seiso mesh` ([docs](docs/training/mesh.md)) |
 
 **Why local-first?**
@@ -477,7 +477,7 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 - **Optimizations:** gradient checkpointing, packing, RSLoRA, train-on-responses-only
 - **Multi-GPU:** `torchrun` distributed workers; rank-0 checkpoint writes ([multi-gpu](docs/training/multi-gpu.md))
 - **Buzz mesh (experimental) — not functional, do not use yet:** opt-in peer coordination for shared / multi-node jobs ([mesh](docs/training/mesh.md))
-- **Opt-in sats marketplace — not functional, do not use yet:** remote finetune/RL/inference with Ark settlement + protocol fee ([marketplace](docs/pay/marketplace.md))
+- **Opt-in sats marketplace — not functional, do not use yet:** remote finetune/RL/inference with Ark + L402 settlement + protocol fee ([marketplace](docs/pay/marketplace.md))
 - **Fused kernels:** RMSNorm, SwiGLU MLP, cross-entropy, fused LoRA delta ([kernels](docs/training/kernels.md))
 - **Release-style post-training:** `method: slime` adds rollout rewards, verifier data, best/final checkpoints, and plateau auto-stop; multi-GPU rollouts can use **vLLM** (`rollout_backend: vllm`) or SGLang ([training](docs/training/quickstart.md#slime-post-training))
 - **External NeMo RL:** `method: nemo_rl` shells out to a local [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL) checkout via `uv run` (not vendored); see [NeMo RL](docs/training/quickstart.md#nemo-rl)
@@ -688,7 +688,7 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 | NeMo RL (external) | [docs/training/quickstart.md § NeMo RL](docs/training/quickstart.md#nemo-rl) |
 | GPU kernels | [docs/training/kernels.md](docs/training/kernels.md) |
 | Multi-GPU | [docs/training/multi-gpu.md](docs/training/multi-gpu.md) |
-| Opt-in sats marketplace (Ark) | [docs/pay/marketplace.md](docs/pay/marketplace.md) |
+| Opt-in sats marketplace (Ark + L402) | [docs/pay/marketplace.md](docs/pay/marketplace.md) |
 | Buzz mesh shared training | [docs/training/mesh.md](docs/training/mesh.md) |
 | Buzz agent orchestration skill | [`.agents/skills/seiso-orchestrate/`](.agents/skills/seiso-orchestrate/SKILL.md) |
 | Inference backends | [docs/inference/backends.md](docs/inference/backends.md) |
@@ -705,12 +705,12 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 
 Self-hosted Forge/CLI remain **free** and unchanged unless you opt in. Two optional surfaces:
 
-> **Not functional yet — do not use.** Opt-in **Ark marketplace** (`seiso pay`) and **Buzz mesh** (`seiso mesh`) are **not ready for real use**. Treat them as docs / scaffolding only: do not run them for production work, real funds, or trusted multi-node jobs. Live Ark pay-in / Bark–Second settlement is **not wired** (quotes + faucet/simulated ledgers exist for smoke tests). Use `SEISO_PAY_FAUCET=1` for local experiments only — never with real money or a public market.
+> **Not functional yet — do not use.** Opt-in **Ark / L402 marketplace** (`seiso pay`) and **Buzz mesh** (`seiso mesh`) are **not ready for real use**. Treat them as docs / scaffolding only: do not run them for production work, real funds, or trusted multi-node jobs. Live Ark pay-in / Bark–Second settlement and live L402 (Lightning HTTP 402) are **not wired** (quotes + faucet/simulated ledgers exist for smoke tests). Use `SEISO_PAY_FAUCET=1` for local experiments only — never with real money or a public market.
 
 | Mode | Flag | Settlement | Protocol fee | Docs |
 |------|------|------------|--------------|------|
 | **Self-hosted** (default) | — | None | None | this README |
-| **Sats marketplace** | `SEISO_ALLOW_PAY=1` | Opt-in **Ark** (**not functional — do not use yet**; faucet/sim only) | Default **5%** on top of compute | [pay/marketplace.md](docs/pay/marketplace.md) |
+| **Sats marketplace** | `SEISO_ALLOW_PAY=1` | Opt-in **Ark** + **L402** (**not functional — do not use yet**; faucet/sim only) | Default **5%** on top of compute | [pay/marketplace.md](docs/pay/marketplace.md) |
 | **Buzz mesh** (experimental) | `SEISO_ALLOW_MESH=1` | Reciprocal peers (**not functional — do not use yet**); `SEISO_MESH_TOKEN` out-of-band | **None** | [training/mesh.md](docs/training/mesh.md) |
 
 ```bash
@@ -730,7 +730,7 @@ seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2
 
 Buzz agents should follow [`.agents/skills/seiso-orchestrate/`](.agents/skills/seiso-orchestrate/SKILL.md): prefer local free compute → mesh peers → paid marketplace → ask a human. Post receipts (job ids, fee split, mesh plan ids) to the channel; never post `SEISO_PAY_TOKEN`, `SEISO_MESH_TOKEN`, or `nsec`.
 
-`SEISO_ARK_BACKEND=bark|second` is **not functional currently** (reserved for a future Bark/Second client wire). Until then use faucet/simulated settlement or leave the backend unset.
+`SEISO_ARK_BACKEND=bark|second` is **not functional currently** (reserved for a future Bark/Second client wire). L402 is advertised in discovery (`SEISO_PAY_L402`, default on) but **not functional currently** — see [L402 payments explained](https://lightningfaucet.com/learn/l402-payments-explained/). Until either rail is wired, use faucet/simulated settlement or leave backends unset.
 
 ---
 ## RL Stack
