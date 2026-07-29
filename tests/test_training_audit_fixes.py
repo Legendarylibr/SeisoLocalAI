@@ -126,3 +126,49 @@ def test_train_config_rejects_vllm_weight_dir_escape(tmp_path: Path):
                 "vllm_weight_dir": "../../escape",
             }
         )
+
+
+def test_full_method_default_lr_is_not_lora_2e4():
+    from seiso.training.config import TrainMethod
+    from seiso.training.practices import learning_rate_for_method
+
+    assert learning_rate_for_method(TrainMethod.FULL) == pytest.approx(1e-5)
+    assert learning_rate_for_method(TrainMethod.LORA, explicit=2e-4) == pytest.approx(
+        2e-4
+    )
+
+
+def test_format_eval_prompt_applies_chat_template():
+    pytest.importorskip("torch")
+    from seiso.distill_rl.evaluate import _format_eval_prompt
+
+    class _Tok:
+        def apply_chat_template(self, messages, **kwargs):
+            return f"<user>{messages[0]['content']}</user><assistant>"
+
+    assert (
+        _format_eval_prompt(_Tok(), "hi", use_chat_template=True)
+        == "<user>hi</user><assistant>"
+    )
+    assert _format_eval_prompt(_Tok(), "hi", use_chat_template=False) == "hi"
+
+
+def test_nemo_base_config_rejects_path_escape(tmp_path: Path):
+    from seiso.nemo_rl.config_builder import _resolve_base_config_path
+
+    root = tmp_path / "nemo"
+    root.mkdir()
+    (root / "ok.yaml").write_text("x: 1\n", encoding="utf-8")
+    assert _resolve_base_config_path(root, "ok.yaml").name == "ok.yaml"
+    with pytest.raises(ValueError, match="base_config|\\.\\."):
+        _resolve_base_config_path(root, "../../../etc/passwd")
+
+
+def test_select_hub_folder_prefers_lora_dir(tmp_path: Path):
+    from seiso.export.formats import ExportFormat, _select_hub_folder
+
+    out = tmp_path / "export"
+    lora = out / "lora"
+    lora.mkdir(parents=True)
+    (lora / "adapter_config.json").write_text("{}", encoding="utf-8")
+    assert _select_hub_folder(out, [ExportFormat.LORA]) == lora

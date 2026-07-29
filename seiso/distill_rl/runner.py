@@ -204,6 +204,7 @@ def _run_single_job(
             prompt_library_path=eval_library,
             eval_max_prompts=config.eval_max_prompts,
             trust_remote_code=config.trust_remote_code,
+            use_chat_template=bool(config.use_chat_template),
             benchmark_verifiable=config.benchmark_verifiable,
             benchmark_tasks=config.benchmark_tasks,
             require_thinking_trace=config.require_thinking_trace,

@@ -125,11 +125,17 @@ def build_command(
     script = config.recipe_script()
     base = config.recipe_base_config()
     script_path = nemo_root / script
-    base_path = nemo_root / base
+    base_path = _resolve_base_config_path(nemo_root, base)
     if not script_path.is_file():
         raise FileNotFoundError(f"NeMo RL script missing: {script_path}")
     if not base_path.is_file():
         raise FileNotFoundError(f"NeMo RL base config missing: {base_path}")
+
+    # Prefer a path relative to nemo_root for Hydra when possible.
+    try:
+        base_arg = str(base_path.resolve().relative_to(nemo_root.resolve()))
+    except ValueError:
+        base_arg = str(base_path)
 
     cmd = [
         uv,
@@ -137,10 +143,43 @@ def build_command(
         "python",
         script,
         "--config",
-        base,
+        base_arg,
     ]
     cmd.extend(build_hydra_overrides(config))
     return cmd
+
+
+def _resolve_base_config_path(nemo_root: Path, base: str) -> Path:
+    """Resolve recipe base YAML under ``nemo_root``; reject ``..`` escapes."""
+    from seiso.security import SecurityError, assert_relative_artifact_name, assert_within
+
+    raw = str(base or "").strip()
+    if not raw:
+        raise ValueError("NeMo RL base_config must not be empty")
+    root = nemo_root.resolve()
+    candidate = Path(raw).expanduser()
+    if candidate.is_absolute():
+        try:
+            return assert_within(root, candidate)
+        except SecurityError as exc:
+            raise ValueError(
+                f"nemo_rl base_config must resolve under the NeMo checkout "
+                f"(rejected: {raw!r})"
+            ) from exc
+    try:
+        assert_relative_artifact_name(raw, field="base_config")
+    except ValueError as exc:
+        raise ValueError(
+            f"nemo_rl base_config must be a relative path without '..' "
+            f"(rejected: {raw!r})"
+        ) from exc
+    try:
+        return assert_within(root, root / raw)
+    except SecurityError as exc:
+        raise ValueError(
+            f"nemo_rl base_config must resolve under the NeMo checkout "
+            f"(rejected: {raw!r})"
+        ) from exc
 
 
 def _hydra_quote(value: str) -> str:

@@ -294,9 +294,13 @@ class TrainingOrchestrator(Orchestrator):
 
         config.output_dir.mkdir(parents=True, exist_ok=True)
         cfg_path = config.output_dir / f"{job_id}.worker.yaml"
-        cfg_path.write_text(
-            yaml.safe_dump(config.model_dump(mode="json")), encoding="utf-8"
-        )
+        # Never persist HF tokens in the worker YAML (env injection below).
+        dump_cfg = config.model_dump(mode="json")
+        extra = dump_cfg.get("extra")
+        if isinstance(extra, dict) and "hf_token" in extra:
+            extra = {k: v for k, v in extra.items() if k != "hf_token"}
+            dump_cfg["extra"] = extra
+        cfg_path.write_text(yaml.safe_dump(dump_cfg), encoding="utf-8")
         cfg_path.chmod(0o600)
 
         self._emit_log(

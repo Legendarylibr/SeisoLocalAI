@@ -201,6 +201,7 @@ def run_auto_hyperparameter_sweep(
             prompt_library_path=config.prompt_library_path,
             eval_max_prompts=max(1, min(config.eval_max_prompts, 8)),
             trust_remote_code=config.trust_remote_code,
+            use_chat_template=bool(config.use_chat_template),
             benchmark_verifiable=bool(
                 getattr(config, "benchmark_verifiable", False)
             ),

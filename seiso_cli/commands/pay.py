@@ -241,10 +241,19 @@ def pay_job(
         if not job_id:
             console.print("[red]--id required[/]")
             raise typer.Exit(1)
+        if not sid:
+            console.print(
+                "[red]--session or SEISO_PAY_TOKEN required "
+                "(must own the job, same as HTTP cancel/status)[/]"
+            )
+            raise typer.Exit(1)
+        job = load_job(job_id)
+        if str(job.get("session_id") or "") != str(sid):
+            console.print("[red]job not found for this session[/]")
+            raise typer.Exit(1)
         if act == "cancel":
             _print_json({"job": cancel_job(job_id)})
             return
-        job = load_job(job_id)
         if act == "receipt":
             _print_json(job_receipt(job))
         else:
