@@ -349,14 +349,15 @@ See [pay/marketplace.md](pay/marketplace.md).
 > **Not functional yet — do not use.** Experimental scaffolding — do not rely on it for real multi-node jobs yet.
 
 Buzz-**agent**-only multi-node / shared training. Opt-in (`SEISO_ALLOW_MESH=1` +
-`BUZZ_PRIVATE_KEY`); **no** protocol fee. Forge UI keeps full local training
-config (`nnodes=1`) and refuses mesh — see `GET /api/training/surface`.
-Share `SEISO_MESH_TOKEN` out-of-band (never post to Buzz). Post announce/plan/worker receipts to the channel.
+valid `BUZZ_PRIVATE_KEY` nsec); **no** protocol fee. Forge UI keeps full local
+training config (`nnodes=1`) and refuses mesh — see `GET /api/training/surface`.
+Share `SEISO_MESH_TOKEN` (≥16 chars) out-of-band. Post **receipts only** to Buzz
+(never plan JSON / fingerprint / token). Seiso does not NIP-98 to the relay.
 
 ```bash
 export SEISO_ALLOW_MESH=1
-export SEISO_MESH_TOKEN=…   # out-of-band; never post to Buzz
-export BUZZ_PRIVATE_KEY=nsec1…   # required Buzz agent identity
+export SEISO_MESH_TOKEN=…   # ≥16 chars; out-of-band; never post to Buzz
+export BUZZ_PRIVATE_KEY=nsec1…   # must be a valid Nostr secret
 seiso mesh announce --channel "$CHANNEL" --gpus 2
 seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2 --master-addr 10.0.0.1 --gpus-per-node 2
 seiso mesh worker --plan "$JOB_ID" --rank 0   # --rank required

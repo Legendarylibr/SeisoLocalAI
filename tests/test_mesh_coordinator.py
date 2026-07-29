@@ -6,20 +6,22 @@ from pathlib import Path
 
 import pytest
 
+from seiso.research.nostr.keys import generate_keypair
+
 
 @pytest.fixture()
 def mesh_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("SEISO_ALLOW_MESH", "1")
-    monkeypatch.setenv("SEISO_MESH_TOKEN", "test-mesh-token")
-    monkeypatch.setenv("BUZZ_PRIVATE_KEY", "nsec1test-mesh-agent")
+    monkeypatch.setenv("SEISO_MESH_TOKEN", "test-mesh-token-ok")
+    monkeypatch.setenv("BUZZ_PRIVATE_KEY", generate_keypair().nsec)
     monkeypatch.setenv("SEISO_AGENT", "1")
     return tmp_path / "data"
 
 
 def test_mesh_disabled_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("SEISO_ALLOW_MESH", raising=False)
-    monkeypatch.setenv("BUZZ_PRIVATE_KEY", "nsec1x")
+    monkeypatch.setenv("BUZZ_PRIVATE_KEY", generate_keypair().nsec)
     from seiso.mesh.flags import mesh_allowed, require_mesh_allowed
 
     assert mesh_allowed() is False
@@ -53,6 +55,8 @@ def test_announce_plan_worker(mesh_env: Path) -> None:
     assert plan_out["plan"]["market"] is False
     assert plan_out["plan"]["distributed_nproc_per_node"] == 2
     assert plan_out["plan"]["token_fingerprint"]
+    assert "token_fingerprint" not in plan_out["plan_public"]
+    assert "master_hint" not in plan_out["buzz_receipt"]
     assert plan_out["buzz_receipt"]["world_size"] == 2
 
     plan = load_plan(plan_out["plan"]["job_id"])
@@ -78,7 +82,9 @@ def test_build_plan_requires_gpus_per_node(mesh_env: Path) -> None:
         )
 
 
-def test_mesh_token_mismatch_refused(mesh_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_mesh_token_mismatch_refused(
+    mesh_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from seiso.mesh.coordinator import build_plan, worker_env
 
     plan_out = build_plan(
@@ -88,9 +94,23 @@ def test_mesh_token_mismatch_refused(mesh_env: Path, monkeypatch: pytest.MonkeyP
         master_addr="10.0.0.2",
         gpus_per_node=1,
     )
-    monkeypatch.setenv("SEISO_MESH_TOKEN", "other-token")
+    monkeypatch.setenv("SEISO_MESH_TOKEN", "other-token-16chars")
     with pytest.raises(RuntimeError, match="does not match"):
         worker_env(plan_out["plan"], node_rank=0)
+
+
+def test_short_mesh_token_refused(mesh_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from seiso.mesh.coordinator import build_plan
+
+    monkeypatch.setenv("SEISO_MESH_TOKEN", "short")
+    with pytest.raises(RuntimeError, match="at least 16"):
+        build_plan(
+            channel="ch-1",
+            job_type="finetune",
+            nodes=2,
+            master_addr="10.0.0.2",
+            gpus_per_node=1,
+        )
 
 
 def test_load_plan_refuses_foreign_absolute_path(

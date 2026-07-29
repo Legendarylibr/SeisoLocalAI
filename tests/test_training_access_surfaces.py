@@ -12,6 +12,7 @@ from seiso.agent.surface import (
     require_buzz_agent,
     resolve_training_surface,
 )
+from seiso.research.nostr.keys import generate_keypair
 from seiso.training.access import (
     FRONTEND_SURFACE,
     assert_surface_distributed_config,
@@ -19,7 +20,14 @@ from seiso.training.access import (
 )
 
 
-def test_frontend_surface_exposes_full_training_config(monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.fixture
+def valid_buzz_nsec() -> str:
+    return generate_keypair().nsec
+
+
+def test_frontend_surface_exposes_full_training_config(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("SEISO_ALLOW_MESH", raising=False)
     monkeypatch.delenv("BUZZ_PRIVATE_KEY", raising=False)
     surface = frontend_training_surface()
@@ -46,6 +54,7 @@ def test_frontend_refuses_multinode_config() -> None:
 
 def test_agent_surface_allows_multinode_only_with_mesh_and_buzz(
     monkeypatch: pytest.MonkeyPatch,
+    valid_buzz_nsec: str,
 ) -> None:
     monkeypatch.delenv("SEISO_ALLOW_MESH", raising=False)
     monkeypatch.delenv("BUZZ_PRIVATE_KEY", raising=False)
@@ -55,25 +64,45 @@ def test_agent_surface_allows_multinode_only_with_mesh_and_buzz(
             {"distributed_num_nodes": 4},
         )
     monkeypatch.setenv("SEISO_ALLOW_MESH", "1")
-    monkeypatch.setenv("BUZZ_PRIVATE_KEY", "nsec1test")
+    monkeypatch.setenv("BUZZ_PRIVATE_KEY", valid_buzz_nsec)
     assert_surface_distributed_config(
         TrainingSurface.AGENT,
         {"distributed_num_nodes": 4},
     )
 
 
-def test_buzz_agent_required_for_mesh_feature(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_buzz_agent_required_for_mesh_feature(
+    monkeypatch: pytest.MonkeyPatch,
+    valid_buzz_nsec: str,
+) -> None:
     monkeypatch.delenv("BUZZ_PRIVATE_KEY", raising=False)
     monkeypatch.delenv("BUZZ_AUTH_TAG", raising=False)
     assert buzz_agent_present() is False
     with pytest.raises(RuntimeError, match="Buzz-agent-only"):
         require_buzz_agent(feature="Mesh")
     monkeypatch.setenv("BUZZ_PRIVATE_KEY", "nsec1test-not-a-real-key")
+    assert buzz_agent_present() is False
+    with pytest.raises(RuntimeError, match="valid Buzz agent nsec"):
+        require_buzz_agent(feature="Mesh")
+    monkeypatch.setenv("BUZZ_PRIVATE_KEY", valid_buzz_nsec)
     assert buzz_agent_present() is True
     require_buzz_agent(feature="Mesh")
 
 
-def test_resolve_training_surface_defaults_frontend(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_trivial_buzz_auth_tag_refused(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.delenv("BUZZ_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("BUZZ_AUTH_TAG", "1")
+    assert buzz_agent_present() is False
+    with pytest.raises(RuntimeError, match="non-trivial BUZZ_AUTH_TAG"):
+        require_buzz_agent(feature="Mesh")
+    monkeypatch.setenv("BUZZ_AUTH_TAG", "desktop-managed-session-tag")
+    assert buzz_agent_present() is True
+    require_buzz_agent(feature="Mesh")
+
+
+def test_resolve_training_surface_defaults_frontend(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     monkeypatch.delenv("SEISO_AGENT", raising=False)
     monkeypatch.delenv("SEISO_TRAINING_SURFACE", raising=False)
     monkeypatch.delenv("BUZZ_PRIVATE_KEY", raising=False)
@@ -88,10 +117,38 @@ def test_mesh_requires_buzz_agent_even_when_allowed(
 ) -> None:
     monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("SEISO_ALLOW_MESH", "1")
-    monkeypatch.setenv("SEISO_MESH_TOKEN", "shared")
+    monkeypatch.setenv("SEISO_MESH_TOKEN", "shared-secret-16+")
     monkeypatch.delenv("BUZZ_PRIVATE_KEY", raising=False)
     monkeypatch.delenv("BUZZ_AUTH_TAG", raising=False)
     from seiso.mesh.flags import require_mesh_allowed
 
     with pytest.raises(RuntimeError, match="Buzz-agent-only"):
         require_mesh_allowed()
+
+
+def test_agent_receipt_scrubs_secrets() -> None:
+    from seiso.agent.receipts import agent_receipt, channel_safe_plan_view
+
+    receipt = agent_receipt(
+        role="plan",
+        status="planned",
+        job_id="abc",
+        token="leak",
+        token_fingerprint="deadbeef",
+        nsec="nsec1leak",
+        mesh_token="secret",
+    )
+    assert "token" not in receipt
+    assert "token_fingerprint" not in receipt
+    assert "nsec" not in receipt
+    assert "mesh_token" not in receipt
+    assert receipt["job_id"] == "abc"
+    view = channel_safe_plan_view(
+        {
+            "job_id": "abc",
+            "token_fingerprint": "deadbeef",
+            "distributed_num_nodes": 2,
+        }
+    )
+    assert "token_fingerprint" not in view
+    assert view["distributed_num_nodes"] == 2

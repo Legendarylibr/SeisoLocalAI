@@ -7,8 +7,8 @@ Opt-in **shared / multi-node** coordination via a [Buzz](https://github.com/bloc
 **Not** a marketplace — **no** protocol fee. Requires:
 
 1. `SEISO_ALLOW_MESH=1`
-2. A Buzz agent identity (`BUZZ_PRIVATE_KEY` or managed `BUZZ_AUTH_TAG`)
-3. A shared out-of-band `SEISO_MESH_TOKEN` (never post the token to Buzz)
+2. A validated Buzz agent marker: real `BUZZ_PRIVATE_KEY` nsec (or a non-trivial managed `BUZZ_AUTH_TAG`). Seiso does **not** NIP-98-auth to the Buzz relay — buzz-cli does that separately.
+3. A shared out-of-band `SEISO_MESH_TOKEN` (≥16 chars; never post the token or plan JSON to Buzz)
 
 **Forge UI / frontend training cannot start mesh.** The Train studio keeps full **local** training config (including local multi-GPU DDP with `nnodes=1`); multi-node is agent-only. See `GET /api/training/surface`.
 
@@ -65,7 +65,7 @@ Plans are sandboxed under `mesh/plans/<job_id>.json` — absolute foreign paths 
 
 - Reachable master (`distributed_master_addr`) on LAN / VPN / tailnet — not `127.0.0.1` when `nodes>=2`
 - Seiso multi-node knobs: [multi-gpu.md](multi-gpu.md)
-- Trusted collaborators only — mesh binds peers via shared token fingerprint + Buzz agent identity
+- Trusted collaborators only — peers bind via the shared out-of-band `SEISO_MESH_TOKEN` (per-job HMAC fingerprint on the local plan). The Buzz env marker is an operator gate, not cryptographic peer attestation.
 
 ## Buzz / agent receipts (safe to post)
 
@@ -73,7 +73,7 @@ Plans are sandboxed under `mesh/plans/<job_id>.json` — absolute foreign paths 
 {"role":"announce","channel":"…","gpus":2,"capabilities":["finetune","slime"],"alias":"node-a","mesh_endpoint_fingerprint":"…","buzz_compatible":true}
 ```
 
-Never post `SEISO_MESH_TOKEN`, private IPs you consider sensitive beyond the agreed master hint, dataset paths, or nsecs.
+Post **only** `buzz_receipt` / `agent_receipt`. Never post `SEISO_MESH_TOKEN`, `token_fingerprint`, full plan JSON, master addresses, dataset paths, or nsecs.
 
 ## Fallback
 

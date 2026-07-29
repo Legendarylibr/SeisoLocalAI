@@ -79,7 +79,16 @@ def mesh_plan(
     except Exception as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
-    _print_json(out)
+    # Never print token_fingerprint to stdout (agents paste CLI JSON into Buzz).
+    safe = {
+        "plan_public": out.get("plan_public"),
+        "plan_path": out.get("plan_path"),
+        "buzz_receipt": out.get("buzz_receipt"),
+        "agent_receipt": out.get("agent_receipt"),
+        "note": out.get("note"),
+        "job_id": (out.get("plan") or {}).get("job_id"),
+    }
+    _print_json(safe)
 
 
 @mesh_app.command("worker")
@@ -144,7 +153,9 @@ def mesh_status(
 
     require_mesh_allowed()
     try:
-        _print_json(load_plan(plan))
+        from seiso.agent.receipts import channel_safe_plan_view
+
+        _print_json(channel_safe_plan_view(load_plan(plan)))
     except Exception as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc

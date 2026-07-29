@@ -88,8 +88,10 @@ def test_resolve_distributed_plan_rejects_more_processes_than_visible_gpus():
 
 
 def test_launch_worker_command_includes_multinode_args(monkeypatch: pytest.MonkeyPatch):
+    from seiso.research.nostr.keys import generate_keypair
+
     monkeypatch.setenv("SEISO_ALLOW_MESH", "1")
-    monkeypatch.setenv("BUZZ_PRIVATE_KEY", "nsec1test-multinode")
+    monkeypatch.setenv("BUZZ_PRIVATE_KEY", generate_keypair().nsec)
     cfg = TrainConfig(
         model_id="m",
         dataset="/tmp/data.jsonl",

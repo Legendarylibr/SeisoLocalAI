@@ -1,8 +1,13 @@
 """Mesh announce / plan / worker helpers (Buzz is the control plane).
 
 Not functional yet — experimental scaffolding. Requires SEISO_ALLOW_MESH=1 and
-a Buzz agent identity (BUZZ_PRIVATE_KEY / BUZZ_AUTH_TAG). Forge UI cannot start
-mesh jobs; use a Buzz agent chat / CLI instead.
+a validated Buzz agent marker (valid ``BUZZ_PRIVATE_KEY`` nsec or managed
+``BUZZ_AUTH_TAG``). Forge UI cannot start mesh jobs; use a Buzz agent chat /
+CLI instead.
+
+Trust boundary: Seiso does not NIP-98-auth to the Buzz relay. Peers share an
+out-of-band ``SEISO_MESH_TOKEN`` (HMAC-bound per job). Post only
+``buzz_receipt`` / ``agent_receipt`` to channels — never plan JSON or tokens.
 """
 
 from __future__ import annotations
@@ -16,9 +21,12 @@ import uuid
 from pathlib import Path
 from typing import Any, cast
 
-from seiso.agent.receipts import agent_receipt
+from seiso.agent.receipts import agent_receipt, channel_safe_plan_view
 from seiso.mesh.flags import mesh_token, require_mesh_allowed
 from seiso.security import SecurityError, resolve_data_dir, safe_join
+
+# Weak shared secrets are dictionary-attackable if fingerprints ever leak.
+_MIN_MESH_TOKEN_LEN = 16
 
 
 def mesh_root(data_dir: Path | None = None) -> Path:
@@ -30,22 +38,38 @@ def mesh_root(data_dir: Path | None = None) -> Path:
     return path
 
 
-def _token_fingerprint(token: str) -> str:
-    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+def _require_strong_mesh_token(token: str) -> str:
+    raw = (token or "").strip()
+    if len(raw) < _MIN_MESH_TOKEN_LEN:
+        raise RuntimeError(
+            f"SEISO_MESH_TOKEN must be at least {_MIN_MESH_TOKEN_LEN} characters "
+            "(shared out-of-band secret; never post to Buzz)"
+        )
+    return raw
+
+
+def _token_fingerprint(token: str, *, job_id: str) -> str:
+    """Per-plan HMAC so a leaked fingerprint is not a reusable SHA-256(token)."""
+    return hmac.new(
+        token.encode("utf-8"),
+        f"seiso-mesh-plan:{job_id}".encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()
 
 
 def _verify_plan_token(plan: dict[str, Any]) -> None:
     """Fail closed unless the live SEISO_MESH_TOKEN matches the plan fingerprint."""
     expected = str(plan.get("token_fingerprint") or "").strip()
-    token = mesh_token()
-    if not token:
-        raise RuntimeError("SEISO_MESH_TOKEN required")
+    token = _require_strong_mesh_token(mesh_token())
     if not expected:
         raise RuntimeError(
             "Plan is missing token_fingerprint — recreate with seiso mesh plan "
             "(unsigned / foreign plans are refused)"
         )
-    actual = _token_fingerprint(token)
+    job_id = str(plan.get("job_id") or "").strip()
+    if not job_id:
+        raise RuntimeError("Plan is missing job_id")
+    actual = _token_fingerprint(token, job_id=job_id)
     if not hmac.compare_digest(expected, actual):
         raise RuntimeError(
             "SEISO_MESH_TOKEN does not match this plan (shared-secret mismatch)"
@@ -123,11 +147,7 @@ def build_plan(
             "gpus_per_node is required so every worker pins the same "
             "distributed_nproc_per_node (heterogeneous defaults disagree on world size)"
         )
-    token = mesh_token()
-    if not token:
-        raise RuntimeError(
-            "SEISO_MESH_TOKEN required out-of-band for workers (never post to Buzz)"
-        )
+    token = _require_strong_mesh_token(mesh_token())
     if master_addr.strip() in {"127.0.0.1", "localhost"} and nodes >= 2:
         raise ValueError(
             "distributed_master_addr must be a reachable multi-host address when "
@@ -155,7 +175,8 @@ def build_plan(
         "multi_gpu": True,
         "protocol_fee_sats": 0,
         "market": False,
-        "token_fingerprint": _token_fingerprint(token),
+        # Local-only binding material — stripped from channel_safe_plan / receipts.
+        "token_fingerprint": _token_fingerprint(token, job_id=job_id),
         "created_at": time.time(),
         "ranks": [
             {
@@ -176,13 +197,20 @@ def build_plan(
         # Node count for Buzz room semantics (not process world size).
         world_size=int(nodes),
         world_size_nodes=int(nodes),
-        master_hint=master_addr,
+        # Master address stays in the local plan file only — do not post RFC1918
+        # hints to Buzz channels by default.
     )
     return {
         "plan": plan,
+        # Channel-safe view for CLI stdout / agent paste (no token_fingerprint).
+        "plan_public": channel_safe_plan_view(plan),
         "plan_path": str(path),
         "buzz_receipt": receipt,
         "agent_receipt": receipt,
+        "note": (
+            "Post buzz_receipt / agent_receipt only. Never post plan JSON, "
+            "token_fingerprint, SEISO_MESH_TOKEN, or nsecs to Buzz."
+        ),
     }
 
 
