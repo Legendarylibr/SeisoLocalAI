@@ -10,6 +10,7 @@ from seiso_cli.commands.experiment import experiment_app
 from seiso_cli.commands.export import export_cmd
 from seiso_cli.commands.forge import doctor, forge
 from seiso_cli.commands.mesh import mesh_app
+from seiso_cli.commands.agent import agent_app
 from seiso_cli.commands.nemo_rl import nemo_rl
 from seiso_cli.commands.pay import pay_app
 from seiso_cli.commands.pipelines import compress_app, distill_rl_app, rl_quant_app
@@ -42,6 +43,7 @@ app.add_typer(experiment_app, name="experiment")
 app.add_typer(provenance_app, name="provenance")
 app.add_typer(pay_app, name="pay")
 app.add_typer(mesh_app, name="mesh")
+app.add_typer(agent_app, name="agent")
 
 if __name__ == "__main__":
     app()

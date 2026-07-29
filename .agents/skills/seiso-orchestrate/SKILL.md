@@ -73,10 +73,19 @@ Hard rules:
 
 1. Join or create a channel for the run (one job family per channel when possible).
 2. Set topic/purpose to the goal + config path.
-3. After each milestone, `buzz messages send` a short status with receipts.
-4. On failure, post the error tail + next diagnostic command; do not silently retry forever.
+3. After each milestone, emit a **signed** status and relay **only** `nostr_event`:
+   `seiso agent status --role train --status started --channel "$CHANNEL"`
+   then publish that event via buzz-cli. Unsigned receipt JSON is a local pointer.
+4. On failure, same pattern with `--status failed` + error summary in `--message`;
+   do not silently retry forever.
 
-Without Buzz, write the same receipt JSON to the terminal / work log.
+**Relay only with signing** applies to **all** Buzz↔Seiso agent authority
+(mesh, train milestones, provenance pointers) — not mesh alone. Local CLI
+without a Buzz channel needs no relay. Forge UI stays on the frontend surface.
+Secrets never go on the wire.
+
+Without Buzz, write the same receipt JSON to the terminal / work log (unsigned
+local log is fine when nothing is relayed).
 
 ```bash
 CHANNEL="<uuid>"   # from buzz channels list|create

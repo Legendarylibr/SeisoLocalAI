@@ -367,6 +367,16 @@ seiso mesh worker --plan "$JOB_ID" --rank 0   # --rank required; verifies Nostr 
 # → relay the returned nostr_event via buzz-cli (signed event only)
 ```
 
+## `seiso agent` (Buzz-facing signed status)
+
+Generic agent milestones use the same **relay only with signing** policy as mesh:
+
+```bash
+export BUZZ_PRIVATE_KEY=nsec1…
+seiso agent status --role train --status started --channel "$CHANNEL" --job-id "$JOB"
+# → relay nostr_event via buzz-cli; buzz_receipt is a local pointer only
+```
+
 Prefer local → mesh → paid marketplace when orchestrating from a Buzz agent
 ([seiso-orchestrate skill](../.agents/skills/seiso-orchestrate/SKILL.md)).
 See [training/mesh.md](training/mesh.md).
