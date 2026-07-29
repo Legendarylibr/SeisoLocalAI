@@ -79,9 +79,24 @@ def buzz_compatible_receipt(receipt: dict[str, Any]) -> dict[str, Any]:
 
 
 def channel_safe_plan_view(plan: dict[str, Any]) -> dict[str, Any]:
-    """Strip secret-binding material from a plan before printing / pasting."""
-    return {
-        k: v
-        for k, v in plan.items()
-        if k != "token_fingerprint" and not _is_forbidden_field(str(k))
-    }
+    """Strip secret-binding material from a plan before printing / pasting.
+
+    Keeps public Nostr identity (npub / event id) but omits the full signed
+    event content (may embed ``token_fingerprint`` + master addr).
+    """
+    out: dict[str, Any] = {}
+    for key, value in plan.items():
+        if key == "token_fingerprint" or _is_forbidden_field(str(key)):
+            continue
+        if key == "nostr" and isinstance(value, dict):
+            out[key] = {
+                "alg": value.get("alg"),
+                "nip01": value.get("nip01"),
+                "kind": value.get("kind"),
+                "npub": value.get("npub"),
+                "pubkey": value.get("pubkey"),
+                "event_id": value.get("event_id"),
+            }
+            continue
+        out[key] = value
+    return out

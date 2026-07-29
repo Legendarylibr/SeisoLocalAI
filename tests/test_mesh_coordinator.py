@@ -1,4 +1,4 @@
-"""Experimental Buzz mesh — opt-in, Buzz-agent-only, no protocol fee."""
+"""Experimental Buzz mesh — Nostr-signed, Buzz-agent-only, no protocol fee."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+from seiso.research.nostr.events import verify_event
 from seiso.research.nostr.keys import generate_keypair
 
 
@@ -16,6 +17,8 @@ def mesh_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("SEISO_MESH_TOKEN", "test-mesh-token-ok")
     monkeypatch.setenv("BUZZ_PRIVATE_KEY", generate_keypair().nsec)
     monkeypatch.setenv("SEISO_AGENT", "1")
+    monkeypatch.delenv("SEISO_MESH_TRUSTED_NPUBS", raising=False)
+    monkeypatch.delenv("SEISO_MESH_TRUSTED_PUBKEYS", raising=False)
     return tmp_path / "data"
 
 
@@ -41,6 +44,10 @@ def test_announce_plan_worker(mesh_env: Path) -> None:
     ann = announce(channel="ch-1", gpus=2, capabilities=["finetune", "slime"])
     assert ann["buzz_receipt"]["role"] == "announce"
     assert ann["agent_receipt"]["buzz_compatible"] is True
+    assert ann["buzz_receipt"]["npub"].startswith("npub1")
+    assert ann["buzz_receipt"]["nostr_event_id"]
+    assert ann["buzz_receipt"]["sig_alg"] == "bip340-schnorr"
+    assert verify_event(ann["nostr_event"])
     assert "test-mesh-token" not in json_dumps(ann["buzz_receipt"])
     assert "token" not in ann["buzz_receipt"]
 
@@ -55,9 +62,13 @@ def test_announce_plan_worker(mesh_env: Path) -> None:
     assert plan_out["plan"]["market"] is False
     assert plan_out["plan"]["distributed_nproc_per_node"] == 2
     assert plan_out["plan"]["token_fingerprint"]
+    assert plan_out["plan"]["nostr"]["event_id"]
+    assert verify_event(plan_out["plan"]["nostr"]["event"])
     assert "token_fingerprint" not in plan_out["plan_public"]
-    assert "master_hint" not in plan_out["buzz_receipt"]
+    assert "event" not in (plan_out["plan_public"].get("nostr") or {})
     assert plan_out["buzz_receipt"]["world_size"] == 2
+    assert plan_out["buzz_receipt"]["npub"].startswith("npub1")
+    assert plan_out["buzz_receipt"]["nostr_kind"] == 31251
 
     plan = load_plan(plan_out["plan"]["job_id"])
     env = worker_env(plan, node_rank=1)
@@ -65,9 +76,48 @@ def test_announce_plan_worker(mesh_env: Path) -> None:
     assert env["NNODES"] == "2"
     assert env["MASTER_ADDR"] == "10.0.0.2"
     assert env["NPROC_PER_NODE"] == "2"
+    assert env["SEISO_MESH_PLANNER_NPUB"].startswith("npub1")
     overlay = worker_train_config_overlay(plan, node_rank=1)
     assert overlay["distributed_nproc_per_node"] == 2
     assert overlay["distributed_node_rank"] == 1
+
+
+def test_tampered_plan_nostr_refused(mesh_env: Path) -> None:
+    from seiso.mesh.coordinator import build_plan, worker_env
+
+    plan_out = build_plan(
+        channel="ch-1",
+        job_type="finetune",
+        nodes=2,
+        master_addr="10.0.0.2",
+        gpus_per_node=1,
+    )
+    plan = plan_out["plan"]
+    plan["distributed_num_nodes"] = 99
+    with pytest.raises(RuntimeError, match="tamper|Nostr|signature|match"):
+        worker_env(plan, node_rank=0)
+
+
+def test_trusted_npub_allowlist(
+    mesh_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seiso.mesh.coordinator import build_plan, worker_env
+
+    plan_out = build_plan(
+        channel="ch-1",
+        job_type="finetune",
+        nodes=2,
+        master_addr="10.0.0.2",
+        gpus_per_node=1,
+    )
+    planner_npub = plan_out["plan"]["nostr"]["npub"]
+    monkeypatch.setenv("SEISO_MESH_TRUSTED_NPUBS", planner_npub)
+    worker_env(plan_out["plan"], node_rank=0)
+
+    other = generate_keypair()
+    monkeypatch.setenv("SEISO_MESH_TRUSTED_NPUBS", other.npub)
+    with pytest.raises(RuntimeError, match="TRUSTED"):
+        worker_env(plan_out["plan"], node_rank=0)
 
 
 def test_build_plan_requires_gpus_per_node(mesh_env: Path) -> None:
@@ -99,7 +149,9 @@ def test_mesh_token_mismatch_refused(
         worker_env(plan_out["plan"], node_rank=0)
 
 
-def test_short_mesh_token_refused(mesh_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_short_mesh_token_refused(
+    mesh_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     from seiso.mesh.coordinator import build_plan
 
     monkeypatch.setenv("SEISO_MESH_TOKEN", "short")

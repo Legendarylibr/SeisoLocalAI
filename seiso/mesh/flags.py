@@ -1,10 +1,10 @@
-"""Mesh opt-in flags — off by default; Buzz-agent-only when enabled."""
+"""Mesh opt-in flags — off by default; Nostr-signed Buzz-agent mesh when enabled."""
 
 from __future__ import annotations
 
 import os
 
-from seiso.agent.surface import require_buzz_agent
+from seiso.agent.nostr_identity import require_buzz_nsec
 
 
 def _truthy(raw: str | None) -> bool:
@@ -22,7 +22,8 @@ def require_mesh_allowed() -> None:
             "Self-hosted single-node training does not need this flag. "
             "Mesh is Buzz-agent-only — Forge UI cannot start mesh jobs."
         )
-    require_buzz_agent(feature="Mesh")
+    # Mesh artifacts are NIP-01 / BIP-340 signed — requires a real agent nsec.
+    require_buzz_nsec(feature="Mesh")
 
 
 def mesh_token() -> str:

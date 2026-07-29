@@ -7,8 +7,9 @@ Opt-in **shared / multi-node** coordination via a [Buzz](https://github.com/bloc
 **Not** a marketplace — **no** protocol fee. Requires:
 
 1. `SEISO_ALLOW_MESH=1`
-2. A validated Buzz agent marker: real `BUZZ_PRIVATE_KEY` nsec (or a non-trivial managed `BUZZ_AUTH_TAG`). Seiso does **not** NIP-98-auth to the Buzz relay — buzz-cli does that separately.
+2. A valid Buzz agent `BUZZ_PRIVATE_KEY` **nsec** (BIP-340 signing). `BUZZ_AUTH_TAG` alone cannot sign mesh plans in Seiso. Seiso does **not** NIP-98 to the Buzz relay — buzz-cli does that separately; Seiso signs local NIP-01 mesh events offline.
 3. A shared out-of-band `SEISO_MESH_TOKEN` (≥16 chars; never post the token or plan JSON to Buzz)
+4. Optional allowlist: `SEISO_MESH_TRUSTED_NPUBS` / `SEISO_MESH_TRUSTED_PUBKEYS` (comma-separated) so workers only accept plans from known agent keys
 
 **Forge UI / frontend training cannot start mesh.** The Train studio keeps full **local** training config (including local multi-GPU DDP with `nnodes=1`); multi-node is agent-only. See `GET /api/training/surface`.
 
@@ -52,28 +53,28 @@ seiso mesh worker --plan "$JOB_ID" --rank 1
 
 `protocol_fee_sats` on plans is always `0`; `market` is `false`.
 
-Plans are sandboxed under `mesh/plans/<job_id>.json` — absolute foreign paths are refused. Workers must present the same `SEISO_MESH_TOKEN` that created the plan (fingerprint compare).
+Plans are sandboxed under `mesh/plans/<job_id>.json` — absolute foreign paths are refused. Each plan is a **NIP-01** event (kind `31251`) signed with the agent nsec (**BIP-340 Schnorr**). Workers verify the signature + body match, then check the shared `SEISO_MESH_TOKEN` HMAC (bound to job id + planner pubkey).
 
 ## Frontend vs agent
 
 | | Frontend (Forge UI) | Agent (CLI / Buzz chat) |
 |--|---------------------|-------------------------|
 | Local training config | Full (method, quant, DDP `nnodes=1`, hyperparams) | Full |
-| Multi-node / mesh | Refused | Opt-in experimental |
+| Multi-node / mesh | Refused | Opt-in experimental (Nostr-signed) |
 
 ## Requirements
 
 - Reachable master (`distributed_master_addr`) on LAN / VPN / tailnet — not `127.0.0.1` when `nodes>=2`
 - Seiso multi-node knobs: [multi-gpu.md](multi-gpu.md)
-- Trusted collaborators only — peers bind via the shared out-of-band `SEISO_MESH_TOKEN` (per-job HMAC fingerprint on the local plan). The Buzz env marker is an operator gate, not cryptographic peer attestation.
+- Trusted collaborators only — peers bind via (1) Nostr signature from the planner nsec and (2) shared out-of-band `SEISO_MESH_TOKEN`. Optional pubkey allowlist via `SEISO_MESH_TRUSTED_NPUBS`.
 
 ## Buzz / agent receipts (safe to post)
 
 ```json
-{"role":"announce","channel":"…","gpus":2,"capabilities":["finetune","slime"],"alias":"node-a","mesh_endpoint_fingerprint":"…","buzz_compatible":true}
+{"role":"plan","job_id":"…","npub":"npub1…","nostr_event_id":"…","nostr_kind":31251,"sig_alg":"bip340-schnorr","nip01":true,"buzz_compatible":true}
 ```
 
-Post **only** `buzz_receipt` / `agent_receipt`. Never post `SEISO_MESH_TOKEN`, `token_fingerprint`, full plan JSON, master addresses, dataset paths, or nsecs.
+Post **only** `buzz_receipt` / `agent_receipt` (includes `npub` + event id). Optionally publish the full `nostr_event` via buzz-cli. Never post `SEISO_MESH_TOKEN`, `token_fingerprint`, nsecs, or raw master addresses.
 
 ## Fallback
 

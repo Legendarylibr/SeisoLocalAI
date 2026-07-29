@@ -81,19 +81,23 @@ def assert_surface_distributed_config(
 
 
 def require_multinode_mesh_agent(nnodes: int) -> None:
-    """Fail closed: multi-node only under Buzz agent + SEISO_ALLOW_MESH."""
+    """Fail closed: multi-node only under Buzz agent nsec + SEISO_ALLOW_MESH."""
     if nnodes <= FRONTEND_MAX_NODES:
         return
-    from seiso.agent.surface import buzz_agent_present
+    from seiso.agent.nostr_identity import require_buzz_nsec
     from seiso.mesh.flags import mesh_allowed
 
-    if not mesh_allowed() or not buzz_agent_present():
+    if not mesh_allowed():
         raise ValueError(
             "Multi-node training (distributed_num_nodes>1) is Buzz-agent/mesh-only. "
-            "Set SEISO_ALLOW_MESH=1 and BUZZ_PRIVATE_KEY (or BUZZ_AUTH_TAG), "
+            "Set SEISO_ALLOW_MESH=1 and BUZZ_PRIVATE_KEY (valid nsec), "
             "or keep distributed_num_nodes=1 for local multi-GPU. "
             "Not functional for real multi-node yet."
         )
+    try:
+        require_buzz_nsec(feature="Multi-node training")
+    except RuntimeError as exc:
+        raise ValueError(str(exc)) from exc
 
 
 def frontend_training_surface() -> dict[str, Any]:
@@ -118,9 +122,11 @@ def frontend_training_surface() -> dict[str, Any]:
         "mesh": {
             "available_on_this_surface": False,
             "opt_in_env": "SEISO_ALLOW_MESH",
-            "requires": "buzz_agent",
+            "requires": "buzz_agent_nsec",
             "operator_mesh_flag_set": mesh_allowed(),
             "buzz_agent_present": buzz_agent_present(),
+            "nostr_signed_plans": True,
+            "sig_alg": "bip340-schnorr",
         },
         "agent_surface": TrainingSurface.AGENT.value,
         "buzz_compatible": True,
@@ -129,9 +135,10 @@ def frontend_training_surface() -> dict[str, Any]:
 
 def agent_training_surface() -> dict[str, Any]:
     """Capabilities for generic agents (Buzz-compatible)."""
+    from seiso.agent.nostr_identity import get_buzz_keypair
     from seiso.mesh.flags import mesh_allowed
 
-    mesh_ok = mesh_allowed() and buzz_agent_present()
+    mesh_ok = bool(mesh_allowed() and get_buzz_keypair())
     return {
         "surface": TrainingSurface.AGENT.value,
         "exposes_full_training_config": True,
@@ -146,9 +153,11 @@ def agent_training_surface() -> dict[str, Any]:
         "mesh": {
             "available_on_this_surface": mesh_ok,
             "opt_in_env": "SEISO_ALLOW_MESH",
-            "requires": "buzz_agent",
+            "requires": "buzz_agent_nsec",
             "operator_mesh_flag_set": mesh_allowed(),
             "buzz_agent_present": buzz_agent_present(),
+            "nostr_signed_plans": True,
+            "sig_alg": "bip340-schnorr",
             "not_functional_yet": True,
         },
         "buzz_compatible": True,

@@ -3,11 +3,10 @@
 Mesh / multi-node coordination is Buzz-agent-only. Local single-node and
 local multi-GPU DDP remain available on both surfaces.
 
-Buzz→Seiso trust note: Seiso does **not** speak NIP-98 to the Buzz relay.
-``BUZZ_PRIVATE_KEY`` is validated as a real Nostr secret (nsec/hex) so a
-trivial ``export BUZZ_PRIVATE_KEY=1`` cannot unlock mesh. Actual Buzz relay
-auth remains with buzz-cli. Peer mesh binding is ``SEISO_MESH_TOKEN``
-(HMAC fingerprint), not cryptographic Buzz identity verification.
+Buzz→Seiso trust note: Seiso does **not** speak NIP-98 to the Buzz relay
+(buzz-cli does). Mesh plans are local **NIP-01** events signed with the agent
+``BUZZ_PRIVATE_KEY`` via **BIP-340 Schnorr**. Peer binding also uses
+``SEISO_MESH_TOKEN`` (HMAC per job+pubkey) and optional trusted-npub allowlists.
 """
 
 from __future__ import annotations

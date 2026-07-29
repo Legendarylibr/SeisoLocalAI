@@ -58,7 +58,7 @@ def test_agent_surface_allows_multinode_only_with_mesh_and_buzz(
 ) -> None:
     monkeypatch.delenv("SEISO_ALLOW_MESH", raising=False)
     monkeypatch.delenv("BUZZ_PRIVATE_KEY", raising=False)
-    with pytest.raises(ValueError, match="Buzz-agent/mesh-only"):
+    with pytest.raises(ValueError, match="Buzz-agent/mesh-only|BUZZ_PRIVATE_KEY|Multi-node"):
         assert_surface_distributed_config(
             TrainingSurface.AGENT,
             {"distributed_num_nodes": 4},
@@ -122,7 +122,21 @@ def test_mesh_requires_buzz_agent_even_when_allowed(
     monkeypatch.delenv("BUZZ_AUTH_TAG", raising=False)
     from seiso.mesh.flags import require_mesh_allowed
 
-    with pytest.raises(RuntimeError, match="Buzz-agent-only"):
+    with pytest.raises(RuntimeError, match="BUZZ_PRIVATE_KEY"):
+        require_mesh_allowed()
+
+
+def test_mesh_auth_tag_alone_cannot_sign(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path / "data"))
+    monkeypatch.setenv("SEISO_ALLOW_MESH", "1")
+    monkeypatch.setenv("SEISO_MESH_TOKEN", "shared-secret-16+")
+    monkeypatch.delenv("BUZZ_PRIVATE_KEY", raising=False)
+    monkeypatch.setenv("BUZZ_AUTH_TAG", "desktop-managed-session-tag")
+    from seiso.mesh.flags import require_mesh_allowed
+
+    with pytest.raises(RuntimeError, match="BUZZ_PRIVATE_KEY"):
         require_mesh_allowed()
 
 
