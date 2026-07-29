@@ -68,6 +68,20 @@ from seiso.training.sft import build_sft_trainer
 logger = logging.getLogger(__name__)
 
 
+def greater_is_better_for_metric(metric: str | None) -> bool:
+    """HuggingFace convention: minimize metrics ending in ``loss``.
+
+    Comparing only to the exact string ``eval_loss`` mishandles names like
+    ``loss`` and incorrectly maximizes them under early stopping.
+    """
+    return not str(metric or "eval_loss").endswith("loss")
+
+
+def resolve_trust_remote_code(cfg: TrainConfig) -> bool:
+    """Top-level ``trust_remote_code`` wins; ``extra`` remains a legacy override."""
+    return bool(cfg.trust_remote_code) or bool(cfg.extra.get("trust_remote_code", False))
+
+
 @dataclass
 class PreparedTrainingDatasets:
     train_ds: Any
@@ -764,7 +778,9 @@ class SeisoTrainer:
         try:
             from seiso.models.hub_quant import is_native_hub_quant_model
 
-            trust_remote_code = bool(cfg.extra.get("trust_remote_code", False))
+            # Prefer top-level TrainConfig.trust_remote_code; allow extra as
+            # a legacy/advanced override so either path enables custom code.
+            trust_remote_code = resolve_trust_remote_code(cfg)
             native_hub_quant = is_native_hub_quant_model(
                 str(cfg.model_id),
                 trust_remote_code=trust_remote_code,
@@ -780,7 +796,7 @@ class SeisoTrainer:
                 load_in_4bit=load_4bit,
                 load_in_8bit=load_8bit,
                 dtype=load_dtype,
-                trust_remote_code=bool(cfg.extra.get("trust_remote_code", False)),
+                trust_remote_code=trust_remote_code,
                 use_flash_attention=use_flash,
             )
         except OSError as exc:
@@ -945,8 +961,10 @@ class SeisoTrainer:
             "gradient_checkpointing": cfg.gradient_checkpointing,
         }
         if eval_ds is not None and cfg.early_stopping and "metric_for_best_model" in _ta_fields:
-            base["metric_for_best_model"] = cfg.metric_for_best_model
-            base["greater_is_better"] = cfg.metric_for_best_model != "eval_loss"
+            # Match HuggingFace: minimize any *loss metric, maximize others.
+            metric = str(cfg.metric_for_best_model or "eval_loss")
+            base["metric_for_best_model"] = metric
+            base["greater_is_better"] = greater_is_better_for_metric(metric)
         # save_safetensors was removed in transformers 5.x — only add when available
         if "save_safetensors" in _ta_fields:
             base["save_safetensors"] = cfg.save_safetensors

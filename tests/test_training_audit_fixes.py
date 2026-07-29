@@ -69,3 +69,60 @@ def test_slime_allow_zero_kl_env(monkeypatch, tmp_path: Path):
     )
     cfg.validate()
     assert cfg.kl_coef == 0.0
+
+
+def test_greater_is_better_for_loss_metrics():
+    from seiso.training.trainer import greater_is_better_for_metric
+
+    assert greater_is_better_for_metric("eval_loss") is False
+    assert greater_is_better_for_metric("loss") is False
+    assert greater_is_better_for_metric("train_loss") is False
+    assert greater_is_better_for_metric("eval_accuracy") is True
+    assert greater_is_better_for_metric("reward") is True
+
+
+def test_resolve_trust_remote_code_reads_top_level(tmp_path: Path):
+    from seiso.training.trainer import resolve_trust_remote_code
+
+    cfg = TrainConfig.model_validate(
+        {
+            "model_id": "test/model",
+            "dataset": tmp_path / "data.jsonl",
+            "quant": "none",
+            "trust_remote_code": True,
+        }
+    )
+    assert resolve_trust_remote_code(cfg) is True
+    cfg_extra = TrainConfig.model_validate(
+        {
+            "model_id": "test/model",
+            "dataset": tmp_path / "data.jsonl",
+            "quant": "none",
+            "trust_remote_code": False,
+            "extra": {"trust_remote_code": True},
+        }
+    )
+    assert resolve_trust_remote_code(cfg_extra) is True
+
+
+def test_slime_rejects_weight_dir_path_escape(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "slime.jsonl",
+        output_dir=tmp_path / "out",
+        sglang_weight_dir="../../../escape",
+    )
+    with pytest.raises(ValueError, match="sglang_weight_dir|\\.\\."):
+        cfg.validate()
+
+
+def test_train_config_rejects_vllm_weight_dir_escape(tmp_path: Path):
+    with pytest.raises(ValueError, match="\\.\\.|artifact"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": tmp_path / "data.jsonl",
+                "quant": "none",
+                "vllm_weight_dir": "../../escape",
+            }
+        )
