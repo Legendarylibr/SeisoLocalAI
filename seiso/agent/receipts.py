@@ -27,6 +27,10 @@ _FORBIDDEN_KEYS = frozenset(
         "api_key",
         "access_token",
         "refresh_token",
+        # Machine identity — keep local; do not paste into Buzz.
+        "hostname",
+        "host",
+        "fqdn",
     }
 )
 _FORBIDDEN_SUBSTR = (
@@ -84,7 +88,9 @@ def channel_safe_plan_view(plan: dict[str, Any]) -> dict[str, Any]:
     """Strip secret-binding material from a plan before printing / pasting.
 
     Keeps public Nostr identity (npub / event id) but omits the full signed
-    event content (may embed ``token_fingerprint`` + master addr).
+    event body. ``token_fingerprint`` is local-only (not in signed content).
+    ``distributed_master_addr`` remains for local operator/peer setup — when
+    posting to Buzz, relay only ``nostr_event`` (not this whole view).
     """
     out: dict[str, Any] = {}
     for key, value in plan.items():

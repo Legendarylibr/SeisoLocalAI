@@ -53,6 +53,16 @@ def test_announce_plan_worker(mesh_env: Path) -> None:
     assert ann["nostr_event"]["sig"]
     assert "test-mesh-token" not in json_dumps(ann["buzz_receipt"])
     assert "token" not in ann["buzz_receipt"]
+    # Privacy: default alias is opaque peer-*, never OS hostname.
+    import json as _json
+    import socket as _socket
+
+    ann_body = _json.loads(ann["nostr_event"]["content"])
+    assert ann_body["alias"].startswith("peer-")
+    assert ann_body["alias"] != _socket.gethostname()
+    assert "hostname" not in ann_body
+    assert "hostname" not in ann["buzz_receipt"]
+    assert ann["buzz_receipt"]["alias"] == ann_body["alias"]
 
     plan_out = build_plan(
         channel="ch-1",
@@ -203,6 +213,29 @@ def test_sign_mesh_announce_requires_d_tag() -> None:
                 "capabilities": [],
                 "alias": "x",
                 "mesh_endpoint_fingerprint": "",
+                "ts": 1,
+            },
+            pair,
+        )
+
+
+def test_sign_mesh_announce_refuses_hostname_alias() -> None:
+    import socket
+
+    from seiso.mesh.nostr_bind import sign_mesh_announce
+    from seiso.research.nostr.keys import generate_keypair
+
+    pair = generate_keypair()
+    host = socket.gethostname()
+    with pytest.raises(RuntimeError, match="hostname"):
+        sign_mesh_announce(
+            {
+                "channel": "ch",
+                "gpus": 1,
+                "capabilities": [],
+                "alias": host,
+                "hostname": host,
+                "mesh_endpoint_fingerprint": "abc123def4567890",
                 "ts": 1,
             },
             pair,

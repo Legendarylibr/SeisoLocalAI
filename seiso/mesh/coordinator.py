@@ -96,19 +96,29 @@ def announce(
     alias: str | None = None,
     data_dir: Path | None = None,
 ) -> dict[str, Any]:
-    """Record a local announce + return Buzz-safe JSON (Nostr-signed, no secrets)."""
+    """Record a local announce + return Buzz-safe JSON (Nostr-signed, no secrets).
+
+    Privacy: machine hostname stays on the local disk record only. Signed /
+    channel-facing payloads use an explicit ``alias`` or an opaque
+    ``peer-<fingerprint>`` — never the OS hostname (which would leak into Buzz
+    when the signed event is embedded in kind-9).
+    """
     require_mesh_allowed()
     pair = require_buzz_nsec(feature="Mesh announce")
     caps = capabilities or ["finetune", "slime"]
+    fingerprint = uuid.uuid4().hex[:16]
+    # Opaque peer label by default — do not publish OS hostname to the channel.
+    public_alias = (alias or "").strip() or f"peer-{fingerprint}"
     record = {
         "role": "announce",
         "channel": channel,
         "gpus": int(gpus),
         "capabilities": caps,
-        "alias": alias or socket.gethostname(),
+        "alias": public_alias,
+        # Local operator debugging only — never signed / never in receipts.
         "hostname": socket.gethostname(),
         "ts": time.time(),
-        "mesh_endpoint_fingerprint": uuid.uuid4().hex[:16],
+        "mesh_endpoint_fingerprint": fingerprint,
     }
     nostr = sign_mesh_announce(record, pair)
     record["nostr"] = nostr

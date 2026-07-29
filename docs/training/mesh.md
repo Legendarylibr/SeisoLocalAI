@@ -92,6 +92,13 @@ On a general Nostr relay you may publish the same event as a native addressable
 EVENT. Never post `SEISO_MESH_TOKEN`, local `token_fingerprint` (HMAC stays on
 disk only — not in signed event content), nsecs, or unsigned plan JSON as authority.
 
+**Privacy:** announce defaults to an opaque `peer-<fingerprint>` alias — OS
+hostname stays on the local disk record and is never signed. Do not pass
+`--alias` equal to your machine hostname (signing refuses). Plan
+`distributed_master_addr` is intentionally in the signed event (peers need it);
+treat channel posts of plans as LAN-topology-sensitive and prefer private
+channels / trusted peers.
+
 ## Fallback
 
 If the mesh lacks GPUs, fall back to a bookmarked paid marketplace URL ([pay/marketplace.md](../pay/marketplace.md)) or ask a human — do not invent cloud.

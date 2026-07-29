@@ -156,18 +156,24 @@ def test_agent_receipt_scrubs_secrets() -> None:
         token_fingerprint="deadbeef",
         nsec="nsec1leak",
         mesh_token="secret",
+        hostname="devs-MacBook-Pro.local",
+        host="localbox",
     )
     assert "token" not in receipt
     assert "token_fingerprint" not in receipt
     assert "nsec" not in receipt
     assert "mesh_token" not in receipt
+    assert "hostname" not in receipt
+    assert "host" not in receipt
     assert receipt["job_id"] == "abc"
     view = channel_safe_plan_view(
         {
             "job_id": "abc",
             "token_fingerprint": "deadbeef",
             "distributed_num_nodes": 2,
+            "hostname": "should-not-appear",
         }
     )
     assert "token_fingerprint" not in view
+    assert "hostname" not in view
     assert view["distributed_num_nodes"] == 2

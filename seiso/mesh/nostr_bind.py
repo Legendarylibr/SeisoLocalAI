@@ -157,6 +157,7 @@ def sign_mesh_announce(record: dict[str, Any], pair: NostrKeyPair) -> dict[str, 
             "mesh announce requires mesh_endpoint_fingerprint for addressable d-tag "
             "(NIP-01 kind 30000–39999)"
         )
+    # Never sign hostname / local paths — alias is an explicit or opaque peer label.
     payload = {
         "channel": record.get("channel"),
         "gpus": record.get("gpus"),
@@ -164,6 +165,14 @@ def sign_mesh_announce(record: dict[str, Any], pair: NostrKeyPair) -> dict[str, 
         "alias": record.get("alias"),
         "mesh_endpoint_fingerprint": d_tag,
     }
+    # Defense in depth: refuse if alias equals OS hostname (would leak into Buzz).
+    host = str(record.get("hostname") or "").strip()
+    alias_val = str(payload.get("alias") or "").strip()
+    if host and alias_val and host == alias_val:
+        raise RuntimeError(
+            "Refusing to sign mesh announce: alias equals machine hostname. "
+            "Pass an explicit non-hostname --alias (or omit for opaque peer-*)."
+        )
     draft = {
         "kind": SEISO_MESH_ANNOUNCE_KIND,
         "created_at": int(record.get("ts") or time.time()),
