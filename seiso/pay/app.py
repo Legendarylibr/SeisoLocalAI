@@ -132,21 +132,23 @@ def build_app():
         return public_session_view(session)
 
     @app.post("/pay/v1/sessions/fund/l402")
-    def fund_l402_challenge(body: dict[str, Any] | None = None) -> JSONResponse:
-        """Mint an L402 challenge for session top-up (sim until live LN wired)."""
+    def fund_l402_challenge(
+        body: dict[str, Any] | None = None,
+        session: dict[str, Any] = _bearer_dep,
+    ) -> JSONResponse:
+        """Mint an L402 challenge for session top-up (sim until live LN wired).
+
+        Requires the session Bearer token so sim_preimage cannot top up an
+        arbitrary session_id guessed from the URL/body.
+        """
         body = body or {}
-        session_id = str(body.get("session_id") or "").strip()
+        session_id = str(session["session_id"])
+        body_sid = str(body.get("session_id") or "").strip()
+        if body_sid and body_sid != session_id:
+            raise HTTPException(403, "session_id does not match Bearer session")
         amount = int(body.get("sats") or body.get("amount_sats") or 0)
-        if not session_id:
-            raise HTTPException(400, "session_id required")
         if amount <= 0:
             raise HTTPException(400, "sats / amount_sats must be > 0")
-        from seiso.pay.store import load_session
-
-        try:
-            load_session(session_id)
-        except KeyError as exc:
-            raise HTTPException(404, "session not found") from exc
         try:
             challenge = mint_fund_challenge(
                 session_id=session_id,
@@ -263,10 +265,12 @@ def build_app():
         body = await request.json()
         messages = body.get("messages") or []
         prompt_est = estimate_tokens_from_messages(messages)
-        # Preflight minimum balance using flat call quote
+        # Align preflight with post-call debit: bill max_tokens (not a low
+        # underestimate) so clients cannot pass check then over-debit / fail.
+        completion_est = max(1, int(body.get("max_tokens") or 64))
         from seiso.pay.pricing import quote_inference_tokens
 
-        pre = quote_inference_tokens(prompt_est, 16, flat_call=False)
+        pre = quote_inference_tokens(prompt_est, completion_est, flat_call=False)
         if int(session.get("balance_sats") or 0) < int(pre["total_sats"]):
             raise HTTPException(402, "insufficient balance for inference")
 
@@ -304,11 +308,11 @@ def build_app():
                     async for chunk in upstream.aiter_bytes():
                         yield chunk
                     await upstream.aclose()
-                    # Flat post-stream debit
+                    # Debit the same completion estimate used at preflight.
                     debit_inference(
                         str(session["session_id"]),
                         prompt_tokens=prompt_est,
-                        completion_tokens=int(body.get("max_tokens") or 64),
+                        completion_tokens=completion_est,
                         flat_call=False,
                     )
 

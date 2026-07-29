@@ -199,6 +199,7 @@ def test_l402_fund_exchange_and_job_failure_refund(
     challenge = client.post(
         "/pay/v1/sessions/fund/l402",
         json={"session_id": session_id, "sats": 25_000},
+        headers={"Authorization": f"Bearer {token}"},
     )
     assert challenge.status_code == 402
     assert "WWW-Authenticate" in challenge.headers
@@ -207,6 +208,19 @@ def test_l402_fund_exchange_and_job_failure_refund(
     assert ch["macaroon"]
     assert ch["invoice"].startswith("lnbcsseisosim1")
     assert ch["sim_preimage"]
+
+    unauth = client.post(
+        "/pay/v1/sessions/fund/l402",
+        json={"session_id": session_id, "sats": 1_000},
+    )
+    assert unauth.status_code == 401
+
+    wrong = client.post(
+        "/pay/v1/sessions/fund/l402",
+        json={"session_id": "not-my-session", "sats": 1_000},
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    assert wrong.status_code == 403
 
     done = client.post(
         "/pay/v1/sessions/fund/l402/complete",
@@ -309,3 +323,150 @@ def test_cancel_job_refunds(pay_env: Path) -> None:
     assert again["refunded_sats"] == quote["total_sats"]
     after = load_session(created["session_id"])["balance_sats"]
     assert after == before + int(quote["total_sats"])
+
+
+def test_l402_fund_id_idempotent_no_double_credit(pay_env: Path) -> None:
+    from seiso.pay.l402 import complete_fund, mint_fund_challenge
+    from seiso.pay.store import create_session, load_session
+
+    created = create_session(scopes=["inference"])
+    challenge = mint_fund_challenge(
+        session_id=created["session_id"], amount_sats=5_000
+    )
+    complete_fund(
+        macaroon=str(challenge["macaroon"]),
+        preimage_hex=str(challenge["sim_preimage"]),
+    )
+    session = load_session(created["session_id"])
+    assert session["balance_sats"] == 5_000
+    assert challenge["challenge_id"] in session["fund_ids"]
+
+    # Simulate crash/retry: credit again with same fund_id via activate_session.
+    from seiso.pay.store import activate_session
+
+    activate_session(
+        created["session_id"],
+        amount_sats=5_000,
+        funding_mode="l402",
+        fund_id=str(challenge["challenge_id"]),
+    )
+    assert load_session(created["session_id"])["balance_sats"] == 5_000
+
+
+def test_escrow_refund_idempotent_by_job_id(pay_env: Path) -> None:
+    from seiso.pay.store import (
+        activate_session,
+        create_session,
+        escrow_hold,
+        escrow_release_refund,
+        load_session,
+    )
+
+    created = create_session(scopes=["finetune"])
+    activate_session(created["session_id"], amount_sats=10_000, funding_mode="faucet")
+    escrow_hold(created["session_id"], total_sats=1_000, job_id="job-a")
+    before = load_session(created["session_id"])["balance_sats"]
+    escrow_release_refund(
+        created["session_id"], amount_sats=1_000, job_id="job-a", reason="test"
+    )
+    escrow_release_refund(
+        created["session_id"], amount_sats=1_000, job_id="job-a", reason="test"
+    )
+    assert load_session(created["session_id"])["balance_sats"] == before + 1_000
+
+
+def test_complete_after_cancel_does_not_settle(pay_env: Path) -> None:
+    from seiso.pay.jobs import _complete_job, cancel_job
+    from seiso.pay.pricing import quote_job
+    from seiso.pay.store import (
+        activate_session,
+        create_job,
+        create_session,
+        escrow_hold,
+        load_session,
+        save_job,
+    )
+
+    created = create_session(scopes=["finetune"])
+    activate_session(created["session_id"], amount_sats=50_000, funding_mode="faucet")
+    quote = quote_job("finetune", preset="smoke")
+    job = create_job(
+        session_id=created["session_id"],
+        job_type="finetune",
+        quote=quote,
+        preset="smoke",
+    )
+    escrow_hold(
+        created["session_id"],
+        total_sats=int(quote["total_sats"]),
+        job_id=job["job_id"],
+    )
+    job["status"] = "running"
+    save_job(job)
+    cancelled = cancel_job(job["job_id"])
+    assert cancelled["status"] == "cancelled"
+    bal_after_cancel = load_session(created["session_id"])["balance_sats"]
+    # Runner loses the race: attempt settle after cancel.
+    result = _complete_job(job, data_dir=None, dry_run=True)
+    assert result["status"] == "cancelled"
+    assert result["settlement"]["status"] == "refunded"
+    assert load_session(created["session_id"])["balance_sats"] == bal_after_cancel
+
+
+def test_settle_failure_refunds_escrow(
+    pay_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from seiso.pay.jobs import _complete_job
+    from seiso.pay.pricing import quote_job
+    from seiso.pay.store import (
+        activate_session,
+        create_job,
+        create_session,
+        escrow_hold,
+        load_session,
+        save_job,
+    )
+
+    monkeypatch.setenv("SEISO_ARK_BACKEND", "bark")
+    created = create_session(scopes=["finetune"])
+    activate_session(created["session_id"], amount_sats=50_000, funding_mode="faucet")
+    quote = quote_job("finetune", preset="smoke")
+    job = create_job(
+        session_id=created["session_id"],
+        job_type="finetune",
+        quote=quote,
+        preset="smoke",
+    )
+    escrow_hold(
+        created["session_id"],
+        total_sats=int(quote["total_sats"]),
+        job_id=job["job_id"],
+    )
+    job["status"] = "running"
+    save_job(job)
+    before_hold = 50_000 - int(quote["total_sats"])
+    assert load_session(created["session_id"])["balance_sats"] == before_hold
+    failed = _complete_job(job, data_dir=None, dry_run=True)
+    assert failed["status"] == "failed"
+    assert "settle failed" in (failed.get("error") or "")
+    assert failed["settlement"]["status"] == "refunded"
+    assert load_session(created["session_id"])["balance_sats"] == 50_000
+
+
+def test_buyer_config_must_be_under_configs(pay_env: Path) -> None:
+    from seiso.pay.jobs import _sandbox_config_path
+
+    with pytest.raises(ValueError, match="configs"):
+        _sandbox_config_path("/etc/passwd")
+    with pytest.raises(ValueError, match="configs|\\.\\."):
+        _sandbox_config_path("../secrets.yaml")
+
+
+def test_relative_artifact_name_rejects_traversal() -> None:
+    from seiso.security import assert_relative_artifact_name
+
+    assert assert_relative_artifact_name("checkpoint-best") == "checkpoint-best"
+    with pytest.raises(ValueError, match="\\.\\."):
+        assert_relative_artifact_name("../../../models/other")
+    with pytest.raises(ValueError, match="relative"):
+        assert_relative_artifact_name("/tmp/out")

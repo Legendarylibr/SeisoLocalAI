@@ -313,6 +313,32 @@ async def test_reset_session_wipes_nostr_keys(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_reset_session_refuses_env_bound_inference_key(
+    tmp_path: Path, monkeypatch
+):
+    monkeypatch.setenv("SEISO_INFERENCE_API_KEY", "seiso_sk_env_bound_cannot_rotate_xx")
+    from forge.api.deps import clear_dependency_caches
+
+    clear_dependency_caches()
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post(
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
+        assert reg.status_code == 201
+        csrf = client.cookies.get("seiso_csrf")
+        assert csrf
+        reset = await client.post(
+            "/api/auth/reset-session",
+            json={"confirmation": "RESET"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert reset.status_code == 409
+        assert "env-bound" in reset.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_ephemeral_mode_skips_nostr_key_persist(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("SEISO_DB_EPHEMERAL", "true")
     from forge.api.deps import clear_dependency_caches

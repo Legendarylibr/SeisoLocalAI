@@ -31,6 +31,13 @@ def debit_inference(
         completion_tokens,
         flat_call=flat_call,
     )
+    # Settle first so a settlement failure cannot leave the balance reduced
+    # with no receipt / no rollback path.
+    settlement = settle_split(
+        compute_sats=int(quote["compute_sats"]),
+        protocol_fee_sats=int(quote["protocol_fee_sats"]),
+        session_id=session_id,
+    )
     debit_session(
         session_id,
         compute_sats=int(quote["compute_sats"]),
@@ -38,10 +45,5 @@ def debit_inference(
         data_dir=data_dir,
         reason="inference",
         meta=quote,
-    )
-    settlement = settle_split(
-        compute_sats=int(quote["compute_sats"]),
-        protocol_fee_sats=int(quote["protocol_fee_sats"]),
-        session_id=session_id,
     )
     return {"quote": quote, "settlement": settlement.as_dict()}

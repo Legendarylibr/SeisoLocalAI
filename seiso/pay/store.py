@@ -113,15 +113,31 @@ def activate_session(
     amount_sats: int,
     data_dir: Path | None = None,
     funding_mode: str = "faucet",
+    fund_id: str | None = None,
 ) -> dict[str, Any]:
+    """Credit session balance.
+
+    When ``fund_id`` is set (e.g. L402 ``challenge_id``), the credit is
+    idempotent: a second call with the same id is a no-op that returns the
+    current session. Persist the fund id on the session *with* the balance
+    bump so crash/retry cannot double-credit.
+    """
     if amount_sats <= 0:
         raise ValueError("amount_sats must be > 0")
     with _lock:
         record = load_session(session_id, data_dir)
+        fund_ids = record.setdefault("fund_ids", [])
+        if not isinstance(fund_ids, list):
+            fund_ids = []
+            record["fund_ids"] = fund_ids
+        if fund_id and fund_id in fund_ids:
+            return record
         record["balance_sats"] = int(record.get("balance_sats") or 0) + amount_sats
         record["funded_sats"] = int(record.get("funded_sats") or 0) + amount_sats
         record["status"] = "active"
         record["funding_mode"] = funding_mode
+        if fund_id:
+            fund_ids.append(fund_id)
         _save_session(record, data_dir)
         _append_ledger(
             {
@@ -129,6 +145,7 @@ def activate_session(
                 "session_id": session_id,
                 "amount_sats": amount_sats,
                 "funding_mode": funding_mode,
+                "fund_id": fund_id,
                 "balance_sats": record["balance_sats"],
                 "ts": time.time(),
             },
@@ -225,13 +242,24 @@ def escrow_release_refund(
 
     Lightning/L402 pay-in is one-way; marketplace refunds restore session
     balance (not an on-chain/LN reverse payment).
+
+    When ``job_id`` is set, the credit is idempotent per job so crash/retry
+    or cancel+fail cannot double-refund.
     """
     if amount_sats <= 0:
         return load_session(session_id, data_dir)
     with _lock:
         record = load_session(session_id, data_dir)
+        refund_ids = record.setdefault("escrow_refund_ids", {})
+        if not isinstance(refund_ids, dict):
+            refund_ids = {}
+            record["escrow_refund_ids"] = refund_ids
+        if job_id and job_id in refund_ids:
+            return record
         record["balance_sats"] = int(record.get("balance_sats") or 0) + int(amount_sats)
         record["refunded_sats"] = int(record.get("refunded_sats") or 0) + int(amount_sats)
+        if job_id:
+            refund_ids[job_id] = int(amount_sats)
         _save_session(record, data_dir)
         _append_ledger(
             {

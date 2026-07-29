@@ -107,6 +107,17 @@ def test_sync_inference_api_key_owner_env_bound_still_binds(tmp_path, monkeypatc
     assert settings.get_inference_api_key_owner() == owner
 
 
+def test_sync_env_bound_refuses_owner_rebind(tmp_path, monkeypatch):
+    monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SEISO_SECRET_KEY", "test-secret-key-for-jwt-signing-32b")
+    monkeypatch.setenv("SEISO_INFERENCE_API_KEY", "seiso_sk_env_bound_test_key_value_xx")
+    clear_dependency_caches()
+    settings = ForgeSettings()
+    settings.sync_inference_api_key_owner("cc" * 32)
+    with pytest.raises(RuntimeError, match="env-bound"):
+        settings.sync_inference_api_key_owner("dd" * 32)
+
+
 @pytest.mark.asyncio
 async def test_login_omits_access_token_unless_opted_in(tmp_path, monkeypatch):
     monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))

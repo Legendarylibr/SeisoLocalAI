@@ -336,11 +336,15 @@ def complete_fund(
             raise ValueError("payment hash mismatch")
 
         amount = int(record["amount_sats"])
+        # Credit first with challenge_id as fund_id (idempotent on session),
+        # then mark the challenge settled. Crash between the two only leaves a
+        # pending challenge whose retry is a no-op credit + settle mark.
         session = activate_session(
             str(record["session_id"]),
             amount_sats=amount,
             data_dir=data_dir,
             funding_mode="l402",
+            fund_id=challenge_id,
         )
         record["status"] = "settled"
         record["settled_at"] = time.time()
@@ -410,7 +414,7 @@ def funding_l402_block(session_id: str, amount_sats: int) -> dict[str, Any] | No
             "amount_sats": int(amount_sats),
             "do_not_use_live_ln": True,
             "endpoints": {
-                "challenge": "POST /pay/v1/sessions/fund/l402",
+                "challenge": "POST /pay/v1/sessions/fund/l402 (Bearer required)",
                 "complete": "POST /pay/v1/sessions/fund/l402/complete",
             },
             "cli": "seiso pay session fund --session ID --sats N --l402",
