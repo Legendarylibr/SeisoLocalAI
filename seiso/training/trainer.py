@@ -52,6 +52,7 @@ from seiso.training.multi_gpu import (
 )
 from seiso.training.practices import (
     default_pad_to_multiple_of,
+    learning_rate_for_method,
     resolve_compute_dtype,
     resolve_dataloader_settings,
     resolve_map_workers,
@@ -307,31 +308,43 @@ class SeisoTrainer:
 
             from seiso.training.metrics import is_main_process
 
-            if not is_main_process():
-                logger.info("Non-main rank finished training (no checkpoint write)")
-                return cfg.output_dir
+            def _ddp_barrier() -> None:
+                """Sync ranks so non-main teardown cannot race main's final save."""
+                try:
+                    import torch.distributed as dist
 
-            out = (
-                cfg.output_dir
-                / f"checkpoint-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-            )
-            trainer.save_model(str(out))
-            tokenizer.save_pretrained(str(out))
-            if cfg.method == TrainMethod.LORA:
-                self._patch_adapter_metadata(out)
-            self._write_manifest(
-                out,
-                layout,
-                multi_gpu,
-                distributed_plan.strategy,
-                prepared.detected_format.value,
-                preprocess_stats=prepared.preprocess_stats,
-                train_samples=len(prepared.train_ds),
-                eval_samples=len(prepared.eval_ds) if prepared.eval_ds is not None else 0,
-                train_fingerprints=prepared.train_fingerprints,
-                dataset_merkle_skipped=prepared.dataset_merkle_skipped,
-            )
-            logger.info("Training complete: %s", out)
+                    if dist.is_available() and dist.is_initialized():
+                        dist.barrier()
+                except Exception:
+                    logger.debug("DDP barrier skipped", exc_info=True)
+
+            _ddp_barrier()
+            out = cfg.output_dir
+            if is_main_process():
+                out = (
+                    cfg.output_dir
+                    / f"checkpoint-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+                )
+                trainer.save_model(str(out))
+                tokenizer.save_pretrained(str(out))
+                if cfg.method == TrainMethod.LORA:
+                    self._patch_adapter_metadata(out)
+                self._write_manifest(
+                    out,
+                    layout,
+                    multi_gpu,
+                    distributed_plan.strategy,
+                    prepared.detected_format.value,
+                    preprocess_stats=prepared.preprocess_stats,
+                    train_samples=len(prepared.train_ds),
+                    eval_samples=len(prepared.eval_ds) if prepared.eval_ds is not None else 0,
+                    train_fingerprints=prepared.train_fingerprints,
+                    dataset_merkle_skipped=prepared.dataset_merkle_skipped,
+                )
+                logger.info("Training complete: %s", out)
+            else:
+                logger.info("Non-main rank finished training (no checkpoint write)")
+            _ddp_barrier()
             return out
         finally:
             try:
@@ -822,11 +835,11 @@ class SeisoTrainer:
                         gradient_checkpointing_kwargs={"use_reentrant": False}
                     )
                 self._loaded.model = model
-            except ImportError:
-                logger.warning(
-                    "prepare_model_for_kbit_training unavailable — install peft>=0.11; "
-                    "QLoRA may train without k-bit preparation"
-                )
+            except ImportError as exc:
+                raise ImportError(
+                    "prepare_model_for_kbit_training requires peft>=0.11 for QLoRA; "
+                    "refusing to continue without k-bit preparation"
+                ) from exc
 
         return model, tokenizer
 
@@ -930,13 +943,22 @@ class SeisoTrainer:
 
         _ta_fields = set(inspect.signature(_TA.__init__).parameters.keys())
 
+        # Field default 2e-4 is the LoRA default. For FULL/embedding/RL methods,
+        # treat that sentinel as "unset" so learning_rate_for_method applies.
+        _lora_default_lr = 2e-4
+        explicit_lr = float(cfg.learning_rate)
+        if cfg.method != TrainMethod.LORA and abs(explicit_lr - _lora_default_lr) < 1e-15:
+            effective_lr = learning_rate_for_method(cfg.method)
+        else:
+            effective_lr = learning_rate_for_method(cfg.method, explicit=explicit_lr)
+
         base = {
             "output_dir": str(cfg.output_dir),
             "num_train_epochs": cfg.epochs,
             "per_device_train_batch_size": cfg.batch_size,
             "per_device_eval_batch_size": cfg.batch_size,
             "gradient_accumulation_steps": cfg.gradient_accumulation_steps,
-            "learning_rate": cfg.learning_rate,
+            "learning_rate": effective_lr,
             "warmup_ratio": cfg.warmup_ratio,
             "weight_decay": cfg.weight_decay,
             "max_grad_norm": cfg.max_grad_norm,
@@ -960,6 +982,8 @@ class SeisoTrainer:
             "dataloader_persistent_workers": persistent_workers,
             "gradient_checkpointing": cfg.gradient_checkpointing,
         }
+        if cfg.max_steps is not None and "max_steps" in _ta_fields:
+            base["max_steps"] = int(cfg.max_steps)
         if eval_ds is not None and cfg.early_stopping and "metric_for_best_model" in _ta_fields:
             # Match HuggingFace: minimize any *loss metric, maximize others.
             metric = str(cfg.metric_for_best_model or "eval_loss")

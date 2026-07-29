@@ -308,7 +308,7 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
 
 
 def _select_hub_folder(out_root: Path, formats: list[ExportFormat]) -> Path:
-    """Prefer merged/full weights; fall back to GGUF quant dir or export root."""
+    """Prefer merged/full weights; then LoRA adapter dir; then GGUF; else root."""
     for key in (ExportFormat.MERGED, ExportFormat.FULL, ExportFormat.BASE):
         if key in formats:
             candidate = out_root / (
@@ -316,6 +316,10 @@ def _select_hub_folder(out_root: Path, formats: list[ExportFormat]) -> Path:
             )
             if candidate.is_dir() and any(candidate.iterdir()):
                 return candidate
+    if ExportFormat.LORA in formats:
+        lora_dir = out_root / "lora"
+        if lora_dir.is_dir() and any(lora_dir.iterdir()):
+            return lora_dir
     if ExportFormat.GGUF in formats:
         gguf_dirs: list[Path] = []
         for child in out_root.iterdir():
