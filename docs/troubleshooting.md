@@ -310,15 +310,16 @@ python -c "from seiso.training.platform_caps import training_capabilities; impor
 
 Default data dir: `$HOME/.seiso` on Linux/macOS/WSL, `%USERPROFILE%\.seiso` on Windows (override with `SEISO_DATA_DIR`).
 
-## Opt-in pay marketplace / Ark
+## Opt-in pay marketplace / Ark + L402
 
-> **Not functional yet — do not use.** Live Ark settlement is not wired; faucet/sim only for local smoke tests.
+> **Not functional yet — do not use.** Live Ark and L402 settlement are not wired; faucet/sim only for local smoke tests.
 
 | Symptom | Check |
 |---------|--------|
 | `seiso pay` refuses to run | `SEISO_ALLOW_PAY=1` must be set |
 | Settle / funding fails closed | Set `SEISO_PROTOCOL_TREASURY_ARK` (and operator Ark) **or** use `SEISO_PAY_FAUCET=1` for local tests only |
 | `SEISO_ARK_BACKEND=bark\|second` errors | Backend not bundled yet — leave unset / use faucet for smoke tests |
+| Expecting live L402 | Not wired yet — discovery lists it; use faucet for smoke tests ([L402 explained](https://lightningfaucet.com/learn/l402-payments-explained/)) |
 | Buyer can’t reach operator | Hit `SEISO_PAY_URL` (pay sidecar), not Forge; check `GET /.well-known/seiso-pay.json` |
 | Accidentally exposed faucet | Turn `SEISO_PAY_FAUCET` **off** on any public market |
 

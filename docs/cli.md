@@ -318,9 +318,14 @@ See [provenance-nostr.md](provenance-nostr.md) for Forge UI settings, auto-attes
 Remote sats marketplace for inference / finetune / RL. **Self-hosted stays free** —
 do not enable this for local-only use. Requires `SEISO_ALLOW_PAY=1`.
 
-Settlement uses **opt-in Ark** addresses (`SEISO_OPERATOR_ARK`, `SEISO_PROTOCOL_TREASURY_ARK`).
+Settlement payment methods (all live rails **not functional yet — do not use**):
+**Ark** addresses (`SEISO_OPERATOR_ARK`, `SEISO_PROTOCOL_TREASURY_ARK`) and
+**L402** (Lightning HTTP 402 — see [marketplace.md](pay/marketplace.md) and
+[L402 explained](https://lightningfaucet.com/learn/l402-payments-explained/)).
 Without a treasury Ark and without `SEISO_PAY_FAUCET=1`, paid settles fail closed.
-**Ark chain settlement is not functional currently** — `SEISO_ARK_BACKEND=bark|second` is reserved for a future client wire; leave unset or use faucet for smoke tests.
+**Ark chain settlement is not functional currently** — `SEISO_ARK_BACKEND=bark|second`
+is reserved for a future client wire; leave unset or use faucet for smoke tests.
+**L402 is not functional currently** — advertised in discovery only until wired.
 
 ```bash
 export SEISO_ALLOW_PAY=1

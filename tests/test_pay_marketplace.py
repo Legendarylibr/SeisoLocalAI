@@ -137,7 +137,11 @@ def test_well_known_and_app_health(pay_env: Path) -> None:
     assert h.json()["pay_allowed"] is True
     wk = client.get("/.well-known/seiso-pay.json")
     assert wk.status_code == 200
-    assert wk.json()["protocol_fee_bps"] == 500
+    body_wk = wk.json()
+    assert body_wk["protocol_fee_bps"] == 500
+    method_ids = {m["id"] for m in body_wk["payment_methods"]}
+    assert method_ids >= {"ark", "l402", "faucet"}
+    assert "L402" in body_wk["payment_methods_note"]
 
     created = client.post(
         "/pay/v1/sessions",
@@ -147,6 +151,12 @@ def test_well_known_and_app_health(pay_env: Path) -> None:
     body = created.json()
     assert body["token"].startswith("seiso_pay_")
     assert body["session"]["status"] == "active"
+    funding = body["funding"]
+    assert "payment_methods" in funding
+    assert funding["l402"]["method"] == "l402"
+    assert funding["l402"]["status"] == "not_functional"
+    assert funding["l402"]["do_not_use"] is True
+    assert "lightningfaucet.com" in funding["l402"]["reference"]
 
     q = client.post("/pay/v1/quotes", json={"type": "finetune", "preset": "smoke"})
     assert q.status_code == 200
@@ -159,3 +169,19 @@ def test_well_known_and_app_health(pay_env: Path) -> None:
     )
     assert job.status_code == 200
     assert job.json()["job"]["status"] == "completed"
+
+
+def test_l402_hide_and_fail_closed(pay_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    from seiso.pay.ark import funding_instructions
+    from seiso.pay.flags import payment_methods
+    from seiso.pay.l402 import require_l402_ready
+
+    monkeypatch.setenv("SEISO_PAY_L402", "0")
+    ids = {m["id"] for m in payment_methods()}
+    assert "l402" not in ids
+    assert "ark" in ids
+    funding = funding_instructions("sess-test", 1000)
+    assert funding["l402"] is None
+
+    with pytest.raises(RuntimeError, match="not functional yet"):
+        require_l402_ready()

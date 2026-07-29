@@ -116,9 +116,9 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 
 ### Path E — Opt-in marketplace & Buzz mesh
 
-> **Not functional yet — do not use.** Pay, mesh, and live Ark settlement are scaffolding only until wired.
+> **Not functional yet — do not use.** Pay, mesh, and live Ark / L402 settlement are scaffolding only until wired.
 
-1. [pay/marketplace.md](pay/marketplace.md) — sats marketplace, Ark treasury/operator, faucet vs real settles
+1. [pay/marketplace.md](pay/marketplace.md) — sats marketplace, Ark + L402 payment methods, faucet vs real settles
 2. [training/mesh.md](training/mesh.md) — Buzz-coordinated shared / multi-node training (no fee)
 3. [cli.md § seiso pay / seiso mesh](cli.md#seiso-pay-opt-in-marketplace) — command cheat sheet
 4. [`.agents/skills/seiso-orchestrate/`](../.agents/skills/seiso-orchestrate/SKILL.md) — agent decision loop (local → mesh → pay)

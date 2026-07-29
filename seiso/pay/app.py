@@ -10,6 +10,7 @@ from seiso.pay.flags import (
     faucet_enabled,
     forge_base_url,
     pay_allowed,
+    payment_methods,
     protocol_fee_bps,
     protocol_treasury_ark,
     require_pay_allowed,
@@ -78,6 +79,12 @@ def build_app():
             "protocol_fee_bps": protocol_fee_bps(),
             "scopes": ["inference", "finetune", "rl"],
             "job_types": sorted(JOB_TYPES - {"inference"}),
+            "payment_methods": payment_methods(),
+            "payment_methods_note": (
+                "Live Ark and L402 rails are not functional yet — do not use. "
+                "Faucet/sim only for local smoke tests. "
+                "L402: https://lightningfaucet.com/learn/l402-payments-explained/"
+            ),
             "endpoints": {
                 "sessions": "/pay/v1/sessions",
                 "quotes": "/pay/v1/quotes",
