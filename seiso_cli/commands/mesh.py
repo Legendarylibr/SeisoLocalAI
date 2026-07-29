@@ -136,8 +136,10 @@ def mesh_worker(
         "next": (
             "Apply train_config_overlay to your train YAML / Accelerate launch "
             "(Seiso honors the overlay, not env-only NNODES). "
-            "Relay only the top-level signed nostr_event via buzz-cli — "
-            "unsigned receipts are local pointers, not channel authority. "
+            "Relay only the top-level signed nostr_event: "
+            "`jq -c .nostr_event <this.json> | buzz messages send --channel $CHANNEL --content -` "
+            "(Buzz kind-9 embed; do not --kind 31251). "
+            "Unsigned receipts are local pointers, not channel authority. "
             "Mesh does not charge protocol fees. Not functional for real multi-node yet."
         ),
     }

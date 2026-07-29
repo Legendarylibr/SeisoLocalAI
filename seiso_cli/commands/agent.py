@@ -32,8 +32,8 @@ def agent_status(
 ) -> None:
     """Emit a signed agent status event + local receipt pointer.
 
-    Post ``nostr_event`` to Buzz via buzz-cli. Do not treat ``buzz_receipt`` as
-    channel authority.
+    Embed ``nostr_event`` JSON in a Buzz kind-9 ``buzz messages send`` (Buzz
+    rejects ``--kind 31254``). Do not treat ``buzz_receipt`` as channel authority.
     """
     from seiso.agent.signed_relay import signed_agent_interaction
 

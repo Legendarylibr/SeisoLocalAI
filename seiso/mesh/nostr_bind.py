@@ -28,8 +28,11 @@ SEISO_MESH_ANNOUNCE_KIND = 31252
 SEISO_MESH_HEARTBEAT_KIND = 31253
 
 _RELAY_ONLY_WITH_SIGNING_NOTE = (
-    "Relay policy: post only the signed nostr_event (NIP-01 + BIP-340) via "
-    "buzz-cli. Do not treat unsigned receipt JSON as channel authority."
+    "Relay policy: post only the signed nostr_event (NIP-01 + BIP-340). On Buzz, "
+    "embed that JSON as kind-9 channel message content via "
+    "`buzz messages send` (Buzz rejects --kind 31251–31254; social publish is "
+    "kind:1 only). Peers verify the inner event offline. Do not treat unsigned "
+    "receipt JSON as channel authority."
 )
 
 _SIGNED_PLAN_KEYS = (
@@ -148,18 +151,24 @@ def verify_mesh_plan_nostr(plan: dict[str, Any]) -> None:
 
 def sign_mesh_announce(record: dict[str, Any], pair: NostrKeyPair) -> dict[str, Any]:
     """Sign an announce record (local + receipt metadata)."""
+    d_tag = str(record.get("mesh_endpoint_fingerprint") or "").strip()
+    if not d_tag:
+        raise RuntimeError(
+            "mesh announce requires mesh_endpoint_fingerprint for addressable d-tag "
+            "(NIP-01 kind 30000–39999)"
+        )
     payload = {
         "channel": record.get("channel"),
         "gpus": record.get("gpus"),
         "capabilities": record.get("capabilities"),
         "alias": record.get("alias"),
-        "mesh_endpoint_fingerprint": record.get("mesh_endpoint_fingerprint"),
+        "mesh_endpoint_fingerprint": d_tag,
     }
     draft = {
         "kind": SEISO_MESH_ANNOUNCE_KIND,
         "created_at": int(record.get("ts") or time.time()),
         "tags": [
-            ["d", str(record.get("mesh_endpoint_fingerprint") or "")],
+            ["d", d_tag],
             ["t", "seiso-mesh-announce"],
             ["client", "seiso"],
             ["channel", str(record.get("channel") or "")],

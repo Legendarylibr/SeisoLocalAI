@@ -74,8 +74,12 @@ Hard rules:
 1. Join or create a channel for the run (one job family per channel when possible).
 2. Set topic/purpose to the goal + config path.
 3. After each milestone, emit a **signed** status and relay **only** `nostr_event`:
-   `seiso agent status --role train --status started --channel "$CHANNEL"`
-   then publish that event via buzz-cli. Unsigned receipt JSON is a local pointer.
+   `seiso agent status --role train --status started --channel "$CHANNEL" >status.json`
+   then embed that event as kind-9 channel content (Buzz does **not** accept
+   `--kind 31250–31254`; `buzz social publish` is kind:1 only):
+   `jq -c .nostr_event status.json | buzz messages send --channel "$CHANNEL" --content -`
+   Peers verify the inner NIP-01 / BIP-340 event offline. Unsigned receipt JSON
+   is a local pointer.
 4. On failure, same pattern with `--status failed` + error summary in `--message`;
    do not silently retry forever.
 

@@ -352,19 +352,22 @@ Buzz-**agent**-only multi-node / shared training. Opt-in (`SEISO_ALLOW_MESH=1` +
 valid `BUZZ_PRIVATE_KEY` nsec); plans are **NIP-01 / BIP-340** signed. **No**
 protocol fee. Forge UI keeps full local training config (`nnodes=1`) and refuses
 mesh — see `GET /api/training/surface`. Share `SEISO_MESH_TOKEN` (≥16 chars)
-out-of-band. **Relay only with signing:** publish the signed `nostr_event`
-(NIP-01 + BIP-340) via buzz-cli — unsigned receipts are local pointers.
-Seiso does not NIP-98 to the relay.
+out-of-band. **Relay only with signing:** the signed `nostr_event` (NIP-01 +
+BIP-340) is channel authority — unsigned receipts are local pointers.
+Seiso does not NIP-98 to the relay. On Buzz, embed `nostr_event` JSON in a
+kind-9 `buzz messages send` (Buzz rejects `--kind 31251–31254`).
 
 ```bash
 export SEISO_ALLOW_MESH=1
 export SEISO_MESH_TOKEN=…   # ≥16 chars; out-of-band; never post to Buzz
 export BUZZ_PRIVATE_KEY=nsec1…   # must be a valid Nostr secret (signing key)
 # optional: export SEISO_MESH_TRUSTED_NPUBS=npub1planner…
-seiso mesh announce --channel "$CHANNEL" --gpus 2
-seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2 --master-addr 10.0.0.1 --gpus-per-node 2
-seiso mesh worker --plan "$JOB_ID" --rank 0   # --rank required; verifies Nostr sig
-# → relay the returned nostr_event via buzz-cli (signed event only)
+seiso mesh announce --channel "$CHANNEL" --gpus 2 >announce.json
+jq -c .nostr_event announce.json | buzz messages send --channel "$CHANNEL" --content -
+seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2 --master-addr 10.0.0.1 --gpus-per-node 2 >plan.json
+jq -c .nostr_event plan.json | buzz messages send --channel "$CHANNEL" --content -
+seiso mesh worker --plan "$JOB_ID" --rank 0 >worker.json  # --rank required; verifies Nostr sig
+jq -c .nostr_event worker.json | buzz messages send --channel "$CHANNEL" --content -
 ```
 
 ## `seiso agent` (Buzz-facing signed status)
@@ -373,8 +376,9 @@ Generic agent milestones use the same **relay only with signing** policy as mesh
 
 ```bash
 export BUZZ_PRIVATE_KEY=nsec1…
-seiso agent status --role train --status started --channel "$CHANNEL" --job-id "$JOB"
-# → relay nostr_event via buzz-cli; buzz_receipt is a local pointer only
+seiso agent status --role train --status started --channel "$CHANNEL" --job-id "$JOB" >status.json
+jq -c .nostr_event status.json | buzz messages send --channel "$CHANNEL" --content -
+# buzz_receipt is a local pointer only — not channel authority
 ```
 
 Prefer local → mesh → paid marketplace when orchestrating from a Buzz agent

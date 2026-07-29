@@ -78,7 +78,19 @@ Plans are sandboxed under `mesh/plans/<job_id>.json` — absolute foreign paths 
 {"id":"…","pubkey":"…","created_at":0,"kind":31251,"tags":[…],"content":"{…}","sig":"…"}
 ```
 
-Publish that signed event via buzz-cli (or an allowlisted Nostr relay). Never post `SEISO_MESH_TOKEN`, local `token_fingerprint` (HMAC stays on disk only — not in signed event content), nsecs, or unsigned plan JSON as authority.
+**Buzz transport:** Buzz channel messages only accept kinds `9` / `45001` / `45003`
+(`buzz messages send --kind`); `buzz social publish` is kind `1` only. Do **not**
+pass `--kind 31251` (rejected). Embed the signed event JSON as message *content*
+so peers can extract and `verify_event` offline:
+
+```bash
+# after seiso mesh plan / announce / worker / seiso agent status
+jq -c .nostr_event <out.json | buzz messages send --channel "$CHANNEL" --content -
+```
+
+On a general Nostr relay you may publish the same event as a native addressable
+EVENT. Never post `SEISO_MESH_TOKEN`, local `token_fingerprint` (HMAC stays on
+disk only — not in signed event content), nsecs, or unsigned plan JSON as authority.
 
 ## Fallback
 

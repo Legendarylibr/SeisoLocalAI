@@ -35,8 +35,10 @@ SEISO_AGENT_STATUS_KIND = 31254
 RELAY_POLICY = "signed_event_only"
 
 _RELAY_NOTE = (
-    "Relay policy: post only the signed nostr_event (NIP-01 + BIP-340) via "
-    "buzz-cli. Do not treat unsigned receipt JSON as channel authority. "
+    "Relay policy: post only the signed nostr_event (NIP-01 + BIP-340). On Buzz, "
+    "embed that JSON in a kind-9 `buzz messages send` (Buzz does not accept "
+    "--kind 31250–31254; `buzz social publish` is kind:1 only). Peers verify "
+    "the inner event offline. Unsigned receipt JSON is not channel authority. "
     "Applies to all Buzz↔Seiso agent authority — not mesh-only."
 )
 

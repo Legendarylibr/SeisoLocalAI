@@ -190,6 +190,25 @@ def test_relay_signed_event_refuses_unsigned() -> None:
         relay_signed_event({"event": {"id": "ab" * 32, "sig": "00" * 64}})
 
 
+def test_sign_mesh_announce_requires_d_tag() -> None:
+    from seiso.mesh.nostr_bind import sign_mesh_announce
+    from seiso.research.nostr.keys import generate_keypair
+
+    pair = generate_keypair()
+    with pytest.raises(RuntimeError, match="mesh_endpoint_fingerprint"):
+        sign_mesh_announce(
+            {
+                "channel": "ch",
+                "gpus": 1,
+                "capabilities": [],
+                "alias": "x",
+                "mesh_endpoint_fingerprint": "",
+                "ts": 1,
+            },
+            pair,
+        )
+
+
 def test_build_plan_requires_gpus_per_node(mesh_env: Path) -> None:
     from seiso.mesh.coordinator import build_plan
 
