@@ -325,7 +325,8 @@ Settlement payment methods (all live rails **not functional yet — do not use**
 Without a treasury Ark and without `SEISO_PAY_FAUCET=1`, paid settles fail closed.
 **Ark chain settlement is not functional currently** — `SEISO_ARK_BACKEND=bark|second`
 is reserved for a future client wire; leave unset or use faucet for smoke tests.
-**L402 is not functional currently** — advertised in discovery only until wired.
+**L402 is not functional for live Lightning** — use `SEISO_PAY_L402_SIM=1`
+(or faucet) for simulated fund/exchange; see marketplace docs.
 
 ```bash
 export SEISO_ALLOW_PAY=1
@@ -334,11 +335,13 @@ export SEISO_PAY_FAUCET=1   # dev only — never on a public market
 # export SEISO_OPERATOR_ARK=ark1…
 seiso pay quote --type finetune --preset smoke
 seiso pay session create --sats 20000 --scopes inference,finetune,rl
+# seiso pay session fund --session ID --sats 20000 --l402   # sim L402
 seiso pay job start --type finetune --preset smoke --dry-run
 seiso pay serve --host 127.0.0.1 --port 8787   # operator sidecar
 ```
 
 Default protocol fee is 5% (`SEISO_PROTOCOL_FEE_BPS=500`) added on top of compute.
+Failed/cancelled jobs refund escrow to the prepaid session balance (not Lightning).
 See [pay/marketplace.md](pay/marketplace.md).
 
 ## `seiso mesh` (experimental)

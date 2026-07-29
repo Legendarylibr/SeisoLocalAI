@@ -73,12 +73,20 @@ def pay_session(
     faucet: Annotated[
         bool, typer.Option(help="Use dev faucet (requires SEISO_PAY_FAUCET=1)")
     ] = False,
+    l402: Annotated[
+        bool,
+        typer.Option(
+            "--l402",
+            help="Fund via L402 sim (SEISO_PAY_L402_SIM=1 or faucet)",
+        ),
+    ] = False,
     json_out: Annotated[bool, typer.Option("--json")] = True,
 ) -> None:
     """Create / status / fund marketplace sessions."""
     _require_allow()
     from seiso.pay.ark import funding_instructions
     from seiso.pay.flags import faucet_enabled
+    from seiso.pay.l402 import complete_fund, l402_sim_enabled, mint_fund_challenge
     from seiso.pay.store import (
         activate_session,
         create_session,
@@ -92,7 +100,19 @@ def pay_session(
         created = create_session(scopes=[s.strip() for s in scopes.split(",")])
         tok = created["token"]
         sid = created["session_id"]
-        if sats > 0 and (faucet or faucet_enabled()):
+        if sats > 0 and l402:
+            if not l402_sim_enabled():
+                console.print(
+                    "[red]SEISO_PAY_L402_SIM=1 (or SEISO_PAY_FAUCET=1) required "
+                    "for L402 sim funding[/]"
+                )
+                raise typer.Exit(1)
+            challenge = mint_fund_challenge(session_id=sid, amount_sats=sats)
+            complete_fund(
+                macaroon=str(challenge["macaroon"]),
+                preimage_hex=str(challenge["sim_preimage"]),
+            )
+        elif sats > 0 and (faucet or faucet_enabled()):
             if not faucet_enabled():
                 console.print("[red]SEISO_PAY_FAUCET=1 required for faucet funding[/]")
                 raise typer.Exit(1)
@@ -127,10 +147,30 @@ def pay_session(
         if sats <= 0:
             console.print("[red]--sats required[/]")
             raise typer.Exit(1)
+        if l402:
+            if not l402_sim_enabled():
+                console.print(
+                    "[red]SEISO_PAY_L402_SIM=1 (or SEISO_PAY_FAUCET=1) required "
+                    "for L402 sim. Live Lightning is not wired.[/]"
+                )
+                _print_json(funding_instructions(session, sats))
+                raise typer.Exit(2)
+            try:
+                challenge = mint_fund_challenge(session_id=session, amount_sats=sats)
+                result = complete_fund(
+                    macaroon=str(challenge["macaroon"]),
+                    preimage_hex=str(challenge["sim_preimage"]),
+                )
+            except Exception as exc:
+                console.print(f"[red]{exc}[/]")
+                raise typer.Exit(1) from exc
+            _print_json(result)
+            return
         if not (faucet or faucet_enabled()):
             console.print(
                 "[yellow]Ark funding: use funding.ark_address from session create. "
-                "For dev, pass --faucet with SEISO_PAY_FAUCET=1.[/]"
+                "For L402 sim: --l402 with SEISO_PAY_L402_SIM=1. "
+                "For faucet: --faucet with SEISO_PAY_FAUCET=1.[/]"
             )
             _print_json(funding_instructions(session, sats))
             raise typer.Exit(2)

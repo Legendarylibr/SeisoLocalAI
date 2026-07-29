@@ -17,6 +17,12 @@ from seiso.pay.flags import (
 )
 from seiso.pay.inference import debit_inference, estimate_tokens_from_messages
 from seiso.pay.jobs import cancel_job, job_receipt, start_job
+from seiso.pay.l402 import (
+    REFERENCE_URL,
+    complete_fund,
+    l402_sim_enabled,
+    mint_fund_challenge,
+)
 from seiso.pay.pricing import JOB_TYPES, quote_job
 from seiso.pay.store import (
     activate_session,
@@ -81,17 +87,21 @@ def build_app():
             "job_types": sorted(JOB_TYPES - {"inference"}),
             "payment_methods": payment_methods(),
             "payment_methods_note": (
-                "Live Ark and L402 rails are not functional yet — do not use. "
-                "Faucet/sim only for local smoke tests. "
-                "L402: https://lightningfaucet.com/learn/l402-payments-explained/"
+                "Live Ark and live Lightning L402 are not functional yet — "
+                "do not use for real funds. "
+                "Faucet and SEISO_PAY_L402_SIM credit sessions for smoke tests. "
+                f"L402: {REFERENCE_URL}"
             ),
             "endpoints": {
                 "sessions": "/pay/v1/sessions",
+                "fund_l402": "/pay/v1/sessions/fund/l402",
+                "fund_l402_complete": "/pay/v1/sessions/fund/l402/complete",
                 "quotes": "/pay/v1/quotes",
                 "jobs": "/pay/v1/jobs",
                 "models": "/v1/models",
                 "chat": "/v1/chat/completions",
             },
+            "l402_sim": l402_sim_enabled(),
             "forge_proxied": forge_base_url(),
         }
 
@@ -120,6 +130,60 @@ def build_app():
     @app.get("/pay/v1/sessions/me")
     def session_me(session: dict[str, Any] = _bearer_dep) -> dict[str, Any]:
         return public_session_view(session)
+
+    @app.post("/pay/v1/sessions/fund/l402")
+    def fund_l402_challenge(body: dict[str, Any] | None = None) -> JSONResponse:
+        """Mint an L402 challenge for session top-up (sim until live LN wired)."""
+        body = body or {}
+        session_id = str(body.get("session_id") or "").strip()
+        amount = int(body.get("sats") or body.get("amount_sats") or 0)
+        if not session_id:
+            raise HTTPException(400, "session_id required")
+        if amount <= 0:
+            raise HTTPException(400, "sats / amount_sats must be > 0")
+        from seiso.pay.store import load_session
+
+        try:
+            load_session(session_id)
+        except KeyError as exc:
+            raise HTTPException(404, "session not found") from exc
+        try:
+            challenge = mint_fund_challenge(
+                session_id=session_id,
+                amount_sats=amount,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        headers = {"WWW-Authenticate": str(challenge["www_authenticate"])}
+        return JSONResponse(challenge, status_code=402, headers=headers)
+
+    @app.post("/pay/v1/sessions/fund/l402/complete")
+    async def fund_l402_complete(
+        body: dict[str, Any] | None = None,
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        """Exchange L402 macaroon:preimage for session credit (+ Bearer path unchanged)."""
+        body = body or {}
+        auth = authorization
+        if not auth:
+            # Prefer header; allow JSON body for CLI/sim without custom header plumbing.
+            mac = body.get("macaroon")
+            pre = body.get("preimage") or body.get("sim_preimage")
+            if mac and pre:
+                auth = f"L402 {mac}:{pre}"
+            elif body.get("authorization"):
+                auth = str(body["authorization"])
+        try:
+            result = complete_fund(authorization=auth)
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(401, str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return result
 
     @app.post("/pay/v1/quotes")
     def quotes(body: dict[str, Any]) -> dict[str, Any]:

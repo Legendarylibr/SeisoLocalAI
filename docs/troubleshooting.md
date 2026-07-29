@@ -319,7 +319,8 @@ Default data dir: `$HOME/.seiso` on Linux/macOS/WSL, `%USERPROFILE%\.seiso` on W
 | `seiso pay` refuses to run | `SEISO_ALLOW_PAY=1` must be set |
 | Settle / funding fails closed | Set `SEISO_PROTOCOL_TREASURY_ARK` (and operator Ark) **or** use `SEISO_PAY_FAUCET=1` for local tests only |
 | `SEISO_ARK_BACKEND=bark\|second` errors | Backend not bundled yet — leave unset / use faucet for smoke tests |
-| Expecting live L402 | Not wired yet — discovery lists it; use faucet for smoke tests ([L402 explained](https://lightningfaucet.com/learn/l402-payments-explained/)) |
+| Expecting live L402 | Live Lightning not wired — set `SEISO_PAY_L402_SIM=1` (or faucet) for sim fund/exchange; use `seiso pay session fund --l402` ([L402 explained](https://lightningfaucet.com/learn/l402-payments-explained/)) |
+| Job failed / cancelled but balance missing | Escrow should restore to session (`refunded_sats`); check job receipt `settlement.status=refunded` |
 | Buyer can’t reach operator | Hit `SEISO_PAY_URL` (pay sidecar), not Forge; check `GET /.well-known/seiso-pay.json` |
 | Accidentally exposed faucet | Turn `SEISO_PAY_FAUCET` **off** on any public market |
 

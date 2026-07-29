@@ -81,9 +81,24 @@ def faucet_enabled() -> bool:
 def payment_methods() -> list[dict[str, str]]:
     """Advertised marketplace payment rails (discovery / docs).
 
-    Live Ark and L402 settlement are **not functional yet** — do not use for
-    real funds. Faucet is the only smoke-test credit path today.
+    Live Ark and live Lightning L402 are **not functional yet** — do not use
+    for real funds. Faucet and ``SEISO_PAY_L402_SIM`` credit sessions for smoke
+    tests only.
     """
+    from seiso.pay.l402 import l402_sim_enabled
+
+    l402_status = "sim" if l402_sim_enabled() else "not_functional"
+    l402_detail = (
+        "Simulated L402 fund/exchange (SEISO_PAY_L402_SIM or faucet); "
+        "live Lightning not wired — "
+        "https://lightningfaucet.com/learn/l402-payments-explained/"
+        if l402_sim_enabled()
+        else (
+            "HTTP 402 + Lightning invoice + macaroon; live LN not wired — "
+            "set SEISO_PAY_L402_SIM=1 for smoke tests; "
+            "https://lightningfaucet.com/learn/l402-payments-explained/"
+        )
+    )
     methods: list[dict[str, str]] = [
         {
             "id": "ark",
@@ -94,11 +109,8 @@ def payment_methods() -> list[dict[str, str]]:
         {
             "id": "l402",
             "label": "L402 (Lightning HTTP 402)",
-            "status": "not_functional",
-            "detail": (
-                "HTTP 402 + Lightning invoice + macaroon; "
-                "https://lightningfaucet.com/learn/l402-payments-explained/"
-            ),
+            "status": l402_status,
+            "detail": l402_detail,
         },
     ]
     # Allow operators to hide L402 from discovery without removing Ark.

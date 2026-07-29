@@ -38,6 +38,47 @@ def _append_log(job: dict[str, Any], line: str, data_dir: Path | None) -> None:
     save_job(job, data_dir)
 
 
+def _already_refunded(job: dict[str, Any]) -> bool:
+    settlement = job.get("settlement") or {}
+    if settlement.get("status") == "refunded":
+        return True
+    return int(job.get("refunded_sats") or 0) > 0
+
+
+def _refund_escrow(
+    job: dict[str, Any],
+    *,
+    data_dir: Path | None,
+    reason: str,
+) -> int:
+    """Return escrowed sats to session balance; idempotent per job."""
+    if _already_refunded(job):
+        return int(job.get("refunded_sats") or 0)
+    total = int((job.get("quote") or {}).get("total_sats") or 0)
+    if total <= 0:
+        return 0
+    escrow_release_refund(
+        str(job["session_id"]),
+        amount_sats=total,
+        data_dir=data_dir,
+        job_id=str(job["job_id"]),
+        reason=reason,
+    )
+    job["refunded_sats"] = total
+    job["settlement"] = {
+        "status": "refunded",
+        "amount_sats": total,
+        "reason": reason,
+        "rail": "session_balance",
+        "detail": (
+            "Escrow restored to prepaid session balance. "
+            "Lightning/L402 pay-in is one-way; no on-chain reverse payment."
+        ),
+        "ts": time.time(),
+    }
+    return total
+
+
 def start_job(
     *,
     session_id: str,
@@ -77,13 +118,8 @@ def start_job(
         if _RUNNING:
             job["status"] = "failed"
             job["error"] = "another marketplace GPU job is already running"
+            _refund_escrow(job, data_dir=data_dir, reason="gpu_busy")
             save_job(job, data_dir)
-            escrow_release_refund(
-                session_id,
-                amount_sats=total,
-                data_dir=data_dir,
-                job_id=job["job_id"],
-            )
             return job
         _RUNNING = True
 
@@ -223,6 +259,7 @@ def _complete_job(
     )
     job["status"] = "completed"
     job["settlement"] = receipt.as_dict()
+    job["refunded_sats"] = 0
     if dry_run:
         job["artifact_dir"] = job.get("artifact_dir") or str(
             _artifact_dir(job, data_dir)
@@ -243,14 +280,7 @@ def _fail_job(
     job["error"] = error
     _append_log(job, f"ERROR: {error}", data_dir)
     if refund:
-        total = int((job.get("quote") or {}).get("total_sats") or 0)
-        if total:
-            escrow_release_refund(
-                job["session_id"],
-                amount_sats=total,
-                data_dir=data_dir,
-                job_id=job["job_id"],
-            )
+        _refund_escrow(job, data_dir=data_dir, reason="job_failure")
     save_job(job, data_dir)
     return job
 
@@ -260,23 +290,19 @@ def cancel_job(job_id: str, *, data_dir: Path | None = None) -> dict[str, Any]:
     job = load_job(job_id, data_dir)
     if job.get("status") in {"completed", "failed", "cancelled"}:
         return job
-    total = int((job.get("quote") or {}).get("total_sats") or 0)
     prev = job.get("status")
     job["status"] = "cancelled"
     job["error"] = "cancelled by client"
-    if total and prev in {"pending", "running"}:
-        escrow_release_refund(
-            job["session_id"],
-            amount_sats=total,
-            data_dir=data_dir,
-            job_id=job_id,
-        )
+    if prev in {"pending", "running"}:
+        _refund_escrow(job, data_dir=data_dir, reason="cancelled")
     save_job(job, data_dir)
     return job
 
 
 def job_receipt(job: dict[str, Any]) -> dict[str, Any]:
     q = job.get("quote") or {}
+    settlement = job.get("settlement")
+    refunded = int(job.get("refunded_sats") or 0)
     return {
         "mode": "paid",
         "type": job.get("job_type"),
@@ -285,7 +311,8 @@ def job_receipt(job: dict[str, Any]) -> dict[str, Any]:
         "compute_sats": q.get("compute_sats"),
         "protocol_fee_sats": q.get("protocol_fee_sats"),
         "total_sats": q.get("total_sats"),
+        "refunded_sats": refunded,
         "artifacts": job.get("artifact_dir"),
-        "settlement": job.get("settlement"),
+        "settlement": settlement,
         "error": job.get("error"),
     }
