@@ -23,7 +23,7 @@ agent identity.
 | Surface | Entry | What it exposes | Mesh / multi-node |
 |---------|-------|-----------------|-------------------|
 | **Frontend** | Forge UI / `POST /api/training/jobs` | Full local training config (method, quant, local multi-GPU DDP `nnodes=1`, hyperparams) | **Refused** |
-| **Agent** | `seiso` CLI / agent chat | Same full local config + mesh tools when opted in | Buzz-agent-only (`SEISO_ALLOW_MESH=1` + valid `BUZZ_PRIVATE_KEY` nsec). Seiso does not NIP-98 to Buzz — buzz-cli does. Peers bind via `SEISO_MESH_TOKEN`. |
+| **Agent** | `seiso` CLI / agent chat | Same full local config + mesh tools when opted in | Buzz-agent-only (`SEISO_ALLOW_MESH=1` + valid `BUZZ_PRIVATE_KEY` nsec). Mesh plans are NIP-01 / BIP-340 signed offline; buzz-cli does relay NIP-98. Peers also share `SEISO_MESH_TOKEN`. |
 
 - Frontend must keep showing proper training settings — never strip the Train
   studio down to a stub when separating agent mesh.
