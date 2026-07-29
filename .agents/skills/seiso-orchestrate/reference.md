@@ -98,6 +98,19 @@ Never send `$KEY` to Buzz.
 - verify: seiso provenance verify <manifest>
 ```
 
+**Paid marketplace** (remote only — never for localhost)
+
+```text
+## Seiso marketplace run
+- mode: paid
+- type: finetune|slime|distill_rl|rl_quant|nemo_rl|inference
+- status: completed|failed
+- compute_sats: …
+- protocol_fee_sats: …
+- total_sats: …
+- job_id: …
+```
+
 **Failed**
 
 ```text
@@ -134,3 +147,9 @@ Never send `$KEY` to Buzz.
 | `SEISO_NOSTR_RELAYS` | Comma-separated `wss://` relays |
 | `SEISO_NOSTR_ATTEST` | Auto-attest after pipelines (opt-in) |
 | `SEISO_INFERENCE_API_KEY` | Compat `/v1` chat key override |
+| `SEISO_PAY_URL` | Remote marketplace base (never required for local) |
+| `SEISO_PAY_TOKEN` | Prepaid `seiso_pay_*` session token (never post to Buzz) |
+| `SEISO_ALLOW_PAY` | Operator: enable pay sidecar / CLI (opt-in) |
+| `SEISO_PROTOCOL_FEE_BPS` | Protocol fee basis points (default 500 = 5%) |
+| `SEISO_ALLOW_MESH` | Experimental Buzz mesh (opt-in; no protocol fee) |
+| `SEISO_MESH_TOKEN` | Mesh shared secret (out-of-band; never post to Buzz) |

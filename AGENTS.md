@@ -81,10 +81,12 @@ See also `docs/troubleshooting.md`, `docs/install.md`, and `docs/forge.md` (for 
 
 ```
 seiso/                 # core (runners, kernels, training, export, compress, rl, ...)
+seiso/pay/             # opt-in sats marketplace (sidecar; self-hosted stays free)
+seiso/mesh/            # experimental Buzz mesh coordination (opt-in; no protocol fee)
 seiso/slime/           # slime RL (HF / multi-GPU DDP / SGLang / vLLM rollouts)
 seiso/chat/            # shared chat prompts + output sanitize (CLI + Forge)
 seiso/slime_single_gpu/# compat shim → seiso.slime (do not add new code here)
-seiso_cli/main.py      # CLI
+seiso_cli/main.py      # CLI (includes seiso pay / seiso mesh)
 forge/                 # FastAPI (orchestrators, routes, services, security, db)
 forge-ui/              # React sources + built dist/
 seiso/codellama_compress/    # bundled LLM compression (research)

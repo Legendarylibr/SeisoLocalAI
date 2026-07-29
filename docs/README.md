@@ -39,6 +39,8 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Enable fused GPU kernels | [training/kernels.md](training/kernels.md) |
 | Read kernel shape / intensity estimates | [training/kernel-shape.md](training/kernel-shape.md) · `seiso-bench-kernels --roofline-only` |
 | Train on multiple GPUs | [training/multi-gpu.md](training/multi-gpu.md) |
+| Opt-in sats marketplace (remote finetune/RL/inference) | [pay/marketplace.md](pay/marketplace.md) |
+| Experimental Buzz mesh training | [training/mesh.md](training/mesh.md) |
 | Deploy with HTTPS | [deployment/reverse-proxy.md](deployment/reverse-proxy.md) |
 | Fix a problem | [troubleshooting.md](troubleshooting.md) |
 | Run tests before a PR | [CI_LOCAL.md](CI_LOCAL.md) |
