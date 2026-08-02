@@ -138,8 +138,14 @@ seiso_is_wsl() {
   [[ -f /proc/version ]] && grep -qiE 'microsoft|WSL' /proc/version 2>/dev/null
 }
 
+# Bash 3.2 (macOS /bin/bash) has no ${var,,}; keep install helpers portable.
+seiso_tolower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
 seiso_install_profile_extras() {
-  local profile="${1,,}"
+  local profile
+  profile="$(seiso_tolower "$1")"
   case "$profile" in
     linux-nvidia|linux-nvidia-native)
       printf '%s\n' "forge,train,cuda,llamacpp"
@@ -178,8 +184,8 @@ seiso_detect_platform_extras() {
   local profile extras os
   if [[ -n "${SEISO_INSTALL_PROFILE:-}" ]]; then
     extras="$(seiso_install_profile_extras "$SEISO_INSTALL_PROFILE")" \
-      || seiso_die "Unknown SEISO_INSTALL_PROFILE=${SEISO_INSTALL_PROFILE!r}. Use: linux-nvidia, linux-cpu, linux-rocm, wsl-nvidia, macos, chat"
-    case "${SEISO_INSTALL_PROFILE,,}" in
+      || seiso_die "Unknown SEISO_INSTALL_PROFILE=${SEISO_INSTALL_PROFILE}. Use: linux-nvidia, linux-cpu, linux-rocm, wsl-nvidia, macos, chat"
+    case "$(seiso_tolower "$SEISO_INSTALL_PROFILE")" in
       wsl|wsl-nvidia)
         export SEISO_NVIDIA_WSL_ACK="${SEISO_NVIDIA_WSL_ACK:-1}"
         ;;
