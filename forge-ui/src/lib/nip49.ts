@@ -11,6 +11,8 @@ const BECH32_LIMIT = 5000;
 const PAYLOAD_LEN = 91;
 /** Spec allows up to 22; cap lower so crafted ncryptsec cannot freeze the tab. */
 const MAX_LOG_N = 18;
+/** New backups must use a scrypt cost floor (~64 MiB); weaker log_n still decrypts. */
+const MIN_LOG_N_ENCRYPT = 16;
 
 export type KeySecurityByte = 0x00 | 0x01 | 0x02;
 
@@ -45,8 +47,10 @@ export function encryptNip49(
   if (secret.length !== 32) {
     throw new Error("secret must be 32 bytes");
   }
-  if (logn < 1 || logn > MAX_LOG_N) {
-    throw new Error(`log_n must be between 1 and ${MAX_LOG_N}`);
+  if (logn < MIN_LOG_N_ENCRYPT || logn > MAX_LOG_N) {
+    throw new Error(
+      `log_n for encrypt must be between ${MIN_LOG_N_ENCRYPT} and ${MAX_LOG_N}`,
+    );
   }
   if (!password || !password.trim()) {
     throw new Error("passphrase is required");

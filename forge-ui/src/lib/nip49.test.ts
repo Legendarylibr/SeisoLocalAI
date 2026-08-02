@@ -60,6 +60,11 @@ describe("nip49", () => {
     }
   });
 
+  it("rejects encrypt below scrypt cost floor (log_n < 16)", () => {
+    const secret = decryptNip49(VECTOR_NCRYPTSEC, "nostr");
+    expect(() => encryptNip49(secret, "bound-check", 15, 0x00)).toThrow(/log_n/);
+  });
+
   it("rejects empty and whitespace passphrases", () => {
     const secret = decryptNip49(VECTOR_NCRYPTSEC, "nostr");
     for (const bad of ["", "   ", "\t"]) {

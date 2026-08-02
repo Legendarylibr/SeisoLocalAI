@@ -137,6 +137,18 @@ The UI speaks in everyday terms; crypto is unchanged (open Nostr key formats). Y
 
 There is no password path. Generated secrets are shown once in the browser; an encrypted signing key is kept under `{SEISO_DATA_DIR}/nostr_keys/` for provenance attest (skipped in ephemeral mode). Non-browser clients that need a Bearer JWT can send `X-Seiso-Return-Token: 1` on login/register. See also [provenance-nostr.md](provenance-nostr.md).
 
+### Auth crypto (what is / is not guaranteed)
+
+| Layer | Mechanism |
+|-------|-----------|
+| Keygen | `os.urandom(32)` → BIP-340 x-only secp256k1; bech32 `nsec` / `npub` |
+| At-rest signing key | AES-256-GCM (`enc:v1:`) under `{SEISO_DATA_DIR}/nostr_keys/`; plaintext files are refused on load |
+| Master AES key | `os.urandom(32)` in `.nostr_key_encryption_key` (mode `0600`) — same-machine trust |
+| Optional backup | NIP-49 scrypt (encrypt `log_n` ≥ 16) + XChaCha20-Poly1305 → `ncryptsec` |
+| Session | HS256 JWT (`secrets.token_urlsafe` ≥ 32 bytes), HttpOnly cookie + CSRF; login pubkey check is constant-time |
+
+**Residual risks (local-first model):** anyone with OS access to the data dir can use the AES key + ciphertext; XSS in the Forge UI can read the one-time recovery key from `sessionStorage` until Continue; default bind is localhost — remote exposure requires explicit `SEISO_ALLOW_REMOTE` acknowledgements.
+
 ## API surface
 
 | Prefix | Purpose |

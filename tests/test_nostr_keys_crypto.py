@@ -95,6 +95,32 @@ def test_keypair_save_load_clear_and_wrong_key(tmp_path: Path):
     assert load_npub(identity="cli", data_dir=tmp_path) is None
 
 
+def test_load_keypair_rejects_plaintext_secret_on_disk(tmp_path: Path):
+    pair = generate_keypair()
+    path = key_store_path(tmp_path, "cli")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(pair.secret_hex, encoding="utf-8")
+    path.chmod(0o600)
+    assert load_keypair(identity="cli", data_dir=tmp_path) is None
+
+
+def test_generate_keypair_uses_os_urandom(monkeypatch):
+    calls: list[int] = []
+    # Valid secp256k1 scalar (1) → deterministic pubkey for the mock draw.
+    secret = (1).to_bytes(32, "big")
+
+    def fake_urandom(n: int) -> bytes:
+        calls.append(n)
+        assert n == 32
+        return secret
+
+    monkeypatch.setattr("seiso.research.nostr.keys.os.urandom", fake_urandom)
+    pair = generate_keypair()
+    assert calls == [32]
+    assert pair.secret_hex == secret.hex()
+    assert len(pair.public_hex) == 64
+
+
 def test_keypair_from_hex_and_invalid_secrets():
     pair = generate_keypair()
     restored = keypair_from_secret(pair.secret_hex)

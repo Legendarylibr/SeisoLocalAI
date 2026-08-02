@@ -41,8 +41,14 @@ def load_or_create_encryption_key(path: Path) -> bytes:
     if path.is_file():
         raw = path.read_bytes()
         if len(raw) == _KEY_LEN:
-            return raw
-        return resolve_encryption_key(raw.decode("utf-8").strip())
+            key = raw
+        else:
+            key = resolve_encryption_key(raw.decode("utf-8").strip())
+        try:
+            path.chmod(0o600)
+        except OSError:
+            pass
+        return key
     path.parent.mkdir(parents=True, exist_ok=True)
     key = generate_encryption_key()
     path.write_text(base64.b64encode(key).decode("ascii"), encoding="utf-8")
