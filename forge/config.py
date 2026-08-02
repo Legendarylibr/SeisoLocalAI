@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -84,10 +85,8 @@ class ForgeSettings(BaseSettings):
             else:
                 self.secret_key = generate_secret_key()
                 key_file.write_text(self.secret_key)
-            try:
+            with contextlib.suppress(OSError):
                 key_file.chmod(0o600)
-            except OSError:
-                pass
         # JWT signing material — refuse trivially short env/file values.
         if len(self.secret_key.encode("utf-8")) < 32:
             raise RuntimeError(
