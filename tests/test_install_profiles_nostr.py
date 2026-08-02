@@ -86,6 +86,41 @@ def test_named_install_profiles_documented_in_common():
         assert profile in common, f"profile {profile!r} missing from common.sh"
     # Profile help text lists the supported names for curl | bash users.
     assert "linux-nvidia, linux-cpu, linux-rocm, wsl-nvidia, macos, chat" in common
+    # macOS ships Bash 3.2 — avoid ${var,,} / ${var!r} in install helpers.
+    assert "seiso_tolower" in common
+    assert "${1,,}" not in common
+    assert "${SEISO_INSTALL_PROFILE,,}" not in common
+    assert "${SEISO_INSTALL_PROFILE!r}" not in common
+
+
+def test_macos_install_profile_works_on_bash32(tmp_path):
+    """Documented SEISO_INSTALL_PROFILE=macos must work under macOS /bin/bash 3.2."""
+    import os
+    import shutil
+    import subprocess
+
+    bash = "/bin/bash" if os.path.isfile("/bin/bash") else shutil.which("bash")
+    assert bash, "bash required"
+    script = tmp_path / "probe.sh"
+    script.write_text(
+        "\n".join(
+            [
+                "set -euo pipefail",
+                f'source "{ROOT / "scripts/lib/common.sh"}"',
+                'test "$(seiso_tolower MacOS)" = "macos"',
+                'test "$(SEISO_INSTALL_PROFILE=macos seiso_detect_platform_extras)" = "forge,train,llamacpp,mlx"',
+                'test "$(SEISO_INSTALL_PROFILE=MacOS seiso_detect_platform_extras)" = "forge,train,llamacpp,mlx"',
+                'chat="$(seiso_install_profile_extras chat)"',
+                'case "$(uname -s)" in',
+                '  Darwin) test "$chat" = "forge,llamacpp,mlx" ;;',
+                '  *) test "$chat" = "forge,llamacpp" ;;',
+                "esac",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run([bash, str(script)], check=True, cwd=str(ROOT))
 
 
 def test_ui_pkg_manager_prefers_bun_unless_npm_forced():

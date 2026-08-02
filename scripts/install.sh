@@ -259,7 +259,8 @@ main() {
   extras="$(detect_platform_extras)"
   if [[ -n "${SEISO_INSTALL_PROFILE:-}" ]]; then
     log_unless_quiet "Install profile: ${SEISO_INSTALL_PROFILE} → [$extras]"
-    case "${SEISO_INSTALL_PROFILE,,}" in
+    # Bash 3.2 (macOS /bin/bash) has no ${var,,}.
+    case "$(printf '%s' "$SEISO_INSTALL_PROFILE" | tr '[:upper:]' '[:lower:]')" in
       linux-nvidia|linux-nvidia-native)
         export SEISO_REQUIRE_SIDECAR="${SEISO_REQUIRE_SIDECAR:-1}"
         ;;
