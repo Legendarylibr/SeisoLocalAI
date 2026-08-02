@@ -124,6 +124,84 @@ export function AuthPage() {
     }
   };
 
+  const recoveryKeyField = (
+    <>
+      <label htmlFor="auth-nsec">Recovery key</label>
+      <input
+        id="auth-nsec"
+        type="password"
+        required={mode === "login"}
+        minLength={mode === "login" ? 8 : 0}
+        value={nsec}
+        onChange={(e) => setNsec(e.target.value)}
+        autoComplete="off"
+        autoFocus={mode === "login"}
+        placeholder="Paste your saved recovery key"
+        spellCheck={false}
+      />
+      <p className="auth-field-hint muted-text">
+        A long string that usually starts with <span className="mono">nsec1</span>
+        {needsImportPassphrase ? (
+          <>
+            {" "}
+            or an encrypted <span className="mono">ncryptsec1</span> backup.
+          </>
+        ) : (
+          <>.</>
+        )}
+      </p>
+      {needsImportPassphrase && (
+        <>
+          <label htmlFor="auth-import-passphrase">Backup passphrase</label>
+          <input
+            id="auth-import-passphrase"
+            type="password"
+            required
+            value={importPassphrase}
+            onChange={(e) => setImportPassphrase(e.target.value)}
+            autoComplete="current-password"
+            placeholder="Passphrase you chose for the encrypted backup"
+          />
+        </>
+      )}
+    </>
+  );
+
+  const storagePicker =
+    mode === "register" && !storageModeConfigured ? (
+      <div className="auth-storage-section">
+        <div className="auth-storage-header">
+          <span className="auth-storage-label">How should we store your data?</span>
+          <span className="auth-storage-hint muted-text">Choose once — applies to this machine</span>
+        </div>
+        <div className="auth-storage-cards" role="radiogroup" aria-label="Storage mode">
+          {STORAGE_OPTIONS.map((opt) => {
+            const selected = storageMode === opt.id;
+            return (
+              <button
+                key={opt.id}
+                type="button"
+                role="radio"
+                aria-checked={selected}
+                className={`auth-storage-card${selected ? " auth-storage-card-selected" : ""}`}
+                onClick={() => setStorageMode(opt.id)}
+              >
+                <div className="auth-storage-card-top">
+                  <span className="auth-storage-card-title">{opt.title}</span>
+                  {opt.badge && <span className="auth-storage-card-badge">{opt.badge}</span>}
+                </div>
+                <span className="auth-storage-card-sub">{opt.subtitle}</span>
+                <p className="auth-storage-card-detail">{opt.detail}</p>
+                <span className="auth-storage-card-check" aria-hidden>
+                  {selected ? "✓" : ""}
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    ) : null;
+
   return (
     <div className="auth-page">
       <div className="auth-atmosphere" aria-hidden>
@@ -141,56 +219,72 @@ export function AuthPage() {
             <h1 className="auth-aside-title">Seiso Local AI</h1>
           </div>
           <p className="auth-aside-copy">
-            A local-first AI workspace. Sign in with a Nostr key — your npub is your identity; models and chat stay on this machine.
+            A local-first AI workspace. Create a private account key on this machine — models and chat
+            stay here. No cloud signup.
           </p>
           <ul className="auth-feature-list">
             <li>
               <IconLock size={15} />
-              <span>Nostr npub identity (nsec shown once on keygen, then encrypted at rest)</span>
+              <span>Private recovery key — shown once, then stored encrypted on this device</span>
             </li>
             <li>
               <IconLock size={15} />
-              <span>Optional NIP-49 encrypted backup (ncryptsec + passphrase)</span>
+              <span>Optional encrypted backup file you can keep offline</span>
             </li>
             <li>
               <IconLock size={15} />
-              <span>HttpOnly sessions with CSRF protection</span>
+              <span>Secure browser sessions with CSRF protection</span>
             </li>
             <li>
               <IconLock size={15} />
-              <span>No telemetry — nothing leaves this device unless you attest</span>
+              <span>No telemetry — nothing leaves this device unless you choose to share</span>
             </li>
           </ul>
+          <p className="auth-aside-footnote muted-text">
+            Under the hood your account uses open Nostr key formats (
+            <span className="mono">nsec</span> / <span className="mono">npub</span>). You do not need a
+            Nostr app or relay to use Seiso.
+          </p>
         </div>
 
         <div className="card auth-card matte-glow">
           {keyBackup ? (
             <>
               <div className="auth-card-header">
-                <h2 className="auth-card-title">Write down your nsec</h2>
+                <h2 className="auth-card-title">Save your recovery key</h2>
                 <p className="auth-card-sub">
-                  This private key unlocks this Seiso instance. You will need it to sign in again.
-                  Keep it secret and offline — anyone with it can control this workspace.
+                  This is the only way to sign back in later. Treat it like a password-manager secret —
+                  anyone with it can control this workspace.
                 </p>
               </div>
               <div className="auth-key-backup" role="status">
-                <pre id="auth-nsec-reveal" className="auth-key-backup-value mono" aria-label="Your nsec">
+                <span className="auth-storage-label">Recovery key (private)</span>
+                <pre
+                  id="auth-nsec-reveal"
+                  className="auth-key-backup-value mono"
+                  aria-label="Your recovery key"
+                >
                   {keyBackup.nsec}
                 </pre>
                 <p className="auth-key-backup-prompt">
-                  Write this nsec down now. You will not see it again on this screen.
+                  Write this down or store it in a password manager now. You will not see it again on
+                  this screen.
                 </p>
                 <div className="auth-key-backup-public">
-                  <span className="muted-text">Public identity (npub)</span>
-                  <pre id="auth-npub-reveal" className="auth-key-backup-npub mono" aria-label="Your npub">
+                  <span className="muted-text">Public ID (safe to share)</span>
+                  <pre
+                    id="auth-npub-reveal"
+                    className="auth-key-backup-npub mono"
+                    aria-label="Your public ID"
+                  >
                     {keyBackup.npub}
                   </pre>
                 </div>
                 <div className="auth-key-backup-encrypt">
-                  <span className="auth-storage-label">Optional: download NIP-49 encrypted backup</span>
+                  <span className="auth-storage-label">Optional: download encrypted backup</span>
                   <p className="auth-key-backup-download-hint muted-text">
-                    Encrypts with a passphrase into <span className="mono">ncryptsec</span> (no raw nsec in the file).
-                    Remember the passphrase separately.
+                    Creates a passphrase-locked file. The file never contains the raw recovery key —
+                    remember the passphrase separately.
                   </p>
                   <label htmlFor="auth-backup-passphrase">Backup passphrase</label>
                   <input
@@ -213,7 +307,20 @@ export function AuthPage() {
                     placeholder="Repeat passphrase"
                   />
                 </div>
-                {error && <p className="auth-error" role="alert">{error}</p>}
+                <details className="auth-tech-details">
+                  <summary>Technical names</summary>
+                  <p className="muted-text">
+                    Recovery key = Nostr <span className="mono">nsec</span>. Public ID ={" "}
+                    <span className="mono">npub</span>. Encrypted backup = NIP-49{" "}
+                    <span className="mono">ncryptsec</span>. Same bytes as before — only the labels
+                    changed.
+                  </p>
+                </details>
+                {error && (
+                  <p className="auth-error" role="alert">
+                    {error}
+                  </p>
+                )}
                 <div className="auth-key-backup-actions">
                   <button
                     type="button"
@@ -228,7 +335,7 @@ export function AuthPage() {
                     className="btn btn-primary auth-submit"
                     onClick={() => void confirmKeyBackup()}
                   >
-                    Continue
+                    I saved my recovery key — continue
                   </button>
                 </div>
               </div>
@@ -237,113 +344,78 @@ export function AuthPage() {
             <>
               <div className="auth-card-header">
                 <h2 className="auth-card-title">
-                  {mode === "register" ? "Create your Nostr identity" : "Welcome back"}
+                  {mode === "register" ? "Create your local account" : "Welcome back"}
                 </h2>
                 <p className="auth-card-sub">
                   {needsOnboarding
-                    ? "Default: generate a fresh Nostr key. Or import an existing nsec / ncryptsec. Your public npub identifies this instance."
-                    : "Paste the nsec (or ncryptsec + passphrase) for this instance to unlock the workspace."}
+                    ? "One click creates a private recovery key for this machine. No email or cloud account."
+                    : "Paste the recovery key you saved for this workspace to unlock it."}
                 </p>
               </div>
 
               <form onSubmit={submit} className="auth-form">
-                <label htmlFor="auth-nsec">
-                  {mode === "register" ? "nsec or ncryptsec (import)" : "nsec or ncryptsec"}
-                </label>
-                <input
-                  id="auth-nsec"
-                  type="password"
-                  required={mode === "login"}
-                  minLength={mode === "login" ? 8 : 0}
-                  value={nsec}
-                  onChange={(e) => setNsec(e.target.value)}
-                  autoComplete="off"
-                  autoFocus={mode === "login"}
-                  placeholder="nsec1… or ncryptsec1…"
-                  spellCheck={false}
-                />
-                {needsImportPassphrase && (
-                  <>
-                    <label htmlFor="auth-import-passphrase">NIP-49 passphrase</label>
-                    <input
-                      id="auth-import-passphrase"
-                      type="password"
-                      required
-                      value={importPassphrase}
-                      onChange={(e) => setImportPassphrase(e.target.value)}
-                      autoComplete="current-password"
-                      placeholder="Passphrase for ncryptsec"
-                    />
-                  </>
-                )}
-                {mode === "register" && !storageModeConfigured && (
-                  <div className="auth-storage-section">
-                    <div className="auth-storage-header">
-                      <span className="auth-storage-label">How should we store your data?</span>
-                      <span className="auth-storage-hint muted-text">Choose once — applies to this machine</span>
-                    </div>
-                    <div className="auth-storage-cards" role="radiogroup" aria-label="Storage mode">
-                      {STORAGE_OPTIONS.map((opt) => {
-                        const selected = storageMode === opt.id;
-                        return (
-                          <button
-                            key={opt.id}
-                            type="button"
-                            role="radio"
-                            aria-checked={selected}
-                            className={`auth-storage-card${selected ? " auth-storage-card-selected" : ""}`}
-                            onClick={() => setStorageMode(opt.id)}
-                          >
-                            <div className="auth-storage-card-top">
-                              <span className="auth-storage-card-title">{opt.title}</span>
-                              {opt.badge && <span className="auth-storage-card-badge">{opt.badge}</span>}
-                            </div>
-                            <span className="auth-storage-card-sub">{opt.subtitle}</span>
-                            <p className="auth-storage-card-detail">{opt.detail}</p>
-                            <span className="auth-storage-card-check" aria-hidden>{selected ? "✓" : ""}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-                {error && <p className="auth-error" role="alert">{error}</p>}
                 {mode === "register" ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: "0.5rem" }}>
-                    <button
-                      type="button"
-                      className="btn btn-primary auth-submit"
-                      disabled={busy}
-                      onClick={() => void generateAndContinue()}
-                    >
-                      {busy ? "Working…" : "Generate key and continue"}
-                    </button>
+                  <>
+                    {storagePicker}
+                    {error && (
+                      <p className="auth-error" role="alert">
+                        {error}
+                      </p>
+                    )}
+                    <div className="auth-primary-actions">
+                      <button
+                        type="button"
+                        className="btn btn-primary auth-submit"
+                        disabled={busy}
+                        onClick={() => void generateAndContinue()}
+                      >
+                        {busy ? "Working…" : "Create account and continue"}
+                      </button>
+                    </div>
+                    <details className="auth-tech-details">
+                      <summary>Already have a recovery key?</summary>
+                      <div className="auth-restore-block">
+                        {recoveryKeyField}
+                        <button
+                          type="submit"
+                          className="btn auth-submit"
+                          disabled={
+                            busy || !nsec.trim() || (needsImportPassphrase && !importPassphrase)
+                          }
+                        >
+                          Restore and continue
+                        </button>
+                      </div>
+                    </details>
+                  </>
+                ) : (
+                  <>
+                    {recoveryKeyField}
+                    {error && (
+                      <p className="auth-error" role="alert">
+                        {error}
+                      </p>
+                    )}
                     <button
                       type="submit"
-                      className="btn auth-submit"
-                      disabled={busy || !nsec.trim() || (needsImportPassphrase && !importPassphrase)}
+                      className="btn btn-primary auth-submit"
+                      disabled={
+                        busy || !nsec.trim() || (needsImportPassphrase && !importPassphrase)
+                      }
                     >
-                      Import key and continue
+                      {busy ? "Signing in…" : "Sign in"}
                     </button>
-                  </div>
-                ) : (
-                  <button
-                    type="submit"
-                    className="btn btn-primary auth-submit"
-                    disabled={busy || !nsec.trim() || (needsImportPassphrase && !importPassphrase)}
-                  >
-                    {busy ? "Signing in…" : "Sign in"}
-                  </button>
-                )}
-                {mode === "login" && (
-                  <button
-                    type="button"
-                    className="auth-reset-link"
-                    onClick={resetForgottenKey}
-                    disabled={resetting}
-                  >
-                    {resetting ? "Starting a new session..." : "Lost your nsec? Start a new session"}
-                  </button>
+                    <button
+                      type="button"
+                      className="auth-reset-link"
+                      onClick={resetForgottenKey}
+                      disabled={resetting}
+                    >
+                      {resetting
+                        ? "Starting a new session..."
+                        : "Lost your recovery key? Start a new session"}
+                    </button>
+                  </>
                 )}
               </form>
             </>
