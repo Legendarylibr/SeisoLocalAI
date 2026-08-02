@@ -1,0 +1,51 @@
+# Dependabot updates forge-ui/package-lock.json (and sometimes locks/python.lock)
+# but never locks/digests.json. Without this job, Dependency locks CI fails on
+# every npm Dependabot PR. Refresh digests from the committed lockfiles only —
+# do not recompile Python deps here (that stays a human/scripts/update_dep_locks.py step).
+name: Dependabot lock digests
+
+on:
+  pull_request:
+    paths:
+      - "forge-ui/package-lock.json"
+      - "locks/python.lock"
+
+concurrency:
+  group: dependabot-digests-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  refresh-digests:
+    name: Refresh locks/digests.json
+    if: github.actor == 'dependabot[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          # Push back to the Dependabot branch on the same repository.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Refresh digests from existing lockfiles
+        run: python scripts/update_dep_locks.py --skip-python
+
+      - name: Commit and push digest updates
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add locks/digests.json
+          if git diff --staged --quiet; then
+            echo "digests already current"
+            exit 0
+          fi
+          git commit -m "chore(deps): refresh locks/digests.json for Dependabot"
+          git push

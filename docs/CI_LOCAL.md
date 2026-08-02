@@ -30,6 +30,14 @@ Or use the shell wrapper:
 | Job | What it runs | Skipped by `--fast` |
 |-----|--------------|---------------------|
 | **deps** | lock digests/hashes + CVE floors + pyproject coverage + freshness recompile | no |
+
+After changing `forge-ui/package-lock.json` or `locks/python.lock`, refresh digests:
+
+```bash
+python scripts/update_dep_locks.py --skip-python
+```
+
+Dependabot npm PRs get this automatically via `.github/workflows/dependabot-digests.yml`.
 | **lint** | `ruff check`, `ruff format --check`, `pylint` (E/F only) | no |
 | **types** | `mypy seiso forge seiso_cli` | no |
 | **test** | smoke imports + `pytest -m "not slow and not gpu"` | no |
