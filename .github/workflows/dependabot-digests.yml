@@ -1,13 +1,17 @@
 # Dependabot updates forge-ui/package-lock.json (and sometimes locks/python.lock)
-# but never locks/digests.json. Without this job, Dependency locks CI fails on
-# every npm Dependabot PR. Refresh digests from the committed lockfiles only —
-# do not recompile Python deps here (that stays a human/scripts/update_dep_locks.py step).
+# but never locks/digests.json or forge-ui/bun.lock. Without this job:
+#   - Dependency locks CI fails on every npm Dependabot PR
+#   - macOS/Linux `start` (Bun + --frozen-lockfile) fails to build Forge UI
+# Refresh digests from committed lockfiles and regenerate bun.lock from
+# package.json. Do not recompile Python deps here (that stays a
+# human/scripts/update_dep_locks.py step).
 name: Dependabot lock digests
 
 on:
   pull_request:
     paths:
       - "forge-ui/package-lock.json"
+      - "forge-ui/package.json"
       - "locks/python.lock"
 
 concurrency:
@@ -20,7 +24,7 @@ permissions:
 
 jobs:
   refresh-digests:
-    name: Refresh locks/digests.json
+    name: Refresh digests and bun.lock
     if: github.actor == 'dependabot[bot]'
     runs-on: ubuntu-latest
     steps:
@@ -34,18 +38,26 @@ jobs:
         with:
           python-version: "3.10"
 
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Regenerate forge-ui/bun.lock from package.json
+        working-directory: forge-ui
+        run: bun install
+
       - name: Refresh digests from existing lockfiles
         run: python scripts/update_dep_locks.py --skip-python
 
-      - name: Commit and push digest updates
+      - name: Commit and push lock updates
         run: |
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add locks/digests.json
+          git add locks/digests.json forge-ui/bun.lock
           if git diff --staged --quiet; then
-            echo "digests already current"
+            echo "digests and bun.lock already current"
             exit 0
           fi
-          git commit -m "chore(deps): refresh locks/digests.json for Dependabot"
+          git commit -m "chore(deps): refresh bun.lock and locks/digests.json for Dependabot"
           git push

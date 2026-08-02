@@ -296,7 +296,14 @@ seiso_ui_install_deps() {
   local ui_dir="$1" pm
   pm="$(seiso_ui_pkg_manager)" || seiso_die "Bun or npm is required for Forge UI — install Bun (https://bun.sh) or Node.js 18+"
   if [[ "$pm" == "bun" ]]; then
-    (cd "$ui_dir" && bun install --frozen-lockfile)
+    # Prefer frozen installs for reproducibility. If Dependabot (or a human)
+    # bumped package-lock.json / package.json without regenerating bun.lock,
+    # frozen fails and macOS/Linux `start` never builds Forge UI — fall back
+    # once so local installs keep working, then warn to commit bun.lock.
+    if ! (cd "$ui_dir" && bun install --frozen-lockfile); then
+      seiso_warn "forge-ui/bun.lock out of sync — refreshing with bun install (commit the updated bun.lock)"
+      (cd "$ui_dir" && bun install) || return 1
+    fi
   else
     (cd "$ui_dir" && npm ci --no-audit --no-fund)
   fi

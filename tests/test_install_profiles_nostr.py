@@ -92,9 +92,12 @@ def test_ui_pkg_manager_prefers_bun_unless_npm_forced():
     common = _common_sh()
     assert "SEISO_USE_NPM" in common
     assert "seiso_ui_pkg_manager" in common
-    # Bun path uses frozen lockfile; npm fallback uses ci (package-lock.json).
+    # Bun path prefers frozen lockfile, refreshes if stale; npm uses ci.
     assert re.search(
-        r'seiso_ui_install_deps\(\)[\s\S]*?bun install --frozen-lockfile[\s\S]*?npm ci',
+        r"seiso_ui_install_deps\(\)[\s\S]*?"
+        r"bun install --frozen-lockfile[\s\S]*?"
+        r"bun install[\s\S]*?"
+        r"npm ci",
         common,
     )
 
