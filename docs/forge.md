@@ -149,6 +149,8 @@ There is no password path. Generated secrets are shown once in the browser; an e
 
 **Residual risks (local-first model):** anyone with OS access to the data dir can use the AES key + ciphertext; XSS in the Forge UI can read the one-time recovery key from `sessionStorage` until Continue; default bind is localhost — remote exposure requires explicit `SEISO_ALLOW_REMOTE` acknowledgements.
 
+**Keep it simple:** Nostr owns **identity and Buzz-facing signatures** (login npub, attest, mesh/agent events). Do **not** replace local JWT sessions with NIP-42, or put HF/mesh/pay tokens in Nostr events. At-rest AES (`enc:v1`) is one shared helper for DB columns and signing-key files — not a second crypto religion.
+
 ## API surface
 
 | Prefix | Purpose |

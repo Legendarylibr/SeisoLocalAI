@@ -73,6 +73,7 @@ forge = [
   "python-jose[cryptography]>=3.3",
   # Transitive via python-jose → rsa; floor for REAL/OID DoS (CVE-2026-59885/59886).
   "pyasn1>=0.6.4",
+  # No password auth (Nostr nsec→npub). bcrypt unused in code; drop on next full lock refresh.
   "bcrypt>=4.1",
   "email-validator>=2.1",
   "aiosqlite>=0.20",
