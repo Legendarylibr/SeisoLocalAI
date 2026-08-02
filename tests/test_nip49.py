@@ -68,6 +68,8 @@ def test_nip49_encrypt_rejects_log_n_out_of_range():
     with pytest.raises(ValueError, match="log_n"):
         encrypt_ncryptsec(secret, "x", log_n=0)
     with pytest.raises(ValueError, match="log_n"):
+        encrypt_ncryptsec(secret, "x", log_n=15)  # below encrypt floor
+    with pytest.raises(ValueError, match="log_n"):
         encrypt_ncryptsec(secret, "x", log_n=19)
     with pytest.raises(ValueError, match="log_n"):
         encrypt_ncryptsec(secret, "x", log_n=23)

@@ -1,4 +1,4 @@
-"""JWT auth, password hashing, rate limiting."""
+"""JWT session auth and rate limiting (identity is Nostr nsec → npub)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,6 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
-import bcrypt
 from fastapi import Depends, HTTPException, Request, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwt
@@ -19,26 +18,6 @@ from forge.security.token_revocation import is_jti_revoked, revoke_jti
 bearer_scheme = HTTPBearer(auto_error=False)
 
 ALGORITHM = "HS256"
-
-
-_BCRYPT_MAX_BYTES = 72
-
-
-def _password_bytes(password: str) -> bytes:
-    raw = password.encode()
-    if len(raw) > _BCRYPT_MAX_BYTES:
-        raise ValueError(
-            f"Password must be at most {_BCRYPT_MAX_BYTES} bytes (bcrypt limit)"
-        )
-    return raw
-
-
-def hash_password(password: str) -> str:
-    return bcrypt.hashpw(_password_bytes(password), bcrypt.gensalt()).decode()
-
-
-def verify_password(plain: str, hashed: str) -> bool:
-    return bcrypt.checkpw(_password_bytes(plain), hashed.encode())
 
 
 def create_access_token(

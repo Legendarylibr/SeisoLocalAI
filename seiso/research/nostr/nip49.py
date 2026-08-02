@@ -20,6 +20,8 @@ _PAYLOAD_LEN: Final = 91
 _VERSION: Final = 0x02
 # Spec allows up to 22; cap lower so crafted ncryptsec cannot DoS decrypt paths.
 _MAX_LOG_N: Final = 18
+# New backups must use a scrypt cost floor (~64 MiB); weaker log_n still decrypts.
+_MIN_LOG_N_ENCRYPT: Final = 16
 
 
 def _normalize_password(password: str) -> bytes:
@@ -108,6 +110,10 @@ def encrypt_ncryptsec(
         raise ValueError("password is required")
     if key_security not in (0x00, 0x01, 0x02):
         raise ValueError("key_security must be 0x00, 0x01, or 0x02")
+    if not (_MIN_LOG_N_ENCRYPT <= log_n <= _MAX_LOG_N):
+        raise ValueError(
+            f"log_n for encrypt must be between {_MIN_LOG_N_ENCRYPT} and {_MAX_LOG_N}"
+        )
     salt = os.urandom(16)
     key = _scrypt_key(password, salt, log_n)
     nonce = os.urandom(24)

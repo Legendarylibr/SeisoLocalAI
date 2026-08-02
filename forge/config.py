@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import os
@@ -84,7 +85,14 @@ class ForgeSettings(BaseSettings):
             else:
                 self.secret_key = generate_secret_key()
                 key_file.write_text(self.secret_key)
+            with contextlib.suppress(OSError):
                 key_file.chmod(0o600)
+        # JWT signing material — refuse trivially short env/file values.
+        if len(self.secret_key.encode("utf-8")) < 32:
+            raise RuntimeError(
+                "SEISO_SECRET_KEY (or data_dir/.secret_key) must be at least "
+                "32 bytes — regenerate with a strong random value"
+            )
 
         self._session_db_key = self._resolve_db_encryption_key()
 

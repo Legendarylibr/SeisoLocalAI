@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import os
 from typing import Annotated, cast
 
@@ -210,7 +211,14 @@ async def login(
 
     user = await db.get_sole_user()
     stored = str((user or {}).get("nostr_pubkey") or "").strip().lower()
-    if not user or not stored or stored != identity.pubkey_hex:
+    presented = identity.pubkey_hex.strip().lower()
+    # Constant-time compare so pubkey mismatch timing cannot oracle the owner.
+    if (
+        not user
+        or len(stored) != 64
+        or len(presented) != 64
+        or not hmac.compare_digest(stored, presented)
+    ):
         audit_event("auth_login_failed")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
 

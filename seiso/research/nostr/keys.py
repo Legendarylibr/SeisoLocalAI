@@ -8,6 +8,7 @@ from pathlib import Path
 
 from seiso.research.nostr.bech32 import bech32_decode, bech32_encode
 from seiso.research.nostr.crypto import (
+    PREFIX,
     decrypt_field,
     encrypt_field,
     load_or_create_encryption_key,
@@ -31,6 +32,11 @@ class NostrKeyPair:
 
 
 def generate_keypair() -> NostrKeyPair:
+    """CSPRNG 32-byte secret → BIP-340 x-only secp256k1 public key.
+
+    Uses ``os.urandom`` (OS CSPRNG). Rejects the vanishingly rare invalid
+    scalar (0 or ≥ curve order) by redrawing — never weakens the secret.
+    """
     while True:
         secret = os.urandom(32)
         try:
@@ -102,7 +108,12 @@ def load_keypair(
         return None
     key = encryption_key or load_or_create_encryption_key(encryption_key_path(root))
     try:
-        secret_hex = decrypt_field(path.read_text(encoding="utf-8").strip(), key)
+        raw = path.read_text(encoding="utf-8").strip()
+        # Fail closed: never accept plaintext secrets on disk (decrypt_field
+        # historically passthrough-non-prefixed values for other forge fields).
+        if not raw.startswith(PREFIX):
+            return None
+        secret_hex = decrypt_field(raw, key)
     except Exception:
         return None
     return keypair_from_secret(secret_hex)
