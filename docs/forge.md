@@ -38,11 +38,11 @@ On later sessions, skip the UI build unless `forge-ui/dist` is missing or you ch
 
 Open **http://127.0.0.1:8765**. On first run:
 
-1. **Generate key** (default) or import an `nsec` / `ncryptsec`
-2. Write down the shown `nsec1…` (optional NIP-49 encrypted `.txt` download), then **Continue** (the `npub` is your public identity)
-3. Later: unlock with the instance `nsec`, or `ncryptsec` plus passphrase
+1. **Create account and continue** (default), or open **Already have a recovery key?** to restore
+2. **Save the recovery key** shown once (optional encrypted `.txt` download with passphrase), then **I saved my recovery key — continue**. The public ID is safe to share
+3. Later: unlock by pasting that recovery key (or an encrypted backup + passphrase)
 
-See [Auth (Nostr)](#auth-nostr) below.
+You do not need a Nostr app. See [Auth (local account / Nostr keys)](#auth-local-account--nostr-keys) for the technical mapping.
 
 ### UI development (hot reload)
 
@@ -112,26 +112,28 @@ For production behind a reverse proxy, terminate TLS upstream and run **one** Fo
 
 Knowledge-base ingest and retrieve are also available via API (`/api/knowledge/...`).
 
-## Auth (Nostr)
+## Auth (local account / Nostr keys)
 
-Forge is single-tenant: one **owner npub** per instance. The matching **nsec** proves ownership. Browser sessions are HttpOnly cookies + CSRF (no Bearer JWT in the JSON body). Compat `/v1` uses a file-backed inference key that is **bound to that same owner npub**.
+Forge is single-tenant: one **owner public ID** per instance. The matching **recovery key** proves ownership. Browser sessions are HttpOnly cookies + CSRF (no Bearer JWT in the JSON body). Compat `/v1` uses a file-backed inference key that is **bound to that same owner**.
 
-| Term | Meaning in Seiso |
-|------|------------------|
-| **npub** | Public owner identity for this instance (safe to share / show in UI) |
-| **nsec** | Private key — write it down on first generate; paste it (or decrypt from ncryptsec) to sign in later |
-| **ncryptsec** | NIP-49 passphrase-encrypted backup of the nsec (safe to store as a file; useless without the passphrase) |
-| **Compat key** | `{SEISO_DATA_DIR}/.inference_api_key` for `/v1` only; owner recorded in `.inference_api_key.owner` (pubkey hex) |
-| **Relays** | Allowlisted `wss://` endpoints for digests-only provenance, stored in per-user prefs next to the npub — not on the nsec |
+The UI speaks in everyday terms; crypto is unchanged (open Nostr key formats). You do **not** need a Nostr client or relay to sign in.
+
+| UI label | Technical name | Meaning in Seiso |
+|----------|----------------|------------------|
+| **Public ID** | `npub` | Public owner identity (safe to share / show in UI) |
+| **Recovery key** | `nsec` | Private — save on create; paste to sign in later |
+| **Encrypted backup** | `ncryptsec` (NIP-49) | Passphrase-locked file backup of the recovery key |
+| **Compat key** | file under data dir | `{SEISO_DATA_DIR}/.inference_api_key` for `/v1` only; owner in `.inference_api_key.owner` |
+| **Relays** | allowlisted `wss://` | Digests-only provenance prefs next to the public ID — not on the recovery key |
 
 | Step | What happens |
 |------|----------------|
-| First launch | **Generate key** (default) or import `nsec` / `ncryptsec` — that npub becomes the instance owner |
-| After generate | UI shows the new `nsec1…` once — write it down, optionally **Download encrypted .txt** (NIP-49 `ncryptsec` + passphrase; no raw nsec in the file), then **Continue**. The matching `npub` is your public identity. |
-| Later sessions | Paste `nsec1…`, or `ncryptsec1…` plus the backup passphrase (decrypted in the browser before login). The npub alone cannot unlock. |
-| Lost nsec | **Start a new session** clears the local account, owner binding, Compat key, `job_events`, and `nostr_keys/` (downloaded model files remain) |
+| First launch | **Create account and continue** (default), or restore a recovery key / encrypted backup — that public ID becomes the instance owner |
+| After create | UI shows the recovery key once — save it, optionally **Download encrypted .txt**, then **I saved my recovery key — continue**. Public ID is shown for reference. |
+| Later sessions | Paste the recovery key, or encrypted backup plus passphrase (decrypted in the browser before login). The public ID alone cannot unlock. |
+| Lost recovery key | **Start a new session** clears the local account, owner binding, Compat key, `job_events`, and `nostr_keys/` (downloaded model files remain) |
 | Ephemeral DB | In-memory SQLite (`SEISO_DB_EPHEMERAL`); signing keys are **not** written under `nostr_keys/` |
-| Settings key rotate | Import/keygen updates the account `npub`, attest key, and Compat owner binding together (keygen returns `nsec` once; Compat key rotates) |
+| Settings key rotate | Import/keygen updates the account public ID (`npub`), attest key, and Compat owner binding together (keygen returns `nsec` once; Compat key rotates) |
 
 There is no password path. Generated secrets are shown once in the browser; an encrypted signing key is kept under `{SEISO_DATA_DIR}/nostr_keys/` for provenance attest (skipped in ephemeral mode). Non-browser clients that need a Bearer JWT can send `X-Seiso-Return-Token: 1` on login/register. See also [provenance-nostr.md](provenance-nostr.md).
 

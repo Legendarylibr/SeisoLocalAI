@@ -767,6 +767,56 @@ label {
   opacity: 0.85;
 }
 
+.auth-aside-footnote {
+  margin: 1.25rem 0 0;
+  max-width: 42ch;
+  font-size: 0.75rem;
+  line-height: 1.5;
+}
+
+.auth-field-hint {
+  margin: -0.35rem 0 0.25rem;
+  font-size: 0.78rem;
+  line-height: 1.4;
+}
+
+.auth-primary-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.auth-tech-details {
+  margin-top: 0.85rem;
+  border-radius: var(--radius-md, 8px);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.08));
+  padding: 0.55rem 0.75rem;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+
+.auth-tech-details summary {
+  cursor: pointer;
+  font-weight: 550;
+  color: var(--text-primary);
+  list-style-position: outside;
+}
+
+.auth-tech-details[open] summary {
+  margin-bottom: 0.55rem;
+}
+
+.auth-tech-details p {
+  margin: 0;
+  line-height: 1.45;
+}
+
+.auth-restore-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
 .auth-card {
   width: 100%;
   box-shadow: var(--shadow-lg), 0 0 80px rgba(94, 212, 198, 0.06);

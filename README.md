@@ -71,7 +71,7 @@ Runs on **Windows**, **Linux**, **WSL2**, and **macOS**. See [docs/platforms/](d
 ## Quick start
 
 **Forge URL (all platforms):** [http://127.0.0.1:8765](http://127.0.0.1:8765)  
-On first launch, **generate a key** in the browser (write down the one-time `nsec` → Continue; `npub` is your public identity), or import an existing `nsec`.
+On first launch, **create a local account** in the browser (save the one-time recovery key → continue; public ID is safe to share), or restore from a saved recovery key.
 
 ### Paths on your system
 
@@ -206,7 +206,7 @@ seiso forge               # http://127.0.0.1:8765
 seiso forge --open        # same, and open the browser
 ```
 
-On first launch, **generate a key** (write down the one-time `nsec` → Continue; `npub` is your public identity) or import an `nsec` in the browser. User data (models, checkpoints, exports) lives in `~/.seiso` unless you set `SEISO_DATA_DIR`.
+On first launch, **create a local account** (save the one-time recovery key → continue; public ID is safe to share) or restore a recovery key in the browser. User data (models, checkpoints, exports) lives in `~/.seiso` unless you set `SEISO_DATA_DIR`.
 
 **Later sessions:** `cd "$HOME/Seiso" && source .venv/bin/activate && seiso forge`, or use `start` from the repo root after `scripts/install.sh` has registered it.
 

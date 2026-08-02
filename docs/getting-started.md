@@ -93,17 +93,17 @@ See [install.md](install.md) for AMD ROCm, pip extras, and upgrade steps.
 ## Step 2 — Onboarding
 
 1. Open **http://127.0.0.1:8765**
-2. Choose **Generate key and continue** (default), or import an existing `nsec`
-3. If you generated a key: **write down the `nsec1…` shown on screen**, optionally **Download encrypted .txt** (NIP-49 `ncryptsec` + passphrase), then press **Continue** (the `npub` is your public identity)
-4. Later sessions: sign in by pasting the instance `nsec` (lost key → start a new local session)
+2. Choose **Create account and continue** (default). To restore an existing account, open **Already have a recovery key?** and paste it
+3. If you created an account: **save the recovery key** shown on screen (store it in a password manager), optionally **Download encrypted .txt** with a passphrase, then press **I saved my recovery key — continue**. The public ID shown is safe to share
+4. Later sessions: sign in by pasting that recovery key (lost key → start a new local session)
 5. Optionally paste a [Hugging Face token](https://huggingface.co/settings/tokens) in **Settings** for gated models and faster downloads
 
-| Key | Role |
-|-----|------|
-| **nsec** | Private — backup on generate; paste to sign in later |
-| **npub** | Public owner identity for this instance (shown in UI; cannot unlock alone) |
+| What the UI says | Technical name | Role |
+|------------------|----------------|------|
+| **Recovery key** | `nsec` | Private — save on create; paste to sign in later |
+| **Public ID** | `npub` | Public owner identity (safe to share; cannot unlock alone) |
 
-Seiso binds to `127.0.0.1` by default — the owner npub/nsec pair is the instance identity (encrypted under `nostr_keys/`; Compat `/v1` key is bound to the same npub).
+You do not need a Nostr app. Same key formats under the hood. Seiso binds to `127.0.0.1` by default — the owner pair is the instance identity (encrypted under `nostr_keys/`; Compat `/v1` key is bound to the same public ID / npub).
 
 ## Step 3 — Download a model
 
