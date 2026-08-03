@@ -407,6 +407,35 @@ def test_import_claim_materialize_dry_run_e2e(
     assert reloaded["ranks"][0]["status"] == "pending"
 
 
+def test_buzz_kind9_content_embed_roundtrip(mesh_env: Path) -> None:
+    """Buzz rejects --kind 31251; peers embed the signed event as kind-9 content."""
+    import json
+
+    from seiso.mesh.coordinator import build_plan, import_signed_plan
+    from seiso.mesh.nostr_bind import SEISO_MESH_PLAN_KIND
+
+    plan_out = build_plan(
+        channel="ch-buzz",
+        job_type="finetune",
+        nodes=2,
+        master_addr="10.0.0.9",
+        gpus_per_node=1,
+    )
+    event = plan_out["nostr_event"]
+    assert event["kind"] == SEISO_MESH_PLAN_KIND
+    assert verify_event(event)
+    # Simulate `jq -c .nostr_event | buzz messages send --content -`
+    kind9_content = json.dumps(event, separators=(",", ":"), ensure_ascii=False)
+    assert "token_fingerprint" not in kind9_content
+    assert "SEISO_MESH_TOKEN" not in kind9_content
+    peer_event = json.loads(kind9_content)
+    assert verify_event(peer_event)
+    Path(plan_out["plan_path"]).unlink()
+    imported = import_signed_plan(peer_event)
+    assert imported["plan"]["job_id"] == plan_out["plan"]["job_id"]
+    assert imported["nostr_event"]["id"] == event["id"]
+
+
 def test_claim_rank_refuses_foreign_claimer(
     mesh_env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
