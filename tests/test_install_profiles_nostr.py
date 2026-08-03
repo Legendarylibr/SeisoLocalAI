@@ -163,6 +163,9 @@ def test_ui_pkg_manager_prefers_bun_unless_npm_forced():
     assert "SEISO_USE_NPM" in common
     assert "seiso_ui_pkg_manager" in common
     # Bun path prefers frozen lockfile, refreshes if stale; npm uses ci.
+    # Wall-clock timeout + npm fallback when bun hangs.
+    assert "seiso_run_with_timeout" in common
+    assert "SEISO_BUN_INSTALL_TIMEOUT_SEC" in common
     assert re.search(
         r"seiso_ui_install_deps\(\)[\s\S]*?"
         r"bun install --frozen-lockfile[\s\S]*?"
@@ -170,6 +173,57 @@ def test_ui_pkg_manager_prefers_bun_unless_npm_forced():
         r"npm ci",
         common,
     )
+
+
+def test_python_modules_probe_uses_cuda_path_for_llama_cpp():
+    """Bare llama_cpp import fails without ensure_cuda_library_path on NVIDIA Linux."""
+    common = _common_sh()
+    assert "seiso_llamacpp_import_ok" in common
+    # Module probe must route llama_cpp through the CUDA-aware helper.
+    assert re.search(
+        r"seiso_python_modules_available\(\)[\s\S]*?"
+        r'\[\[ "\$module" == "llama_cpp" \]\][\s\S]*?'
+        r"seiso_llamacpp_import_ok",
+        common,
+    )
+
+
+def test_build_forge_ui_skips_when_dist_present():
+    common = _common_sh()
+    assert "seiso_forge_ui_dist_ready" in common
+    assert "SEISO_FORCE_UI" in common
+    assert re.search(
+        r"seiso_build_forge_ui\(\)[\s\S]*?"
+        r"seiso_forge_ui_dist_ready[\s\S]*?"
+        r"skipping rebuild",
+        common,
+    )
+
+
+def test_resolve_repo_walks_up_from_scripts_start(tmp_path):
+    """scripts/start.sh must resolve the clone root, not only $HOME/Seiso."""
+    import os
+    import shutil
+    import subprocess
+
+    bash = shutil.which("bash")
+    assert bash
+    script = tmp_path / "probe.sh"
+    script.write_text(
+        "\n".join(
+            [
+                "set -euo pipefail",
+                f'source "{ROOT / "scripts/lib/common.sh"}"',
+                f'root="$(seiso_resolve_repo_for_start "{ROOT / "scripts/start.sh"}")"',
+                f'test "$root" = "{ROOT}"',
+                f'root2="$(seiso_resolve_repo_for_start "{ROOT / "start"}")"',
+                f'test "$root2" = "{ROOT}"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run([bash, str(script)], check=True, cwd=str(ROOT))
 
 
 def test_ui_lockfiles_present_for_bun_and_npm_paths():

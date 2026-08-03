@@ -130,6 +130,8 @@ bash start
 | `SEISO_REPO_URL` | `https://github.com/Legendarylibr/SeisoLocalAI.git` | Git remote |
 | `SEISO_BRANCH` | `main` | Branch to clone |
 | `SEISO_SKIP_UI=1` | off | Skip Forge UI build |
+| `SEISO_FORCE_UI=1` | off | Rebuild `forge-ui` even when `dist/` already exists |
+| `SEISO_BUN_INSTALL_TIMEOUT_SEC` | `180` | Wall-clock timeout for `bun install` (then retry / `npm ci` fallback) |
 | `SEISO_START=0` | on (starts Forge) | Set to `0` to install without launching Forge |
 | `SEISO_NO_OPEN=1` | off | Do not open the browser after Forge starts |
 | `SEISO_NO_BANNER=1` | off | Skip install animation |
