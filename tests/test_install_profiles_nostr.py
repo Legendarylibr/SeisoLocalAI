@@ -202,7 +202,6 @@ def test_build_forge_ui_skips_when_dist_present():
 
 def test_resolve_repo_walks_up_from_scripts_start(tmp_path):
     """scripts/start.sh must resolve the clone root, not only $HOME/Seiso."""
-    import os
     import shutil
     import subprocess
 
