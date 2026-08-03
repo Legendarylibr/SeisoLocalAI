@@ -158,19 +158,32 @@ def test_macos_install_profile_works_on_bash32(tmp_path):
     subprocess.run([bash, str(script)], check=True, cwd=str(ROOT))
 
 
-def test_ui_pkg_manager_prefers_bun_unless_npm_forced():
+def test_ui_pkg_manager_linux_prefers_npm_macos_prefers_bun():
     common = _common_sh()
     assert "SEISO_USE_NPM" in common
+    assert "SEISO_USE_BUN" in common
     assert "seiso_ui_pkg_manager" in common
-    # Bun path prefers frozen lockfile, refreshes if stale; npm uses ci.
-    # Wall-clock timeout + npm fallback when bun hangs.
+    assert "seiso_npm_usable" in common
+    assert "seiso_ui_npm_ci" in common
+    assert "seiso_ensure_npm_available" in common
+    # Linux prefers npm when Node 18+ exists; Bun remains default elsewhere / with SEISO_USE_BUN=1.
+    assert '$(uname -s)" == "Linux"' in common
+    # Bun path: frozen lockfile, unfrozen only on non-timeout failure, npm sticky fallback.
     assert "seiso_run_with_timeout" in common
     assert "SEISO_BUN_INSTALL_TIMEOUT_SEC" in common
+    assert "status" in common and "124" in common
+    assert 'export SEISO_USE_NPM=1' in common
     assert re.search(
         r"seiso_ui_install_deps\(\)[\s\S]*?"
         r"bun install --frozen-lockfile[\s\S]*?"
         r"bun install[\s\S]*?"
-        r"npm ci",
+        r"seiso_ui_npm_ci",
+        common,
+    )
+    assert re.search(
+        r"seiso_ui_install_deps\(\)[\s\S]*?"
+        r"status\" -eq 124[\s\S]*?"
+        r"skipping unfrozen retry",
         common,
     )
 

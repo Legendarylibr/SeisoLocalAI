@@ -332,11 +332,42 @@ seiso_ensure_bun() {
   command -v bun >/dev/null 2>&1
 }
 
+seiso_nodejs_major() {
+  # Prints Node major version, or 0 if node is missing/unusable.
+  if ! command -v node >/dev/null 2>&1; then
+    printf '0\n'
+    return 0
+  fi
+  node -p "Number(String(process.versions.node||'0').split('.')[0])||0" 2>/dev/null || printf '0\n'
+}
+
+seiso_npm_usable() {
+  command -v npm >/dev/null 2>&1 || return 1
+  local major
+  major="$(seiso_nodejs_major)"
+  [[ "$major" -ge 18 ]]
+}
+
 seiso_ui_pkg_manager() {
   seiso_ensure_bun_on_path
-  if [[ "${SEISO_USE_NPM:-0}" != "1" ]] && command -v bun >/dev/null 2>&1; then
+  if [[ "${SEISO_USE_NPM:-0}" == "1" ]]; then
+    if seiso_npm_usable; then
+      printf 'npm\n'
+      return 0
+    fi
+    return 1
+  fi
+  # Linux: prefer npm + package-lock.json when Node 18+ is present.
+  # Dependabot's primary updates land on package-lock; bun.lock drift plus hung
+  # `bun install` was the native Linux Forge UI regression after the Bun switch.
+  # Opt back into Bun with SEISO_USE_BUN=1.
+  if [[ "$(uname -s)" == "Linux" && "${SEISO_USE_BUN:-0}" != "1" ]] && seiso_npm_usable; then
+    printf 'npm\n'
+    return 0
+  fi
+  if command -v bun >/dev/null 2>&1; then
     printf 'bun\n'
-  elif command -v npm >/dev/null 2>&1; then
+  elif seiso_npm_usable; then
     printf 'npm\n'
   else
     return 1
@@ -345,9 +376,10 @@ seiso_ui_pkg_manager() {
 
 seiso_ui_bun_timeout_sec() {
   # Bun can hang with 0% CPU on some hosts; never block install forever.
-  local t="${SEISO_BUN_INSTALL_TIMEOUT_SEC:-180}"
+  # Keep the default short enough that npm fallback is reachable in a normal install.
+  local t="${SEISO_BUN_INSTALL_TIMEOUT_SEC:-90}"
   case "$t" in
-    ''|*[!0-9]*) t=180 ;;
+    ''|*[!0-9]*) t=90 ;;
   esac
   if [[ "$t" -lt 30 ]]; then
     t=30
@@ -357,6 +389,7 @@ seiso_ui_bun_timeout_sec() {
 
 seiso_run_with_timeout() {
   # Run command with a wall-clock timeout when `timeout` exists.
+  # Exit 124 matches GNU coreutils `timeout` on overrun.
   local sec="$1"
   shift
   if command -v timeout >/dev/null 2>&1; then
@@ -366,8 +399,51 @@ seiso_run_with_timeout() {
   fi
 }
 
+seiso_ensure_npm_available() {
+  # Best-effort Node/npm for Forge UI when Bun hangs or lockfile drifts.
+  if seiso_npm_usable; then
+    return 0
+  fi
+  seiso_log "Installing Node.js 18+ for Forge UI npm fallback..."
+  if command -v brew >/dev/null 2>&1; then
+    brew install node || true
+  elif command -v apt-get >/dev/null 2>&1; then
+    local apt_cmd=(apt-get)
+    if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
+      apt_cmd=(sudo apt-get)
+    fi
+    "${apt_cmd[@]}" update -qq || true
+    "${apt_cmd[@]}" install -y nodejs npm || true
+  elif command -v dnf >/dev/null 2>&1; then
+    local dnf_cmd=(dnf)
+    if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
+      dnf_cmd=(sudo dnf)
+    fi
+    "${dnf_cmd[@]}" install -y nodejs npm || true
+  elif command -v pacman >/dev/null 2>&1; then
+    local pacman_cmd=(pacman)
+    if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
+      pacman_cmd=(sudo pacman)
+    fi
+    "${pacman_cmd[@]}" -Sy --noconfirm nodejs npm || true
+  fi
+  if seiso_npm_usable; then
+    return 0
+  fi
+  seiso_warn "Node.js 18+ / npm is required for Forge UI fallback — install from https://nodejs.org/ then re-run with SEISO_USE_NPM=1"
+  return 1
+}
+
+seiso_ui_npm_ci() {
+  local ui_dir="$1"
+  seiso_ensure_npm_available || return 1
+  # Sticky for the rest of this process so `bun run build` is not used after npm ci.
+  export SEISO_USE_NPM=1
+  (cd "$ui_dir" && npm ci --no-audit --no-fund)
+}
+
 seiso_ui_install_deps() {
-  local ui_dir="$1" pm bun_timeout
+  local ui_dir="$1" pm bun_timeout status=0
   pm="$(seiso_ui_pkg_manager)" || seiso_die "Bun or npm is required for Forge UI — install Bun (https://bun.sh) or Node.js 18+"
   if [[ "$pm" == "bun" ]]; then
     # Prefer frozen installs for reproducibility. If Dependabot (or a human)
@@ -375,23 +451,34 @@ seiso_ui_install_deps() {
     # frozen fails and macOS/Linux `start` never builds Forge UI — fall back
     # once so local installs keep working, then warn to commit bun.lock.
     # Wall-clock timeout: bun has been observed to hang after printing its version.
+    # On timeout (exit 124), skip the unfrozen retry — a hung bun will hang again.
     bun_timeout="$(seiso_ui_bun_timeout_sec)"
-    if seiso_run_with_timeout "$bun_timeout" bash -c "cd \"\$1\" && bun install --frozen-lockfile" _ "$ui_dir"; then
+    status=0
+    seiso_run_with_timeout "$bun_timeout" bash -c "cd \"\$1\" && bun install --frozen-lockfile" _ "$ui_dir" || status=$?
+    if [[ "$status" -eq 0 ]]; then
       return 0
     fi
-    seiso_warn "bun install --frozen-lockfile failed or timed out after ${bun_timeout}s — retrying without freeze"
-    if seiso_run_with_timeout "$bun_timeout" bash -c "cd \"\$1\" && bun install" _ "$ui_dir"; then
+    if [[ "$status" -eq 124 ]]; then
+      seiso_warn "bun install --frozen-lockfile timed out after ${bun_timeout}s — skipping unfrozen retry, falling back to npm ci"
+      seiso_ui_npm_ci "$ui_dir" || return 1
+      return 0
+    fi
+    seiso_warn "bun install --frozen-lockfile failed — retrying without freeze (lockfile may be stale)"
+    status=0
+    seiso_run_with_timeout "$bun_timeout" bash -c "cd \"\$1\" && bun install" _ "$ui_dir" || status=$?
+    if [[ "$status" -eq 0 ]]; then
       seiso_warn "forge-ui/bun.lock may be out of sync — commit an updated bun.lock if package.json changed"
       return 0
     fi
-    if command -v npm >/dev/null 2>&1; then
-      seiso_warn "bun install hung or failed — falling back to npm ci for forge-ui"
-      (cd "$ui_dir" && npm ci --no-audit --no-fund) || return 1
-      return 0
+    if [[ "$status" -eq 124 ]]; then
+      seiso_warn "bun install timed out after ${bun_timeout}s — falling back to npm ci"
+    else
+      seiso_warn "bun install failed — falling back to npm ci for forge-ui"
     fi
-    return 1
+    seiso_ui_npm_ci "$ui_dir" || return 1
+    return 0
   else
-    (cd "$ui_dir" && npm ci --no-audit --no-fund)
+    seiso_ui_npm_ci "$ui_dir"
   fi
 }
 
@@ -417,7 +504,13 @@ seiso_build_forge_ui() {
     seiso_log "Forge UI dist present — skipping rebuild (set SEISO_FORCE_UI=1 to rebuild)"
     return 0
   fi
-  seiso_ensure_bun || true
+  # Linux with usable npm prefers package-lock — skip auto-installing Bun unless opted in.
+  if [[ "${SEISO_USE_NPM:-0}" == "1" ]] \
+    || { [[ "$(uname -s)" == "Linux" && "${SEISO_USE_BUN:-0}" != "1" ]] && seiso_npm_usable; }; then
+    :
+  else
+    seiso_ensure_bun || true
+  fi
   seiso_ui_install_deps "$root/forge-ui" || return 1
   seiso_ui_run_script "$root/forge-ui" build || return 1
 }

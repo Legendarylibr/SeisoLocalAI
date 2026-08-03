@@ -118,7 +118,7 @@ bash start
    - **`chat` / fast** → `[forge,llamacpp]` (+ `mlx` on macOS)
    - Every path above includes `[forge]`, which pulls Nostr provenance relay deps (`websockets`) plus Forge auth crypto. Auth signing itself is pure-Python in-tree.
 4. **Copies** `.env.example` → `.env` if missing
-5. **Builds** the Forge UI with Bun when available (`bun install --frozen-lockfile`), or npm (`npm ci`) when Bun is missing / `SEISO_USE_NPM=1` — both locks live in `forge-ui/` and must stay in sync with `package.json` on **all** OSes
+5. **Builds** the Forge UI: on **Linux**, prefers `npm ci` + `package-lock.json` when Node 18+ is present (avoids the bun.lock drift / hung-`bun install` regression); on **macOS**, prefers Bun (`bun install --frozen-lockfile`) when available. Force either path with `SEISO_USE_NPM=1` or `SEISO_USE_BUN=1`. Both locks live in `forge-ui/` and must stay in sync with `package.json`
 6. **Installs sidecar stack** on native Linux NVIDIA (`linux-nvidia` profile: Ollama + health gate)
 7. **Starts** Forge (unless `SEISO_START=0`)
 
@@ -131,12 +131,13 @@ bash start
 | `SEISO_BRANCH` | `main` | Branch to clone |
 | `SEISO_SKIP_UI=1` | off | Skip Forge UI build |
 | `SEISO_FORCE_UI=1` | off | Rebuild `forge-ui` even when `dist/` already exists |
-| `SEISO_BUN_INSTALL_TIMEOUT_SEC` | `180` | Wall-clock timeout for `bun install` (then retry / `npm ci` fallback) |
+| `SEISO_BUN_INSTALL_TIMEOUT_SEC` | `90` | Wall-clock timeout for `bun install` (timeout skips unfrozen retry and falls back to `npm ci`) |
 | `SEISO_START=0` | on (starts Forge) | Set to `0` to install without launching Forge |
 | `SEISO_NO_OPEN=1` | off | Do not open the browser after Forge starts |
 | `SEISO_NO_BANNER=1` | off | Skip install animation |
 | `SEISO_VERBOSE=1` | off | Show full pip/Bun output |
-| `SEISO_USE_NPM=1` | off | Use npm instead of Bun for `forge-ui` (Bun is default) |
+| `SEISO_USE_NPM=1` | off | Force npm for `forge-ui` (also auto-set after a Bun→npm fallback in the same process) |
+| `SEISO_USE_BUN=1` | off | On Linux, prefer Bun even when Node/npm 18+ is available |
 | `SEISO_USE_UV=0` | on (use uv if installed) | Use pip instead of uv for Python deps |
 | `SEISO_FAST_INSTALL=1` | off | Forge + GGUF chat only — skip PyTorch/training extras (same as `SEISO_INSTALL_PROFILE=chat`) |
 | `SEISO_INSTALL_PROFILE` | auto | Target stack: `linux-nvidia`, `linux-cpu`, `linux-rocm`, `wsl-nvidia`, `macos`, `chat` |
