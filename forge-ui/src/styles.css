@@ -726,6 +726,22 @@ label {
   margin-bottom: 0.85rem;
 }
 
+.auth-aside-brand-wordmark {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.65rem;
+}
+
+.auth-wordmark {
+  display: block;
+  width: min(100%, 22rem);
+  height: auto;
+  border-radius: var(--radius);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-md);
+  object-fit: cover;
+}
+
 .auth-aside-title {
   font-size: 1.75rem;
   font-weight: 700;

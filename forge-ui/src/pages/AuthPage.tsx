@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { downloadNip49KeyBackup } from "@/lib/keyBackup";
 import { looksLikeNcryptsec, resolveSecretToNsec } from "@/lib/nip49";
-import { SeisoLogoMark } from "@/components/SeisoLogo";
+import { SeisoWordmark } from "@/components/SeisoLogo";
 import { IconLock } from "@/components/Icons";
 
 const STORAGE_OPTIONS = [
@@ -212,10 +212,8 @@ export function AuthPage() {
 
       <div className="auth-layout">
         <div className="auth-aside">
-          <div className="auth-aside-brand">
-            <span className="brand-mark brand-mark-lg">
-              <SeisoLogoMark className="brand-logo-img" />
-            </span>
+          <div className="auth-aside-brand auth-aside-brand-wordmark">
+            <SeisoWordmark className="auth-wordmark" />
             <h1 className="auth-aside-title">Seiso Local AI</h1>
           </div>
           <p className="auth-aside-copy">

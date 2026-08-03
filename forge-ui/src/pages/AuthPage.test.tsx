@@ -35,6 +35,7 @@ vi.mock("@/lib/keyBackup", async () => {
 
 vi.mock("@/components/SeisoLogo", () => ({
   SeisoLogoMark: () => <span data-testid="logo" />,
+  SeisoWordmark: () => <span data-testid="wordmark" />,
 }));
 
 vi.mock("@/components/Icons", () => ({
