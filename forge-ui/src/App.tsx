@@ -29,8 +29,8 @@ function PageLoading() {
   return (
     <div className="app-loading">
       <div className="app-loading-atmosphere" aria-hidden />
-      <div className="app-loading-mark">
-        <SeisoLogoMark className="brand-logo-img app-loading-logo" />
+      <div className="app-loading-mark app-loading-mark-wordmark">
+        <SeisoLogoMark className="app-loading-logo" />
       </div>
       <div className="app-loading-bar" aria-hidden />
       <p className="app-loading-text">Seiso Local AI</p>

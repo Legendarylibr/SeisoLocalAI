@@ -69,9 +69,9 @@ export function HfTokenPage({ onDone }: HfTokenPageProps) {
 
         <div className="card auth-card matte-glow hf-token-card">
           <div className="auth-card-header">
-            <span className="brand-mark" style={{ margin: "0 auto 0.75rem" }}>
-              <SeisoLogoMark className="brand-logo-img" />
-            </span>
+            <div style={{ margin: "0 auto 0.75rem", maxWidth: "22rem" }}>
+              <SeisoLogoMark className="auth-wordmark" />
+            </div>
             <h2 className="auth-card-title">Add your HF token</h2>
             <p className="auth-card-sub">
               Optional — skipping does not block public model downloads. Upload to the Hub always requires a valid token.

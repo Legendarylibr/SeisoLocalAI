@@ -212,10 +212,8 @@ export function AuthPage() {
 
       <div className="auth-layout">
         <div className="auth-aside">
-          <div className="auth-aside-brand">
-            <span className="brand-mark brand-mark-lg">
-              <SeisoLogoMark className="brand-logo-img" />
-            </span>
+          <div className="auth-aside-brand auth-aside-brand-wordmark">
+            <SeisoLogoMark className="auth-wordmark" />
             <h1 className="auth-aside-title">Seiso Local AI</h1>
           </div>
           <p className="auth-aside-copy">
