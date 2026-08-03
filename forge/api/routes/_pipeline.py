@@ -1,6 +1,5 @@
 """Factory for stage-based pipeline job routers (compress)."""
 
-import json
 import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
@@ -38,7 +37,6 @@ class FormattedJobRoutes:
     list_jobs: Callable[[Database, str], Awaitable[list[dict]]]
     get_job: Callable[[Database, str, str], Awaitable[dict | None]]
     get_orchestrator: Callable[[], Orchestrator]
-    before_result: Callable[[dict[str, Any]], list[dict[str, str]]] | None = None
 
 
 def register_formatted_job_routes(
@@ -83,7 +81,6 @@ def register_formatted_job_routes(
                     job_id,
                     db=db,
                     user_id=user_id,
-                    before_result=routes.before_result,
                 )
             )
 
@@ -95,12 +92,6 @@ def register_formatted_job_routes(
             if row and row.get("error_text"):
                 yield {"event": "error", "data": row["error_text"]}
             status = str((row or {}).get("status") or "").lower()
-            formatted = routes.format_job(dict(row)) if row else {}
-            # Replay before_result hooks (e.g. RL-quant recommendation) after
-            # orchestrator eviction so the UI still receives recommendation SSE.
-            if routes.before_result and formatted:
-                for event in routes.before_result(formatted):
-                    yield event
             # Default schema stores stage_results_json='{}' — only emit a real
             # result for successful terminal jobs with non-empty payloads.
             stage_json = (row or {}).get("stage_results_json") or ""
@@ -110,11 +101,6 @@ def register_formatted_job_routes(
                 and stage_json.strip() not in {"{}", "null", "None"}
             ):
                 yield {"event": "result", "data": stage_json}
-            elif status == "completed" and formatted.get("recommendation"):
-                yield {
-                    "event": "result",
-                    "data": json.dumps(formatted, default=str),
-                }
 
         return EventSourceResponse(db_event_gen())
 

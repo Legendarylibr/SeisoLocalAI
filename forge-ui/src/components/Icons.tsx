@@ -69,33 +69,12 @@ export function IconTrain({ size = defaults.size, className, strokeWidth = defau
   );
 }
 
-export function IconQuant({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
-  return (
-    <Svg size={size} className={className}>
-      <path d="M4.5 18.5V14L8.5 10.5L12 13.5L15.5 9.5L19.5 12.5V18.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
-      <path d="M4.5 18.5H19.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" />
-      <circle cx="8.5" cy="7.5" r="1.75" stroke="currentColor" strokeWidth={strokeWidth} />
-      <circle cx="15.5" cy="6" r="1.75" stroke="currentColor" strokeWidth={strokeWidth} />
-    </Svg>
-  );
-}
-
 export function IconCompress({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
   return (
     <Svg size={size} className={className}>
       <path d="M8.5 4.5L4.5 8.5M4.5 8.5H8M4.5 8.5V4.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
       <path d="M15.5 19.5L19.5 15.5M19.5 15.5H16M19.5 15.5V19.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
       <rect x="8.5" y="8.5" width="7" height="7" rx="1.5" stroke="currentColor" strokeWidth={strokeWidth} />
-    </Svg>
-  );
-}
-
-export function IconImage({ size = defaults.size, className, strokeWidth = defaults.strokeWidth }: IconProps) {
-  return (
-    <Svg size={size} className={className}>
-      <rect x="4" y="5" width="16" height="14" rx="2" stroke="currentColor" strokeWidth={strokeWidth} />
-      <circle cx="9" cy="10" r="1.5" stroke="currentColor" strokeWidth={strokeWidth} />
-      <path d="M4 16.5L9.5 12L13 14.5L17.5 10.5L20 12.5" stroke="currentColor" strokeWidth={strokeWidth} strokeLinecap="round" strokeLinejoin="round" />
     </Svg>
   );
 }
@@ -363,9 +342,7 @@ export type NavIconName =
   | "chat"
   | "knowledge"
   | "train"
-  | "quant"
   | "compress"
-  | "image"
   | "export"
   | "recipes"
   | "integrations";
@@ -376,9 +353,7 @@ const NAV_ICONS: Record<NavIconName, FC<IconProps>> = {
   chat: IconChat,
   knowledge: IconKnowledge,
   train: IconTrain,
-  quant: IconQuant,
   compress: IconCompress,
-  image: IconImage,
   export: IconExport,
   recipes: IconRecipes,
   integrations: IconIntegrations,

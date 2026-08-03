@@ -19,7 +19,6 @@ _GPU_TASK_KINDS = frozenset(
         "compress",
         "distill_rl",
         "download",
-        "experiment",
         "inference",
         "slime",
         "nemo_rl",
