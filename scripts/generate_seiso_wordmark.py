@@ -2,7 +2,7 @@
 """Generate a detailed SEISO wordmark matching the Seiso mascot image style.
 
 Warm peach/gold/lavender palette, dithered shading, vertical rain noise,
-and soft block glitches — letters stay clear. Subline: LOCAL · AI.
+and soft block glitches — letters stay clear. Subline: Local first AI.
 """
 
 from __future__ import annotations
@@ -35,14 +35,25 @@ def _repo_root() -> Path:
     return Path(__file__).resolve().parents[1]
 
 
-def _font(size: int) -> ImageFont.FreeTypeFont:
-    candidates = [
-        "/System/Library/Fonts/Supplemental/Arial Black.ttf",
-        "/System/Library/Fonts/Supplemental/Impact.ttf",
-        "/System/Library/Fonts/Supplemental/DIN Condensed Bold.ttf",
-        "/Library/Fonts/Arial Black.ttf",
-        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
-    ]
+def _font(size: int, *, display: bool = True) -> ImageFont.FreeTypeFont:
+    if display:
+        candidates = [
+            "/System/Library/Fonts/Supplemental/Arial Black.ttf",
+            "/System/Library/Fonts/Supplemental/Impact.ttf",
+            "/System/Library/Fonts/Supplemental/DIN Condensed Bold.ttf",
+            "/Library/Fonts/Arial Black.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        ]
+    else:
+        # Clean readable subline (not display/glitch type)
+        candidates = [
+            "/System/Library/Fonts/Supplemental/Arial Bold.ttf",
+            "/System/Library/Fonts/Supplemental/Arial.ttf",
+            "/System/Library/Fonts/Supplemental/Helvetica.ttc",
+            "/System/Library/Fonts/Helvetica.ttc",
+            "/Library/Fonts/Arial.ttf",
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        ]
     for path in candidates:
         if Path(path).exists():
             return ImageFont.truetype(path, size=size)
@@ -329,25 +340,29 @@ def _subtle_slice(img: Image.Image, rng: random.Random) -> Image.Image:
     return out
 
 
-def _subtitle(img: Image.Image, font_small: ImageFont.ImageFont) -> Image.Image:
+def _subtitle(img: Image.Image, font_sub: ImageFont.ImageFont) -> Image.Image:
     overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
-    label = "LOCAL  ·  AI"
-    bbox = draw.textbbox((0, 0), label, font=font_small)
+    label = "Local first AI"
+    bbox = draw.textbbox((0, 0), label, font=font_sub)
     tw = bbox[2] - bbox[0]
+    th = bbox[3] - bbox[1]
     x = (W - tw) // 2
-    y = H // 2 + 150
-    draw.text((x + 1, y + 1), label, font=font_small, fill=(*DEEP, 180))
-    draw.text((x, y), label, font=font_small, fill=(*PEACH, 230))
-    draw.rectangle((x - 72, y + 9, x - 14, y + 12), fill=(*PINK, 200))
-    draw.rectangle((x + tw + 14, y + 9, x + tw + 72, y + 12), fill=(*GOLD, 200))
+    y = H // 2 + 148
+    # Soft shadow for legibility
+    draw.text((x + 2, y + 2), label, font=font_sub, fill=(*DEEP, 160))
+    draw.text((x, y), label, font=font_sub, fill=(*CREAM, 245))
+    # Simple side rules — aligned to text midline
+    mid = y + th // 2 + 2
+    draw.rectangle((x - 96, mid - 1, x - 18, mid + 2), fill=(*PINK, 190))
+    draw.rectangle((x + tw + 18, mid - 1, x + tw + 96, mid + 2), fill=(*GOLD, 190))
     return Image.alpha_composite(img.convert("RGBA"), overlay)
 
 
 def generate(out: Path, seed: int = SEED) -> Path:
     rng = random.Random(seed)
-    font = _font(238)
-    font_small = _font(26)
+    font = _font(238, display=True)
+    font_sub = _font(48, display=False)
     mascot = _load_mascot()
 
     bg = _warm_bg(rng, mascot)
@@ -359,7 +374,7 @@ def generate(out: Path, seed: int = SEED) -> Path:
     word = word.filter(ImageFilter.UnsharpMask(radius=1.1, percent=150, threshold=2))
 
     composed = Image.alpha_composite(bg.convert("RGBA"), word)
-    composed = _subtitle(composed, font_small)
+    composed = _subtitle(composed, font_sub)
     # light film grain
     grain = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     gp = grain.load()
