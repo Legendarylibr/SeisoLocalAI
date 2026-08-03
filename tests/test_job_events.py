@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+
 @pytest.mark.asyncio
 async def test_job_log_event_gen_skips_result_when_cancelled(tmp_path: Path):
     from forge.api.routes._stream import job_log_event_gen
@@ -26,6 +27,7 @@ async def test_job_log_event_gen_skips_result_when_cancelled(tmp_path: Path):
 
     events = [event async for event in job_log_event_gen(orch, job_id)]
     assert not any(e.get("event") == "result" for e in events)
+
 
 @pytest.mark.asyncio
 async def test_durable_job_events_skip_result_after_cancel(tmp_path: Path):
@@ -61,6 +63,7 @@ async def test_durable_job_events_skip_result_after_cancel(tmp_path: Path):
     finally:
         await db.close()
 
+
 def test_bundled_result_rejects_failed_manifest(tmp_path: Path):
     from forge.orchestrators._bundled_job import (
         BundledJobContract,
@@ -80,4 +83,3 @@ def test_bundled_result_rejects_failed_manifest(tmp_path: Path):
             },
             BundledJobContract(requires_manifest=True),
         )
-

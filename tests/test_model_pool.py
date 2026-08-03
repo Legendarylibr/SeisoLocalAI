@@ -8,11 +8,10 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
 
-from forge.orchestrators.inference import InferenceOrchestrator
-
 import pytest
 from gguf_fixtures import write_arch_gguf as _write_arch_gguf
 
+from forge.orchestrators.inference import InferenceOrchestrator
 from seiso.inference.model_pool import (
     BackendKind,
     LoadedModel,
@@ -2078,6 +2077,7 @@ def test_llamaswap_keeps_largest_pinned_context(monkeypatch):
     assert pool.get_llamaswap(path, num_ctx=2048) is client
     assert pool.pinned_n_ctx(path) == 8192
 
+
 @pytest.mark.asyncio
 async def test_inference_execute_stale_finally_keeps_newer_epoch(tmp_path: Path):
     orch = InferenceOrchestrator(tmp_path)
@@ -2106,6 +2106,7 @@ async def test_inference_execute_stale_finally_keeps_newer_epoch(tmp_path: Path)
     # Stale execute finally must not clear the newer reservation.
     assert orch._active_generation_user_id == "user-a"
 
+
 @pytest.mark.asyncio
 async def test_router_stream_sets_generation_owner(monkeypatch, tmp_path):
     from types import SimpleNamespace
@@ -2128,14 +2129,12 @@ async def test_router_stream_sets_generation_owner(monkeypatch, tmp_path):
     )
 
     tokens = [
-        token
-        async for token in orchestrator.stream_router(
-            {"user_id": "user-a", "messages": []}
-        )
+        token async for token in orchestrator.stream_router({"user_id": "user-a", "messages": []})
     ]
 
     assert tokens == ["hello"]
     assert orchestrator._active_generation_user_id is None
+
 
 @pytest.mark.asyncio
 async def test_cancel_generation_cancels_running_inference_job(monkeypatch, tmp_path):
@@ -2166,6 +2165,7 @@ async def test_cancel_generation_cancels_running_inference_job(monkeypatch, tmp_
     assert job.status == JobStatus.CANCELLED
     assert orchestrator._active_generation_user_id is None
 
+
 def test_stale_end_generation_does_not_clear_newer_reservation(tmp_path: Path):
     orch = InferenceOrchestrator(tmp_path)
     epoch1 = orch.begin_generation_for_user("user-a")
@@ -2177,4 +2177,3 @@ def test_stale_end_generation_does_not_clear_newer_reservation(tmp_path: Path):
     assert orch._active_generation_epoch == epoch2
     orch.end_generation_for_user("user-a", epoch=epoch2)
     assert orch._active_generation_user_id is None
-

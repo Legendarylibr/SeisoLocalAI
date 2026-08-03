@@ -1,5 +1,5 @@
-from pathlib import Path
 import json
+from pathlib import Path
 
 import pytest
 
@@ -28,9 +28,7 @@ def test_launch_worker_command():
 
 def test_resolve_distributed_plan_defaults_to_single_process():
     cfg = TrainConfig(model_id="m", dataset="/tmp/data.jsonl")
-    layout = GpuLayout(
-        world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2
-    )
+    layout = GpuLayout(world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2)
 
     plan = resolve_distributed_plan(cfg, layout)
 
@@ -46,9 +44,7 @@ def test_distributed_strategy_none_keeps_single_process_when_multi_gpu_set():
         multi_gpu=True,
         distributed_strategy="none",
     )
-    layout = GpuLayout(
-        world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2
-    )
+    layout = GpuLayout(world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2)
 
     plan = resolve_distributed_plan(cfg, layout)
 
@@ -63,9 +59,7 @@ def test_resolve_distributed_plan_uses_requested_gpu_count():
         multi_gpu=True,
         distributed_nproc_per_node=2,
     )
-    layout = GpuLayout(
-        world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=4
-    )
+    layout = GpuLayout(world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=4)
 
     plan = resolve_distributed_plan(cfg, layout)
 
@@ -82,9 +76,7 @@ def test_resolve_distributed_plan_rejects_more_processes_than_visible_gpus():
         multi_gpu=True,
         distributed_nproc_per_node=3,
     )
-    layout = GpuLayout(
-        world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2
-    )
+    layout = GpuLayout(world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2)
 
     with pytest.raises(ValueError, match="exceeds visible GPU count"):
         resolve_distributed_plan(cfg, layout)
@@ -108,9 +100,7 @@ def test_launch_worker_command_includes_multinode_args(monkeypatch: pytest.Monke
     )
     plan = resolve_distributed_plan(
         cfg,
-        GpuLayout(
-            world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2
-        ),
+        GpuLayout(world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2),
     )
 
     cmd = launch_worker_command("/tmp/cfg.yaml", plan)
@@ -141,9 +131,7 @@ def test_launch_worker_command_refuses_multinode_without_mesh_job(
     )
     plan = resolve_distributed_plan(
         cfg,
-        GpuLayout(
-            world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2
-        ),
+        GpuLayout(world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2),
     )
     with pytest.raises(ValueError, match="SEISO_MESH_JOB_ID"):
         launch_worker_command("/tmp/cfg.yaml", plan)
@@ -162,9 +150,7 @@ def test_resolve_distributed_plan_refuses_multinode_without_buzz_mesh(
         distributed_num_nodes=2,
         distributed_master_addr="10.0.0.2",
     )
-    layout = GpuLayout(
-        world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2
-    )
+    layout = GpuLayout(world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2)
     with pytest.raises(ValueError, match="Buzz-agent/mesh-only"):
         resolve_distributed_plan(cfg, layout)
 
@@ -181,9 +167,7 @@ def test_configure_distributed_training_args_honors_ddp_options(monkeypatch):
         ddp_backend="nccl",
         ddp_find_unused_parameters=True,
     )
-    layout = GpuLayout(
-        world_size=2, local_rank=1, device="cuda:1", use_ddp=True, device_count=2
-    )
+    layout = GpuLayout(world_size=2, local_rank=1, device="cuda:1", use_ddp=True, device_count=2)
 
     args = configure_distributed_training_args({}, layout, cfg, enabled=True)
 
@@ -221,6 +205,7 @@ def test_cloud_gpu_config_rejects_secret_like_labels():
             cloud_gpu_instance_type="p5.48xlarge",
         )
 
+
 def test_example_vllm_yaml_enables_ddp():
     from seiso.training.config import DistributedStrategy, TrainConfig
     from seiso.training.multi_gpu import distributed_requested
@@ -229,6 +214,7 @@ def test_example_vllm_yaml_enables_ddp():
     assert cfg.multi_gpu is True
     assert cfg.distributed_strategy == DistributedStrategy.DDP
     assert distributed_requested(cfg) is True
+
 
 def test_resolve_distributed_env_keeps_multi_node(monkeypatch):
     """Global WORLD_SIZE > local GPU count is multi-node, not stale."""
@@ -246,6 +232,7 @@ def test_resolve_distributed_env_keeps_multi_node(monkeypatch):
     assert env.enabled is True
     assert env.world_size == 16
     assert env.local_rank == 0
+
 
 def test_resolve_distributed_env_rejects_master_leftover_without_worker_proof(
     monkeypatch,
@@ -266,6 +253,7 @@ def test_resolve_distributed_env_rejects_master_leftover_without_worker_proof(
     assert env.enabled is False
     assert env.stale is True
 
+
 def test_resolve_distributed_env_rejects_empty_group_rank(monkeypatch):
     """Empty GROUP_RANK leftover must not count as worker proof."""
     monkeypatch.delenv("SEISO_DISTRIBUTED_WORKER", raising=False)
@@ -283,6 +271,7 @@ def test_resolve_distributed_env_rejects_empty_group_rank(monkeypatch):
     assert env.enabled is False
     assert env.stale is True
 
+
 def test_resolve_distributed_env_rejects_empty_master_marker(monkeypatch):
     monkeypatch.setenv("SEISO_DISTRIBUTED_WORKER", "1")
     monkeypatch.setenv("WORLD_SIZE", "2")
@@ -298,6 +287,7 @@ def test_resolve_distributed_env_rejects_empty_master_marker(monkeypatch):
 
     assert resolve_distributed_env(device_count=2).enabled is False
 
+
 def test_resolve_distributed_env_requires_rank(monkeypatch):
     monkeypatch.setenv("SEISO_DISTRIBUTED_WORKER", "1")
     monkeypatch.setenv("WORLD_SIZE", "2")
@@ -308,6 +298,7 @@ def test_resolve_distributed_env_requires_rank(monkeypatch):
     from seiso.training.multi_gpu import resolve_distributed_env
 
     assert resolve_distributed_env(device_count=2).enabled is False
+
 
 def test_is_main_process_follows_resolver_when_stale(monkeypatch):
     monkeypatch.setenv("WORLD_SIZE", "2")
@@ -324,6 +315,7 @@ def test_is_main_process_follows_resolver_when_stale(monkeypatch):
 
     # Stale → single process → rank 0 for save/manifest gates.
     assert is_main_process() is True
+
 
 def test_resolve_training_device_map_ignores_stale_world_size(monkeypatch):
     monkeypatch.setenv("WORLD_SIZE", "8")
@@ -351,6 +343,7 @@ def test_resolve_training_device_map_ignores_stale_world_size(monkeypatch):
     from seiso.memory.protection.device_map import resolve_training_device_map
 
     assert resolve_training_device_map("cuda") == "auto"
+
 
 def test_resolve_training_device_map_pins_multi_node_rank(monkeypatch):
     monkeypatch.setenv("SEISO_DISTRIBUTED_WORKER", "1")
@@ -380,6 +373,7 @@ def test_resolve_training_device_map_pins_multi_node_rank(monkeypatch):
 
     assert resolve_training_device_map("cuda") == {"": "cuda:2"}
 
+
 def test_resolve_distributed_artifact_prefers_slime_final(tmp_path: Path):
     from forge.orchestrators.training import TrainingOrchestrator
 
@@ -404,6 +398,7 @@ def test_resolve_distributed_artifact_prefers_slime_final(tmp_path: Path):
     resolved = TrainingOrchestrator._resolve_distributed_artifact(out)
     assert resolved == out
 
+
 def test_resolve_distributed_artifact_falls_back_to_checkpoint_glob(tmp_path: Path):
     from forge.orchestrators.training import TrainingOrchestrator
 
@@ -415,6 +410,7 @@ def test_resolve_distributed_artifact_falls_back_to_checkpoint_glob(tmp_path: Pa
     (ckpt / "model.safetensors").write_bytes(b"w")
 
     assert TrainingOrchestrator._resolve_distributed_artifact(out) == ckpt
+
 
 def test_resolve_distributed_artifact_prefers_newer_root_over_old_checkpoint(
     tmp_path: Path,
@@ -436,6 +432,7 @@ def test_resolve_distributed_artifact_prefers_newer_root_over_old_checkpoint(
     os.utime(out, None)
 
     assert TrainingOrchestrator._resolve_distributed_artifact(out) == out
+
 
 def test_detect_training_layout_ignores_stale_world_size(monkeypatch):
     monkeypatch.setenv("WORLD_SIZE", "8")
@@ -466,6 +463,7 @@ def test_detect_training_layout_ignores_stale_world_size(monkeypatch):
     layout = detect_training_layout()
     assert layout.world_size == 1
     assert layout.use_ddp is False
+
 
 def test_detect_training_layout_keeps_multi_node(monkeypatch):
     monkeypatch.setenv("SEISO_DISTRIBUTED_WORKER", "1")
@@ -498,4 +496,3 @@ def test_detect_training_layout_keeps_multi_node(monkeypatch):
     assert layout.world_size == 16
     assert layout.local_rank == 1
     assert layout.use_ddp is True
-
