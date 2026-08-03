@@ -23,7 +23,6 @@ class BundledJobContract:
         "output_root",
         "run_dir",
         "model_dir",
-        "recommendation_path",
         "paper_bundle",
     )
     nested_artifact_keys: tuple[str, ...] = ("stage_results", "artifacts", "summary")

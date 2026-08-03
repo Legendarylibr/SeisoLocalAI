@@ -6,7 +6,7 @@
 
 This document provides a software engineering analysis: architecture, features, code health, security, platform notes, WIP status, and actionable recommendations.
 
-**July 2026 full-tree review:** See [reports/codebase-review-2026-07.md](reports/codebase-review-2026-07.md) (initial) and [reports/codebase-review-2026-07-23.md](reports/codebase-review-2026-07-23.md) (re-audit). **Landed through v0.4.0+ (still confirmed 2026-07-23):** DNS-pin httpx (S1-001), multi-backend chat picker (INF-01), shared `USER_SCOPED_DATA_ROOTS` (S1-003), per-model kernel restore + inference `KernelPatchSession` (S1-006/007), drop unused DB tables (F4-03–05), LoRA-only FULL/BASE refuse (EXP-02), slime sync-weight guards (SLM-01), NeMo RL external method, training-config / GRPO invariants, Forge red-team hardening (tools policy, KB quarantine, Compat key chat-only, remote+code-exec hard refuse), single RL-quant product preset registry (RP-05). **Remediated after the 2026-07-23 audit (both passes):** S1-004/009/010/012/014/016/017/018/019; TRN-02/03/04/05; CMP-ORD; F4-06/10; F5-02/05; SLM-02; INF-02/03; CHAT-01; NEMO-01/02; EXP-02-R; HUB-TOCTOU; RP-06/09/10 (product naming + compress fingerprint delegate); F6-04/05/06/07 hygiene; dead `publishToHub` client removed; code-exec naming clarified. **Top residual risks:** AST code-exec is still not OS isolation (localhost-only; remote+code-exec hard-refused); PR CI still excludes `@gpu` (use `make test-hardware`); historical adaptive_quant domain fingerprints were separate from `seiso.research.provenance` (research now lives in Adaptive-RL-Quantization).
+**Post-extract note (2026-08):** Adaptive RL quantization research lives in [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization) (extracted in Seiso PR #459). Historical July 2026 full-tree review reports that assumed in-tree `adaptive_quant` / `rl_quant` were removed as obsolete. **Top residual risks:** AST code-exec is still not OS isolation (localhost-only; remote+code-exec hard-refused); PR CI still excludes `@gpu` (use `make test-hardware`).
 
 ---
 
@@ -34,7 +34,7 @@ Seiso is a **mature, ambitious local-first AI workspace** (GPL-3.0) that combine
 - Two consistent surfaces (CLI + UI) sharing the same core runners/orchestrators.
 - Comprehensive docs + smoke presets + local CI gate.
 
-**Current state:** Alpha (`pyproject.toml` Development Status :: 3). Usable today for chat, training, export on supported hardware. Advanced pipelines (compress/RL/distill) rely on bundled research code and optional extras; best on Linux + NVIDIA. Research CLI `seiso experiment quant-regression` compares multi-quant train → GGUF export → deploy eval. Some style debt (imports, simplifications) and a modest number of pre-existing lint baseline issues. One hardware enumeration test is flaky in this env.
+**Current state:** Alpha (`pyproject.toml` Development Status :: 3). Usable today for chat, training, export on supported hardware. Advanced pipelines (compress/distill-rl) rely on bundled research code and optional extras; best on Linux + NVIDIA. The `seiso experiment` CLI group prints a pointer to Adaptive-RL-Quantization. Some style debt (imports, simplifications) and a modest number of pre-existing lint baseline issues. One hardware enumeration test is flaky in this env.
 
 ---
 
@@ -52,7 +52,7 @@ User
         └── db (aiosqlite + field-level AES-GCM crypto)
 ```
 
-- **Core** (`seiso/`): Training, inference, export, kernels, compress, distill_rl, experiments, models, hardware, memory, platform, security helpers, bundled package wrappers.
+- **Core** (`seiso/`): Training, inference, export, kernels, compress, distill_rl, models, hardware, memory, platform, security helpers, bundled package wrappers.
 - **Forge** (`forge/`): Web server, job orchestration + SSE streaming, persistence, auth/onboarding, security middleware, model registry/inventory, Compat API.
 - **UI** (`forge-ui/`): React + TS + Vite + xyflow (recipes). Talks REST + SSE. Built assets served by Forge SPA fallback.
 - **Bundled packages**: `seiso.codellama_compress` are part of this repository and are bootstrapped at runtime (no separate pip package). Seiso provides config translation, job wrapping, UI/CLI surfaces, kernel bridge, and manifests.
@@ -123,12 +123,10 @@ Entry points: `start` script, `seiso` CLI (`forge`, `train`, `slime`, `nemo-rl`,
 - Cross-pipeline (compression + adaptive alignment).
 
 
-### Quant regression experiments
-
 ### Fused Kernels (unique strength)
 - Native CUDA (rms_norm, swiglu, lora_delta, lora_qkv, cross_entropy) + Triton + PyTorch fallback.
 - Temporary forward patches + strict restore + empty_cache.
-- Low-VRAM modes, auto-tune, discrete profiles selectable by RL or heuristics.
+- Low-VRAM modes, auto-tune, discrete profiles selectable by heuristics.
 - `seiso/kernels/{dispatch.py,hooks.py,platform.py,loss.py,lifecycle.py,tuning.py,training_profile.py,cuda/*,triton_ops.py}`
 - Bench: `seiso-bench-kernels`.
 
@@ -217,8 +215,6 @@ Seiso maps learning **signals** to proper algorithms (not proxies that look rela
 
 **DPO:** Rafailov β-sigmoid on sum completion log-probs (`average_log_prob=false` by default).
 
-**Historical RL quant (moved):** Research contract embeds `evidence_level`; `deploy_quality_claimable` requires `backend=llama_cpp` **and** `external_quality_path` (simulator or llama.cpp-without-sidecar stay non-claimable).
-
 **Physics / numerics framing:** group advantages are zero-sum within a prompt; length normalization is scale invariance of the importance ratio; non-negative KL is a valid information penalty; VRAM guards are hard resource bounds (logged as-run when they rewrite batch/seq/quant).
 
 ---
@@ -262,7 +258,7 @@ External: llama.cpp (convert/quantize binaries managed by scripts), nvcc for CUD
 
 ### Quick Wins (low risk, high value)
 1. Run `make fix` + refresh ruff/mypy baselines (or targeted import sorting) to reduce noise.
-2. Clean the few obvious F401 / unused in tests and experiments.
+2. Clean the few obvious F401 / unused imports in tests.
 3. Ensure TrainPage recommendation effect also considers `configCustomized` in more places if needed; consider surfacing "applied from recs" indicator.
 4. Document the `error_text` field in API response shapes / UI job lists if not already.
 

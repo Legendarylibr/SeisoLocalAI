@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator, Callable
-from typing import Any
+from collections.abc import AsyncIterator
 
 from forge.db.store import Database
 from forge.orchestrators.base import Orchestrator
@@ -32,7 +31,6 @@ async def job_log_event_gen(
     *,
     db: Database | None = None,
     user_id: str | None = None,
-    before_result: Callable[[dict[str, Any]], list[dict[str, str]]] | None = None,
 ) -> AsyncIterator[dict[str, str]]:
     live_job = orchestrator.get_job(job_id)
     replay_durable = db is not None and user_id is not None and live_job is None
@@ -51,9 +49,6 @@ async def job_log_event_gen(
         and job.result
         and job.status.value == "completed"
     ):
-        if before_result:
-            for event in before_result(job.result):
-                yield event
         yield {"event": "result", "data": json.dumps(job.result, default=str)}
 
 

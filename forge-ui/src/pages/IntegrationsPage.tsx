@@ -415,7 +415,7 @@ export function IntegrationsPage() {
             checked={nostrAuto}
             onChange={(e) => setNostrAuto(e.target.checked)}
           />
-          Auto-attest completed pipeline / export / RL-quant jobs
+          Auto-attest completed pipeline / export jobs
         </label>
         <label style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginTop: "0.5rem" }}>
           <input
