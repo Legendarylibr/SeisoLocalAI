@@ -13,7 +13,11 @@ from seiso.compress.bootstrap import (
     require_codellama_compress,
 )
 from seiso.compress.config_builder import PRESETS, STAGE_ORDER, build_pipeline_config
-from seiso.compress.runner import _trust_remote_code
+from seiso.compress.runner import (
+    _assert_full_model_dir,
+    _resolve_model_dir,
+    _trust_remote_code,
+)
 
 
 def test_bundled_source_present():
@@ -176,3 +180,25 @@ def test_run_smoke_pipeline(tmp_path: Path):
     assert Path(str(result["run_dir"])).is_dir()
     manifest = result.get("manifest") or {}
     assert manifest.get("ok") is True
+
+def test_forge_pipeline_defaults_are_product_presets():
+    from forge.api.routes.compress import CompressStartRequest
+    from forge.api.routes.distill_rl import DistillRLStartRequest
+
+    assert DistillRLStartRequest().preset == "reproducible"
+    assert CompressStartRequest().preset == "full"
+
+def test_compress_refuses_lora_only_model_dir(tmp_path: Path):
+    lora = tmp_path / "adapter"
+    lora.mkdir()
+    (lora / "adapter_config.json").write_text("{}", encoding="utf-8")
+    with pytest.raises(ValueError, match="LoRA adapter only"):
+        _assert_full_model_dir(lora, "prune")
+
+    cfg = {
+        "model_dir": str(lora),
+        "stages": ["prune", "finetune"],
+    }
+    with pytest.raises(ValueError, match="LoRA adapter only"):
+        _resolve_model_dir(cfg, tmp_path / "run", "prune")
+

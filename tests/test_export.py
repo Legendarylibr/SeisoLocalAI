@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from seiso.export.formats import ExportFormat, ExportOptions, export_checkpoint
+from seiso.export.formats import ExportFormat, ExportOptions, _select_hub_folder, export_checkpoint
 from seiso.export.hub_precheck import (
     HubPrecheckResult,
     assert_hub_precheck_ok,
@@ -596,3 +596,105 @@ async def test_export_with_profile_lora(tmp_path, app, auth_client):
     assert job["status"] == "completed"
     outputs = json.loads(job.get("output_paths_json") or "{}")
     assert "lora" in outputs
+
+def test_export_checksum_hashes_weight_files(tmp_path: Path):
+    from seiso.research.provenance import directory_checksum_manifest
+
+    (tmp_path / "model.safetensors").write_bytes(b"weights" * 1000)
+    (tmp_path / "readme.txt").write_bytes(b"x" * 32)
+    manifest = directory_checksum_manifest(
+        tmp_path,
+        max_files=None,
+        max_file_bytes=8,
+        always_hash_suffixes=(".safetensors",),
+    )
+    assert manifest["readme.txt"] == "skipped-large-file"
+    assert manifest["model.safetensors"] not in {"skipped-large-file", "error"}
+    assert len(manifest["model.safetensors"]) == 64
+
+def test_export_download_requires_exact_key(tmp_path: Path):
+    import asyncio
+
+    from fastapi import HTTPException
+
+    from forge.api.routes import export as export_routes
+    from forge.config import ForgeSettings
+    from forge.db.crypto import generate_encryption_key
+    from forge.db.store import Database
+
+    async def _run() -> None:
+        db = Database(
+            tmp_path / "forge.db",
+            encryption_key=generate_encryption_key(),
+            ephemeral=True,
+        )
+        try:
+            user = await db.create_user("hashed", "User", email="export-key@local.dev")
+            uid = user["id"]
+            out_dir = tmp_path / "exports" / uid / "job1"
+            out_dir.mkdir(parents=True)
+            gguf = out_dir / "model.gguf"
+            gguf.write_bytes(b"GGUF")
+            other = out_dir / "adapter.safetensors"
+            other.write_bytes(b"ST")
+            await db.create_export_job(
+                uid,
+                {"checkpoint_path": str(tmp_path / "ckpt"), "formats": ["gguf"]},
+                job_id="job1",
+            )
+            await db.update_export_job_status(
+                "job1",
+                "completed",
+                user_id=uid,
+                output_paths={"gguf": str(gguf), "safetensors": str(other)},
+            )
+            settings = ForgeSettings(data_dir=tmp_path)
+            with pytest.raises(HTTPException) as empty:
+                await export_routes.download_export_output(
+                    job_id="job1",
+                    user_id=uid,
+                    db=db,
+                    settings=settings,
+                    key="  ",
+                )
+            assert empty.value.status_code == 400
+            with pytest.raises(HTTPException) as fuzzy:
+                await export_routes.download_export_output(
+                    job_id="job1",
+                    user_id=uid,
+                    db=db,
+                    settings=settings,
+                    key="a",
+                )
+            assert fuzzy.value.status_code == 404
+            resp = await export_routes.download_export_output(
+                job_id="job1",
+                user_id=uid,
+                db=db,
+                settings=settings,
+                key="GGUF",
+            )
+            assert Path(resp.path) == gguf  # type: ignore[attr-defined]
+        finally:
+            await db.close()
+
+    asyncio.run(_run())
+
+def test_select_hub_folder_skips_empty_gguf_dirs(tmp_path: Path):
+    empty = tmp_path / "q4_k_m"
+    empty.mkdir()
+    good = tmp_path / "q8_0"
+    good.mkdir()
+    (good / "model-q8_0.gguf").write_bytes(b"gguf")
+    chosen = _select_hub_folder(tmp_path, [ExportFormat.GGUF])
+    assert chosen == good
+
+def test_select_hub_folder_prefers_lora_dir(tmp_path: Path):
+    from seiso.export.formats import ExportFormat, _select_hub_folder
+
+    out = tmp_path / "export"
+    lora = out / "lora"
+    lora.mkdir(parents=True)
+    (lora / "adapter_config.json").write_text("{}", encoding="utf-8")
+    assert _select_hub_folder(out, [ExportFormat.LORA]) == lora
+

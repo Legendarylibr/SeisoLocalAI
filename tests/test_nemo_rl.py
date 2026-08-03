@@ -239,3 +239,38 @@ def test_cli_registers_nemo_rl():
 
     names = {cmd.name for cmd in app.registered_commands}
     assert "nemo-rl" in names
+
+def test_nemo_relative_dotdot_override_is_sandboxed(tmp_path: Path, monkeypatch):
+    from seiso.nemo_rl.config import NeMoRLConfig
+    from seiso.nemo_rl.runner import train_nemo_rl
+    from seiso.security import SecurityError
+
+    sandbox = tmp_path / "data"
+    sandbox.mkdir()
+    out = sandbox / "checkpoints" / "u1" / "job"
+    out.mkdir(parents=True)
+    # cwd outside sandbox; relative .. must still be checked after resolve.
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    monkeypatch.chdir(outside)
+
+    cfg = NeMoRLConfig(
+        model_id="org/model",
+        output_dir=out,
+        sandbox_root=sandbox,
+        dry_run=True,
+        extra_overrides=("data.path=../escape.json",),
+    )
+    with pytest.raises(SecurityError, match="outside sandbox"):
+        train_nemo_rl(cfg)
+
+def test_nemo_base_config_rejects_path_escape(tmp_path: Path):
+    from seiso.nemo_rl.config_builder import _resolve_base_config_path
+
+    root = tmp_path / "nemo"
+    root.mkdir()
+    (root / "ok.yaml").write_text("x: 1\n", encoding="utf-8")
+    assert _resolve_base_config_path(root, "ok.yaml").name == "ok.yaml"
+    with pytest.raises(ValueError, match="base_config|\\.\\."):
+        _resolve_base_config_path(root, "../../../etc/passwd")
+
