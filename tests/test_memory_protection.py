@@ -7,7 +7,6 @@ from memory_fixtures import gpu_normal_caps as _gpu_normal_caps
 from memory_fixtures import mock_gpu_total as _mock_gpu_total
 
 from seiso.memory.protection import (
-    apply_rl_memory_guards,
     apply_training_memory_guards,
     assess_path_memory_fit,
     cap_llama_batch_for_context,
@@ -1650,23 +1649,6 @@ def test_apply_training_memory_guards_caps_unsafe_user_sizing(monkeypatch):
     assert policy["changed"] is True
     assert policy["changes"]["batch_size"] == {"from": 8, "to": 1}
     assert policy["changes"]["max_seq_length"] == {"from": 8192, "to": 1024}
-
-
-def test_apply_rl_memory_guards_caps_large_batches(monkeypatch):
-    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 2048)
-    flat = {
-        "torch_preflight_batch_size": 16384,
-        "replay_buffer_on_gpu": True,
-        "torch_batch_episodes": 2048,
-        "torch_minibatch_size": 4096,
-        "online_batch_size": 128,
-    }
-    out = apply_rl_memory_guards(flat)
-    assert out["torch_preflight_batch_size"] == 512
-    assert out["torch_batch_episodes"] == 128
-    assert out["torch_minibatch_size"] == 64
-    assert out["online_batch_size"] == 32
-    assert out["replay_buffer_on_gpu"] is True
 
 
 def test_ensure_load_fits_allows_oversized_chat_gguf(tmp_path, monkeypatch):

@@ -327,7 +327,7 @@ export function ExportPage() {
           />
           <StudioCardBody>
           <p className="field-hint">
-            Only Seiso training, export, and RL quant outputs can be published. A valid Hugging Face token is always
+            Only Seiso training and export outputs can be published. A valid Hugging Face token is always
             required for upload — add one in{" "}
             <Link to="/settings?tab=huggingface">Settings</Link>, enter it below, or use{" "}
             <code>hf auth login</code>.

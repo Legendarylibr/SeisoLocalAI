@@ -83,7 +83,7 @@ To run a second Forge intentionally, change **both** `SEISO_PORT` and `SEISO_DAT
 
 ### Process model
 
-Forge runs as a **single uvicorn worker** by default. Job orchestrators (training, export, compress, distill-RL, RL quant), live SSE log streams, in-memory rate limiting, and loaded inference models all live in that one process.
+Forge runs as a **single uvicorn worker** by default. Job orchestrators (training, export, compress, distill-RL), live SSE log streams, in-memory rate limiting, and loaded inference models all live in that one process.
 
 | Constraint | Why |
 |------------|-----|

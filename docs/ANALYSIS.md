@@ -6,7 +6,7 @@
 
 This document provides a software engineering analysis: architecture, features, code health, security, platform notes, WIP status, and actionable recommendations.
 
-**July 2026 full-tree review:** See [reports/codebase-review-2026-07.md](reports/codebase-review-2026-07.md) (initial) and [reports/codebase-review-2026-07-23.md](reports/codebase-review-2026-07-23.md) (re-audit). **Landed through v0.4.0+ (still confirmed 2026-07-23):** DNS-pin httpx (S1-001), multi-backend chat picker (INF-01), shared `USER_SCOPED_DATA_ROOTS` (S1-003), per-model kernel restore + inference `KernelPatchSession` (S1-006/007), drop unused DB tables (F4-03–05), LoRA-only FULL/BASE refuse (EXP-02), slime sync-weight guards (SLM-01), NeMo RL external method, training-config / GRPO invariants, Forge red-team hardening (tools policy, KB quarantine, Compat key chat-only, remote+code-exec hard refuse), single RL-quant product preset registry (RP-05). **Remediated after the 2026-07-23 audit (both passes):** S1-004/009/010/012/014/016/017/018/019; TRN-02/03/04/05; CMP-ORD; F4-06/10; F5-02/05; SLM-02; INF-02/03; CHAT-01; NEMO-01/02; EXP-02-R; HUB-TOCTOU; RP-06/09/10 (product naming + compress fingerprint delegate); F6-04/05/06/07 hygiene; dead `publishToHub` client removed; code-exec naming clarified. **Top residual risks:** AST code-exec is still not OS isolation (localhost-only; remote+code-exec hard-refused); PR CI still excludes `@gpu` (use `make test-hardware`); adaptive_quant domain fingerprints remain separate from `seiso.research.provenance` for replay integrity.
+**July 2026 full-tree review:** See [reports/codebase-review-2026-07.md](reports/codebase-review-2026-07.md) (initial) and [reports/codebase-review-2026-07-23.md](reports/codebase-review-2026-07-23.md) (re-audit). **Landed through v0.4.0+ (still confirmed 2026-07-23):** DNS-pin httpx (S1-001), multi-backend chat picker (INF-01), shared `USER_SCOPED_DATA_ROOTS` (S1-003), per-model kernel restore + inference `KernelPatchSession` (S1-006/007), drop unused DB tables (F4-03–05), LoRA-only FULL/BASE refuse (EXP-02), slime sync-weight guards (SLM-01), NeMo RL external method, training-config / GRPO invariants, Forge red-team hardening (tools policy, KB quarantine, Compat key chat-only, remote+code-exec hard refuse), single RL-quant product preset registry (RP-05). **Remediated after the 2026-07-23 audit (both passes):** S1-004/009/010/012/014/016/017/018/019; TRN-02/03/04/05; CMP-ORD; F4-06/10; F5-02/05; SLM-02; INF-02/03; CHAT-01; NEMO-01/02; EXP-02-R; HUB-TOCTOU; RP-06/09/10 (product naming + compress fingerprint delegate); F6-04/05/06/07 hygiene; dead `publishToHub` client removed; code-exec naming clarified. **Top residual risks:** AST code-exec is still not OS isolation (localhost-only; remote+code-exec hard-refused); PR CI still excludes `@gpu` (use `make test-hardware`); historical adaptive_quant domain fingerprints were separate from `seiso.research.provenance` (research now lives in Adaptive-RL-Quantization).
 
 ---
 
@@ -23,7 +23,7 @@ Seiso is a **mature, ambitious local-first AI workspace** (GPL-3.0) that combine
 - QLoRA / LoRA / full fine-tuning with live metrics/SSE.
 - Post-training: Seiso-native slime GRPO (`method: slime`, HF / DDP / vLLM / SGLang rollouts) and external NVIDIA NeMo RL (`method: nemo_rl`, no vendoring).
 - Export (LoRA merge, GGUF multi-quant, Hub publish + model cards; LoRA-only checkpoints refuse FULL/BASE).
-- Advanced research pipelines: LLM compression (distill + optional prune + FT + quant), Distill-RL (KL + DPO), RL quantization (adaptive + optional kernel policy co-training).
+- Advanced research pipelines: LLM compression (distill + optional prune + FT + quant), Distill-RL (KL + DPO), Distill-RL; adaptive RL quantization research moved to Adaptive-RL-Quantization.
 - RAG/knowledge bases, visual recipe graphs, provider routing, Compat API (`/v1`).
 
 **Strengths:**
@@ -217,7 +217,7 @@ Seiso maps learning **signals** to proper algorithms (not proxies that look rela
 
 **DPO:** Rafailov β-sigmoid on sum completion log-probs (`average_log_prob=false` by default).
 
-**RL quant:** Research contract embeds `evidence_level`; `deploy_quality_claimable` requires `backend=llama_cpp` **and** `external_quality_path` (simulator or llama.cpp-without-sidecar stay non-claimable).
+**Historical RL quant (moved):** Research contract embeds `evidence_level`; `deploy_quality_claimable` requires `backend=llama_cpp` **and** `external_quality_path` (simulator or llama.cpp-without-sidecar stay non-claimable).
 
 **Physics / numerics framing:** group advantages are zero-sum within a prompt; length normalization is scale invariance of the importance ratio; non-negative KL is a valid information penalty; VRAM guards are hard resource bounds (logged as-run when they rewrite batch/seq/quant).
 
@@ -237,7 +237,7 @@ Seiso maps learning **signals** to proper algorithms (not proxies that look rela
 - MLX absent (correct for Linux).
 - "Hub ready for download" / "Local chat runtime ready" can be False without token or downloaded models (expected).
 
-**Key optional extras** (see pyproject.toml): `.[forge,train,cuda,llamacpp,mlx,compress-quant,compress-eval,dev,flash-attn]`. RL quant has no separate extra — it uses `.[train]` plus bundled package bootstrap.
+**Key optional extras** (see pyproject.toml): `.[forge,train,cuda,llamacpp,mlx,compress-quant,compress-eval,dev,flash-attn]`. Adaptive RL quantization is no longer bundled; see Adaptive-RL-Quantization.
 
 External: llama.cpp (convert/quantize binaries managed by scripts), nvcc for CUDA JIT kernels.
 

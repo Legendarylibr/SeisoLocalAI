@@ -16,5 +16,4 @@ from seiso.memory.protection.load_fit import *  # noqa: F403
 from seiso.memory.protection.load_fit import _llamacpp_deferred_preflight_platform  # noqa: F401
 from seiso.memory.protection.oom import *  # noqa: F403
 from seiso.memory.protection.path_vram import *  # noqa: F403
-from seiso.memory.protection.rl_guards import *  # noqa: F403
 from seiso.memory.protection.training_guards import *  # noqa: F403

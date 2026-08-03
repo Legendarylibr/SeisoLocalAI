@@ -396,8 +396,6 @@ seiso train --config configs/example_lora.yaml
 # Example: export CLI checkpoint to GGUF
 seiso export --checkpoint ./outputs/lora-run/checkpoint-<timestamp> --formats merged,gguf
 
-# Example: RL quant with CUDA kernel co-training
-
 # Example: distill-RL smoke (teacher → DPO)
 seiso distill-rl run --preset smoke
 

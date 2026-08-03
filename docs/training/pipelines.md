@@ -107,16 +107,6 @@ Prefer slime for Seiso-native GRPO + `rl_verify`. Prefer NeMo RL for Ray/Megatro
 scale, DAPO/GDPO, or upstream NeMo recipes. Troubleshoot missing checkout / `uv`
 in [../troubleshooting.md](../troubleshooting.md#nemo-rl-checkout-or-uv-not-found).
 
-## RL quant and quant regression
-
-Run the documented quant regression study with the example config:
-
-```bash
-```
-
-For adaptive quant flows, prefer smoke-sized request counts until reports and
-sidecars are generated correctly.
-
 ## Quality gate
 
 Before opening a PR or after significant pipeline changes:

@@ -4,7 +4,7 @@ Fine-tune open models with QLoRA, LoRA, full fine-tuning, slime-style post-train
 
 **Prerequisites:** Seiso installed with `[train]` extra. See [install.md](../install.md).
 
-For a step-by-step runbook covering supervised training, slime, compression, Distill-RL, RL quant, and quant regression studies, see [pipelines.md](pipelines.md).
+For a step-by-step runbook covering supervised training, slime, compression, and Distill-RL, see [pipelines.md](pipelines.md).
 
 ---
 
