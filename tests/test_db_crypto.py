@@ -342,3 +342,56 @@ async def test_add_message_can_update_thread_model(db: Database):
     updated = await db.get_thread_for_user(thread["id"], user["id"])
     assert updated is not None
     assert updated["model_id"] == "model-b"
+
+def test_hf_token_no_host_fallback_for_user(monkeypatch, tmp_path: Path):
+    from forge.db.crypto import generate_encryption_key
+    from forge.services.hf_auth import resolve_hf_token
+
+    monkeypatch.setenv("HF_TOKEN", "hf_host_secret")
+    monkeypatch.delenv("SEISO_HF_ALLOW_HOST_TOKEN", raising=False)
+    monkeypatch.setattr("forge.services.hf_auth._read_cli_token", lambda: "hf_cli")
+    key = generate_encryption_key()
+    token, source = resolve_hf_token(
+        user_id="bob",
+        data_dir=tmp_path,
+        encryption_key=key,
+    )
+    assert token is None
+    assert source == "none"
+
+    monkeypatch.setenv("SEISO_HF_ALLOW_HOST_TOKEN", "1")
+    token, source = resolve_hf_token(
+        user_id="bob",
+        data_dir=tmp_path,
+        encryption_key=key,
+    )
+    assert token == "hf_host_secret"
+    assert source == "env_hf"
+
+@pytest.mark.asyncio
+async def test_training_job_config_encrypted_at_rest(tmp_path: Path):
+    import base64
+    import json
+
+    from forge.db.crypto import resolve_encryption_key
+    from forge.db.store import Database
+
+    key = resolve_encryption_key(base64.b64encode(b"\x02" * 32).decode())
+    db = Database(tmp_path / "forge.db", encryption_key=key, ephemeral=True)
+    user = await db.create_user("hashed", "User", email="t@local.dev")
+    job = await db.create_training_job(
+        user["id"], {"model_id": "org/model", "dataset": "uploads/x.jsonl"}
+    )
+
+    conn = await db._ensure_conn()
+    async with conn.execute(
+        "SELECT config_json FROM training_jobs WHERE id = ?", (job["id"],)
+    ) as cur:
+        row = await cur.fetchone()
+    assert row is not None
+    assert str(row["config_json"]).startswith("enc:v1:")
+
+    loaded = await db.get_training_job(job["id"], user["id"])
+    assert json.loads(loaded["config_json"])["model_id"] == "org/model"
+    await db.close()
+

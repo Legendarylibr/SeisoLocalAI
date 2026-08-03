@@ -250,3 +250,14 @@ def test_slime_named_rewards_prefer_final_answer():
     assert numeric_reward(think_only, sample) == 0.0
     assert contains_answer_reward(think_only, sample) == 0.0
     assert numeric_reward("<think>x</think>\n42", sample) == 1.0
+
+def test_emit_standard_artifacts_skips_orphan_distill_by_default(tmp_path: Path):
+    from seiso.rl_verify.synth_code import emit_standard_artifacts
+
+    stats = emit_standard_artifacts(
+        data_dir=tmp_path, seed=0, verify=True, limit=2, include_variants=False
+    )
+    assert "distill_code_synth" not in stats
+    assert not (tmp_path / "distill_code_synth.jsonl").exists()
+    assert (tmp_path / "slime_code_sample.jsonl").is_file()
+

@@ -6,6 +6,9 @@ import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from unittest.mock import AsyncMock, MagicMock
+
+from forge.orchestrators.inference import InferenceOrchestrator
 
 import pytest
 from gguf_fixtures import write_arch_gguf as _write_arch_gguf
@@ -2074,3 +2077,104 @@ def test_llamaswap_keeps_largest_pinned_context(monkeypatch):
 
     assert pool.get_llamaswap(path, num_ctx=2048) is client
     assert pool.pinned_n_ctx(path) == 8192
+
+@pytest.mark.asyncio
+async def test_inference_execute_stale_finally_keeps_newer_epoch(tmp_path: Path):
+    orch = InferenceOrchestrator(tmp_path)
+    orch._provider_chat = AsyncMock(return_value="ok")  # type: ignore[method-assign]
+    orch._emit_log = MagicMock()  # type: ignore[method-assign]
+
+    epoch1 = orch.begin_generation_for_user("user-a")
+    job_id = orch.create_job(user_id="user-a")
+
+    # Simulate cancel → new reservation while first execute is about to finish.
+    async def _hijack_provider(*_a, **_k):
+        orch.end_generation_for_user("user-a", epoch=epoch1)
+        orch.begin_generation_for_user("user-a")
+        return "partial"
+
+    orch._provider_chat = _hijack_provider  # type: ignore[method-assign]
+    result = await orch.execute(
+        job_id,
+        {
+            "user_id": "user-a",
+            "messages": [{"role": "user", "content": "hi"}],
+            "provider": {"provider_type": "openai", "config": {}},
+        },
+    )
+    assert result["content"] == "partial"
+    # Stale execute finally must not clear the newer reservation.
+    assert orch._active_generation_user_id == "user-a"
+
+@pytest.mark.asyncio
+async def test_router_stream_sets_generation_owner(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+
+    from forge.orchestrators.inference import InferenceOrchestrator
+
+    orchestrator = InferenceOrchestrator(tmp_path)
+
+    async def fake_router_stream(*_args, **_kwargs):
+        assert orchestrator._active_generation_user_id == "user-a"
+        yield "hello"
+
+    monkeypatch.setattr(
+        "forge.orchestrators.inference.get_settings",
+        lambda: SimpleNamespace(model_router_enabled=True),
+    )
+    monkeypatch.setattr(
+        "forge.services.model_router_client.router_stream_chat",
+        fake_router_stream,
+    )
+
+    tokens = [
+        token
+        async for token in orchestrator.stream_router(
+            {"user_id": "user-a", "messages": []}
+        )
+    ]
+
+    assert tokens == ["hello"]
+    assert orchestrator._active_generation_user_id is None
+
+@pytest.mark.asyncio
+async def test_cancel_generation_cancels_running_inference_job(monkeypatch, tmp_path):
+    import asyncio
+    from types import MethodType
+
+    from forge.orchestrators.base import JobStatus
+    from forge.orchestrators.inference import InferenceOrchestrator
+
+    orchestrator = InferenceOrchestrator(tmp_path)
+    job_id = orchestrator.create_job(user_id="user-a")
+    started = asyncio.Event()
+
+    async def execute(self, _job_id, _payload):
+        started.set()
+        await asyncio.Event().wait()
+        return {}
+
+    monkeypatch.setattr(orchestrator, "execute", MethodType(execute, orchestrator))
+    orchestrator.begin_generation_for_user("user-a")
+    await orchestrator.start(job_id, {"user_id": "user-a"})
+    await started.wait()
+
+    await orchestrator.cancel_generation_for_user("user-a")
+
+    job = orchestrator.get_job(job_id)
+    assert job is not None
+    assert job.status == JobStatus.CANCELLED
+    assert orchestrator._active_generation_user_id is None
+
+def test_stale_end_generation_does_not_clear_newer_reservation(tmp_path: Path):
+    orch = InferenceOrchestrator(tmp_path)
+    epoch1 = orch.begin_generation_for_user("user-a")
+    orch.end_generation_for_user("user-a", epoch=epoch1)
+    epoch2 = orch.begin_generation_for_user("user-a")
+    # Stale finally from the first stream must not clear the new reservation.
+    orch.end_generation_for_user("user-a", epoch=epoch1)
+    assert orch._active_generation_user_id == "user-a"
+    assert orch._active_generation_epoch == epoch2
+    orch.end_generation_for_user("user-a", epoch=epoch2)
+    assert orch._active_generation_user_id is None
+

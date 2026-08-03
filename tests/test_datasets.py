@@ -423,3 +423,9 @@ def test_ensure_eos_supervises_template_eos_when_mask_ignored_it():
     assert out_ids == ids
     assert out_labels[-1] == 99
     assert out_labels[0] == -100
+
+def test_format_sample_uses_code_column():
+    from seiso.training.datasets import DatasetFormat, format_sample
+
+    assert format_sample({"code": "print(1)"}, DatasetFormat.TEXT, None) == "print(1)"
+

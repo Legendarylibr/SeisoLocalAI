@@ -291,3 +291,24 @@ def test_jti_revocation_store_enforces_cap(monkeypatch):
         tr.revoke_jti(f"jti-{idx}", now + 3600 + idx)
     assert len(tr._revoked) <= 100
     tr.clear_revocations_for_tests()
+
+def test_csrf_empty_bearer_helper():
+    from starlette.requests import Request
+
+    from forge.security.csrf import validate_csrf
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/inference/threads",
+        "raw_path": b"/api/inference/threads",
+        "query_string": b"",
+        "headers": [(b"authorization", b"Bearer ")],
+        "client": ("127.0.0.1", 123),
+        "server": ("test", 80),
+    }
+    assert validate_csrf(Request(scope)) is False
+

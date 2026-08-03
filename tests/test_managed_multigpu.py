@@ -278,3 +278,17 @@ def test_managed_vllm_enable_lora_flag(monkeypatch):
     ):
         launch = mv.build_launch_command(model="org/model", tensor_parallel_size=2)
     assert "--enable-lora" in launch["command"]
+
+def test_managed_vllm_tp_respects_cuda_visible_devices(monkeypatch):
+    from seiso.inference import managed_vllm
+
+    monkeypatch.setattr(
+        managed_vllm, "resolve_vllm_command", lambda: ["python3", "-m", "vllm.entrypoints.openai.api_server"]
+    )
+    with pytest.raises(ValueError, match="CUDA_VISIBLE_DEVICES"):
+        managed_vllm.build_launch_command(
+            model="org/model",
+            tensor_parallel_size=8,
+            cuda_visible_devices="0,1",
+        )
+

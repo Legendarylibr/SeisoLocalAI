@@ -339,3 +339,62 @@ def test_attention_resolve_never_empty():
     }
     meta = attention_metadata()
     assert meta["attn_implementation"] == impl
+
+def test_restore_registry_keeps_modules_on_failure(monkeypatch):
+    from seiso.kernels import lifecycle as life
+
+    class Mod:
+        pass
+
+    m1, m2 = Mod(), Mod()
+    m1._seiso_orig_forward = lambda x: x  # type: ignore[attr-defined]
+    m2._seiso_orig_forward = lambda x: x  # type: ignore[attr-defined]
+    m1.forward = lambda x: 1  # type: ignore[attr-defined]
+    m2.forward = lambda x: 2  # type: ignore[attr-defined]
+
+    orig_clear = life._clear_patch_markers
+
+    def flaky(module: object) -> None:
+        if module is m2:
+            raise RuntimeError("restore boom")
+        orig_clear(module)
+
+    monkeypatch.setattr(life, "_clear_patch_markers", flaky)
+    life._PATCH_REGISTRY.clear()
+    life._PATCH_REGISTRY[42] = [m1, m2]
+    with pytest.raises(RuntimeError, match="restore boom"):
+        life._restore_registry_key(42)
+    assert life._PATCH_REGISTRY[42] == [m2]
+    life._PATCH_REGISTRY.clear()
+
+def test_patch_session_keeps_modules_on_restore_failure(monkeypatch):
+    from seiso.kernels.lifecycle import KernelPatchSession, _clear_patch_markers
+
+    class Mod:
+        pass
+
+    m1, m2 = Mod(), Mod()
+    m1._seiso_orig_forward = lambda x: x  # type: ignore[attr-defined]
+    m2._seiso_orig_forward = lambda x: x  # type: ignore[attr-defined]
+    m1.forward = lambda x: 1  # type: ignore[attr-defined]
+    m2.forward = lambda x: 2  # type: ignore[attr-defined]
+
+    orig_clear = _clear_patch_markers
+
+    def flaky(module: object) -> None:
+        if module is m1:
+            raise RuntimeError("session restore boom")
+        orig_clear(module)
+
+    session = KernelPatchSession()
+    session.record(m1)
+    session.record(m2)
+    monkeypatch.setattr("seiso.kernels.lifecycle._clear_patch_markers", flaky)
+    with pytest.raises(RuntimeError, match="session restore boom"):
+        session.restore()
+    # LIFO: m2 restored first; failure on m1 keeps m1 for retry.
+    assert session._modules == [m1]
+    monkeypatch.setattr("seiso.kernels.lifecycle._clear_patch_markers", orig_clear)
+    assert session.restore() == 1
+    assert session._modules == []
+
