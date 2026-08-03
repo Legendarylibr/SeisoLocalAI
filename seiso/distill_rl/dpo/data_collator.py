@@ -41,13 +41,14 @@ class DPODataCollator:
         apply_template = getattr(self.tokenizer, "apply_chat_template", None)
         if apply_template is None:
             return prompt
-        return apply_template(
+        formatted = apply_template(
             [{"role": "user", "content": prompt}],
             tokenize=False,
             add_generation_prompt=True,
         )
+        return str(formatted)
 
-    def _tokenize_pair(self, prompt: str, completion: str) -> dict[str, list[int]]:
+    def _tokenize_pair(self, prompt: str, completion: str) -> dict[str, Any]:
         """Tokenize ``prompt + completion`` jointly and build label mask.
 
         Joint encoding avoids BPE boundary artifacts from concatenating separately

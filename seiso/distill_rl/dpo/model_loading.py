@@ -145,6 +145,8 @@ def load_policy_and_reference(
     )
 
     use_peft = settings.use_lora or settings.use_qlora
+    policy_model: Any
+    reference_model: Any
     if use_peft:
         from peft import get_peft_model
 

@@ -35,9 +35,7 @@ def test_dpo_empty_completion_sentinel_opt_in():
 
     logits = torch.zeros(2, 4, 5)
     labels = torch.full((2, 4), -100)
-    logps = get_batch_logps(
-        logits, labels, average_log_prob=False, allow_empty_completions=True
-    )
+    logps = get_batch_logps(logits, labels, average_log_prob=False, allow_empty_completions=True)
     assert torch.all(logps == -1.0e2)
 
 
@@ -57,9 +55,7 @@ def test_dpo_collator_joint_tokenizes_prompt_completion():
 
     collator = DPODataCollator(tokenizer=_Tok(), max_prompt_length=32, max_length=64)
     encoded = collator._tokenize_pair("ab", "cd")
-    joint = _Tok()("abcd", add_special_tokens=True, truncation=True, max_length=64)[
-        "input_ids"
-    ]
+    joint = _Tok()("abcd", add_special_tokens=True, truncation=True, max_length=64)["input_ids"]
     assert encoded["input_ids"] == joint
     assert encoded["prompt_length"] > 0
     assert all(lab == -100 for lab in encoded["labels"][: encoded["prompt_length"]])
@@ -95,9 +91,7 @@ def test_kl_k3_masked_ignores_padding():
     log_ratio = torch.tensor([[1.0, 2.0], [3.0, 4.0]])
     mask = torch.tensor([[1.0, 0.0], [1.0, 0.0]])
     value = float(_kl_k3_from_log_ratio(log_ratio, torch, mask=mask).item())
-    expected = (
-        (math.exp(1.0) - 1.0 - 1.0) + (math.exp(3.0) - 3.0 - 1.0)
-    ) / 2.0
+    expected = ((math.exp(1.0) - 1.0 - 1.0) + (math.exp(3.0) - 3.0 - 1.0)) / 2.0
     assert value == pytest.approx(expected, rel=1e-5)
 
 
@@ -245,16 +239,56 @@ def test_auto_code_reward_promotes_to_binary_when_group_has_passer():
     )
     # No full passer yet → keep dense.
     dense_group = [
-        Rollout(None, None, None, None, None, 0.5, outcome_reward=0.5, proof_score=0.5, proof_passed=False),
-        Rollout(None, None, None, None, None, 0.0, outcome_reward=0.0, proof_score=0.0, proof_passed=False),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            0.5,
+            outcome_reward=0.5,
+            proof_score=0.5,
+            proof_passed=False,
+        ),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            0.0,
+            outcome_reward=0.0,
+            proof_score=0.0,
+            proof_passed=False,
+        ),
     ]
     _finalize_auto_code_rewards(dense_group, cfg)
     assert dense_group[0].outcome_reward == pytest.approx(0.5)
 
     # Full passer present → binary for the whole group.
     mixed = [
-        Rollout(None, None, None, None, None, 0.5, outcome_reward=0.5, proof_score=0.5, proof_passed=False),
-        Rollout(None, None, None, None, None, 1.0, outcome_reward=1.0, proof_score=1.0, proof_passed=True),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            0.5,
+            outcome_reward=0.5,
+            proof_score=0.5,
+            proof_passed=False,
+        ),
+        Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            1.0,
+            outcome_reward=1.0,
+            proof_score=1.0,
+            proof_passed=True,
+        ),
     ]
     _finalize_auto_code_rewards(mixed, cfg)
     assert mixed[0].outcome_reward == 0.0
@@ -414,9 +448,7 @@ def test_train_config_allows_preference_as_sft(tmp_path):
 
 def test_train_config_auto_probes_local_preference_jsonl(tmp_path):
     prefs = tmp_path / "prefs.jsonl"
-    prefs.write_text(
-        '{"prompt": "q", "chosen": "a", "rejected": "b"}\n', encoding="utf-8"
-    )
+    prefs.write_text('{"prompt": "q", "chosen": "a", "rejected": "b"}\n', encoding="utf-8")
     with pytest.raises(ValueError, match="Preference datasets"):
         TrainConfig.model_validate(
             {
@@ -430,9 +462,7 @@ def test_train_config_auto_probes_local_preference_jsonl(tmp_path):
 
 def test_train_config_auto_refuses_preference_with_slime(tmp_path):
     prefs = tmp_path / "prefs.jsonl"
-    prefs.write_text(
-        '{"prompt": "q", "chosen": "a", "rejected": "b"}\n', encoding="utf-8"
-    )
+    prefs.write_text('{"prompt": "q", "chosen": "a", "rejected": "b"}\n', encoding="utf-8")
     with pytest.raises(ValueError, match="incompatible with method=slime"):
         TrainConfig.model_validate(
             {
@@ -525,10 +555,7 @@ def test_train_config_slime_projection_defaults_per_token(tmp_path):
     slime = cfg.to_single_gpu_slime_config()
     assert slime.calculate_per_token_loss is True
     assert slime.outcome_reward_weight > 0
-    assert (
-        slime.format_reward_weight + slime.process_reward_weight
-        <= slime.outcome_reward_weight
-    )
+    assert slime.format_reward_weight + slime.process_reward_weight <= slime.outcome_reward_weight
 
 
 def test_train_config_slime_multi_epoch_applies_kl_coef(tmp_path, monkeypatch):
@@ -547,16 +574,12 @@ def test_train_config_slime_multi_epoch_applies_kl_coef(tmp_path, monkeypatch):
 
 
 def test_dpo_uses_sum_logps_by_default():
-    from seiso.distill_rl.dpo.config import DPOSettings
     from seiso.distill_rl.config import DistillRLConfig
+    from seiso.distill_rl.dpo.config import DPOSettings
 
     settings = DPOSettings()
     assert settings.average_log_prob is False
     assert DistillRLConfig.model_fields["dpo_average_log_prob"].default is False
-
-
-
-
 
 
 def test_slime_http_rollout_refuses_disabled_weight_sync(tmp_path, monkeypatch):
@@ -632,8 +655,6 @@ def test_verifier_correct_ugly_outranks_wrong_pretty():
     assert correct_ugly.reward > wrong_pretty.reward
     assert correct_ugly.passed is True
     assert wrong_pretty.passed is False
-
-
 
 
 def test_slime_refuses_field_reward_without_opt_in(tmp_path, monkeypatch):
@@ -780,8 +801,8 @@ def test_dpo_rejects_identical_chosen_rejected():
 
 
 def test_dpo_beta_must_be_positive():
-    from seiso.distill_rl.dpo.config import DPOSettings
     from seiso.distill_rl.config import DistillRLConfig
+    from seiso.distill_rl.dpo.config import DPOSettings
 
     with pytest.raises(ValueError, match="beta must be > 0"):
         DPOSettings(beta=0.0).validate()
@@ -799,7 +820,6 @@ def test_dpo_beta_must_be_positive():
                 "stages": ["dpo"],
             }
         )
-
 
 
 def test_clipped_policy_loss_respects_asymmetric_bounds():
@@ -835,12 +855,8 @@ def test_clipped_policy_loss_dual_clip_bounds_negative_advantage():
     old = torch.zeros(1)
     adv = torch.tensor([-1.0])
     mask = torch.ones(1)
-    with_dual = _clipped_policy_loss(
-        new, old, adv, mask, 0.2, torch, clip_ratio_c=3.0
-    )
-    without = _clipped_policy_loss(
-        new, old, adv, mask, 0.2, torch, clip_ratio_c=None
-    )
+    with_dual = _clipped_policy_loss(new, old, adv, mask, 0.2, torch, clip_ratio_c=3.0)
+    without = _clipped_policy_loss(new, old, adv, mask, 0.2, torch, clip_ratio_c=None)
     # With dual-clip objective ≥ c*A = -3 → loss ≤ 3
     assert float(with_dual.item()) == pytest.approx(3.0, rel=1e-5)
     # Without dual-clip, min(10*(-1), 1.2*(-1)) = -1.2 → loss = 1.2
@@ -935,18 +951,10 @@ def test_filter_ignores_truncated_zeros_for_outcome_spread(tmp_path):
     )
     # Two identical valid passers + two truncated zeros → old bug kept the group.
     rollouts = [
-        Rollout(
-            None, None, None, None, None, 1.0, status="stop", outcome_reward=1.0
-        ),
-        Rollout(
-            None, None, None, None, None, 1.0, status="stop", outcome_reward=1.0
-        ),
-        Rollout(
-            None, None, None, None, None, 0.0, status="length", outcome_reward=0.0
-        ),
-        Rollout(
-            None, None, None, None, None, 0.0, status="empty", outcome_reward=0.0
-        ),
+        Rollout(None, None, None, None, None, 1.0, status="stop", outcome_reward=1.0),
+        Rollout(None, None, None, None, None, 1.0, status="stop", outcome_reward=1.0),
+        Rollout(None, None, None, None, None, 0.0, status="length", outcome_reward=0.0),
+        Rollout(None, None, None, None, None, 0.0, status="empty", outcome_reward=0.0),
     ]
     kept, kept_groups, rejected = _filter_rollout_groups(rollouts, cfg)
     assert rejected == 1
@@ -954,9 +962,7 @@ def test_filter_ignores_truncated_zeros_for_outcome_spread(tmp_path):
     assert kept == []
 
     # Same shape but valid outcomes differ → keep.
-    rollouts[1] = Rollout(
-        None, None, None, None, None, 0.0, status="stop", outcome_reward=0.0
-    )
+    rollouts[1] = Rollout(None, None, None, None, None, 0.0, status="stop", outcome_reward=0.0)
     kept, kept_groups, rejected = _filter_rollout_groups(rollouts, cfg)
     assert rejected == 0
     assert kept_groups == {0}
@@ -1001,10 +1007,7 @@ def test_backprop_uses_no_sync_until_final_microbatch(tmp_path):
         policy_micro_batch_size=2,
         require_held_out_eval=False,
     )
-    rollouts = [
-        Rollout(None, None, None, None, None, float(i), advantage=0.1)
-        for i in range(4)
-    ]
+    rollouts = [Rollout(None, None, None, None, None, float(i), advantage=0.1) for i in range(4)]
     empty = {
         "loss": 0.0,
         "policy_loss": 0.0,

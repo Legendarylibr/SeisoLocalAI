@@ -20,8 +20,8 @@ from seiso.distill_rl.dpo.dpo_loss import (
     compute_dpo_loss,
     get_batch_logps,
 )
-from seiso.distill_rl.dpo.model_loading import load_policy_and_reference
 from seiso.distill_rl.dpo.json_utils import JsonlLogger, write_json
+from seiso.distill_rl.dpo.model_loading import load_policy_and_reference
 
 
 def _average_metrics(batch_metrics: list[DPOMetrics]) -> DPOMetrics:
@@ -73,9 +73,7 @@ class DPOTrainer:
 
         if not getattr(policy_model, "hf_device_map", None):
             policy_model = policy_model.to(self.device)
-        if reference_model is not None and not getattr(
-            reference_model, "hf_device_map", None
-        ):
+        if reference_model is not None and not getattr(reference_model, "hf_device_map", None):
             reference_model = reference_model.to(self.device)
 
         self.policy_model = policy_model
@@ -91,7 +89,7 @@ class DPOTrainer:
 
         log_dir = Path(settings.output_dir) / settings.run_name
         log_dir.mkdir(parents=True, exist_ok=True)
-        self.step_logger = JsonlLogger(log_dir / "dpo_steps.jsonl")
+        self.step_logger = JsonlLogger(str(log_dir / "dpo_steps.jsonl"))
 
         self.optimizer = self._build_optimizer()
         self.global_step = 0
@@ -152,9 +150,7 @@ class DPOTrainer:
                         labels,
                     )
             if self.reference_model is None:
-                raise RuntimeError(
-                    "reference_model is required when not using adapter disable."
-                )
+                raise RuntimeError("reference_model is required when not using adapter disable.")
             return self._forward_logps(
                 self.reference_model,
                 input_ids,
@@ -277,16 +273,14 @@ class DPOTrainer:
             if key not in examples[0]:
                 raise ValueError(f"Each preference example must include '{key}'.")
 
-        dataloader = DataLoader(
+        dataloader: Any = DataLoader(
             examples,
             batch_size=self.settings.per_device_train_batch_size,
             shuffle=shuffle,
             collate_fn=self.collator,
         )
 
-        steps_per_epoch = math.ceil(
-            len(dataloader) / self.settings.gradient_accumulation_steps
-        )
+        steps_per_epoch = math.ceil(len(dataloader) / self.settings.gradient_accumulation_steps)
         epoch_steps = steps_per_epoch * self.settings.num_epochs
         max_steps = self.settings.max_steps
         total_steps = (
@@ -337,9 +331,7 @@ class DPOTrainer:
                 # so the final step matches a full accumulation window mean.
                 remaining = micro_steps % self.settings.gradient_accumulation_steps
                 if remaining:
-                    scale = float(self.settings.gradient_accumulation_steps) / float(
-                        remaining
-                    )
+                    scale = float(self.settings.gradient_accumulation_steps) / float(remaining)
                     for param in self.policy_model.parameters():
                         if param.grad is not None:
                             param.grad.mul_(scale)
@@ -352,9 +344,7 @@ class DPOTrainer:
 
         self._save_checkpoint()
         summary_path = (
-            Path(self.settings.output_dir)
-            / self.settings.run_name
-            / "dpo_training_summary.json"
+            Path(self.settings.output_dir) / self.settings.run_name / "dpo_training_summary.json"
         )
         write_json(
             summary_path,
