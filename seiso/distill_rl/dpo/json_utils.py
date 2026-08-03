@@ -279,45 +279,6 @@ def write_text_file(path: str | Path, text: str) -> None:
     _write_text_atomically(path, _write)
 
 
-def load_jsonl(
-    path: str, *, require_integrity_chain: bool | None = None
-) -> list[dict[str, Any]]:
-    source = Path(path)
-    if not source.exists():
-        return []
-    enforce_local_read_limit(source, label="JSONL")
-    require = (
-        _jsonl_require_integrity_chain_enabled()
-        if require_integrity_chain is None
-        else bool(require_integrity_chain)
-    )
-    records: list[dict[str, Any]] = []
-    prev_integrity_hash = ""
-    with source.open("r", encoding="utf-8") as handle:
-        for i, line in enumerate(handle):
-            if i >= MAX_JSONL_LINES:
-                raise ValueError(
-                    f"JSONL exceeds local line limit ({MAX_JSONL_LINES}): {source}"
-                )
-            raw_len = len(line.encode("utf-8"))
-            if raw_len > MAX_JSONL_LINE_BYTES:
-                raise ValueError(
-                    f"JSONL line exceeds byte limit ({MAX_JSONL_LINE_BYTES}): line {i + 1} in {source}"
-                )
-            line = line.strip()
-            if line:
-                line_label = f"JSONL {source} line {i + 1}"
-                record = safe_json_loads(line, label=line_label)
-                prev_integrity_hash = _verify_jsonl_record_integrity(
-                    record,
-                    prev_hash=prev_integrity_hash,
-                    label=line_label,
-                    require=require,
-                )
-                records.append(record)
-    return records
-
-
 def read_json(path: str | Path, *, label: str = "JSON") -> Any:
     source = Path(path)
     enforce_local_read_limit(source, label=label)

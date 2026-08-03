@@ -27,7 +27,6 @@ from seiso.models.lora_targets import (
 )
 from seiso.research.provenance import apply_determinism
 from seiso.rl_verify import score_completion as verify_score_completion
-from seiso.rl_verify.extract import split_thinking_trace
 from seiso.slime.config import SingleGpuSlimeConfig
 from seiso.slime.distributed import (  # noqa: F401
     _balanced_rank_samples,
@@ -898,15 +897,6 @@ def _collect_rollouts(
     return _RolloutBatch(rollouts=rollouts, stats=filter_stats)
 
 
-def _format_rollout_prompt(prompt: str, config: SingleGpuSlimeConfig) -> str:
-    """Legacy prompt formatter (thinking open-tag only; no chat template)."""
-    if not config.require_thinking_trace:
-        return prompt
-    if "<think>" in prompt.lower():
-        return prompt
-    return f"{prompt.rstrip()}\n\n{config.thinking_instruction}\n<think>"
-
-
 def _score_completion(
     completion: str,
     sample: dict[str, Any],
@@ -1005,10 +995,6 @@ def _sync_verifier_records_with_rollouts(
         record["reward"] = float(rollout.reward)
         record["outcome_reward"] = float(rollout.outcome_reward)
         record["outcome_passed"] = bool(rollout.outcome_passed)
-
-
-def _split_thinking_trace(completion: str) -> tuple[str, str, bool]:
-    return split_thinking_trace(completion)
 
 
 def _process_reward(
