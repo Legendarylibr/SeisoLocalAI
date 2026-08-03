@@ -97,7 +97,7 @@ def require_multinode_mesh_agent(nnodes: int) -> None:
             "Multi-node training (distributed_num_nodes>1) is Buzz-agent/mesh-only. "
             "Set SEISO_ALLOW_MESH=1 and BUZZ_PRIVATE_KEY (valid nsec), "
             "or keep distributed_num_nodes=1 for local multi-GPU. "
-            "Not functional for real multi-node yet."
+            "Mesh is an opt-in secondary path (not the default Forge/CLI flow)."
         )
     try:
         require_buzz_nsec(feature="Multi-node training")
@@ -163,7 +163,7 @@ def agent_training_surface() -> dict[str, Any]:
             "buzz_agent_present": buzz_agent_present(),
             "nostr_signed_plans": True,
             "sig_alg": "bip340-schnorr",
-            "not_functional_yet": True,
+            "secondary_path": True,
         },
         "buzz_compatible": True,
     }

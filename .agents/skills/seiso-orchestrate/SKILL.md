@@ -27,8 +27,9 @@ agent identity.
 
 - Frontend must keep showing proper training settings — never strip the Train
   studio down to a stub when separating agent mesh.
-- Mesh is **not functional yet — do not use** for real multi-node until declared
-  ready. Self-hosted single-node remains free and does not need mesh flags.
+- Mesh is an **opt-in secondary path** (`SEISO_ALLOW_MESH=1` + Buzz nsec). Prefer
+  local single-node Forge/CLI first. Real multi-host still needs reachable
+  peers + GPUs; use `--dry-run` to materialize without launching.
 
 Query the surface from Forge: `GET /api/training/surface`.
 

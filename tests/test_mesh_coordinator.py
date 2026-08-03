@@ -19,6 +19,7 @@ def mesh_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("SEISO_AGENT", "1")
     monkeypatch.delenv("SEISO_MESH_TRUSTED_NPUBS", raising=False)
     monkeypatch.delenv("SEISO_MESH_TRUSTED_PUBKEYS", raising=False)
+    monkeypatch.delenv("SEISO_MESH_ALLOW_LOOPBACK", raising=False)
     return tmp_path / "data"
 
 
@@ -301,7 +302,7 @@ def test_load_plan_refuses_foreign_absolute_path(
 def test_build_plan_refuses_localhost_multinode(mesh_env: Path) -> None:
     from seiso.mesh.coordinator import build_plan
 
-    with pytest.raises(ValueError, match="reachable multi-host"):
+    with pytest.raises(ValueError, match="reachable multi-host|SEISO_MESH_ALLOW_LOOPBACK"):
         build_plan(
             channel="ch-1",
             job_type="finetune",
@@ -309,6 +310,182 @@ def test_build_plan_refuses_localhost_multinode(mesh_env: Path) -> None:
             master_addr="127.0.0.1",
             gpus_per_node=1,
         )
+
+
+def test_build_plan_allows_loopback_when_opted_in(
+    mesh_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SEISO_MESH_ALLOW_LOOPBACK", "1")
+    from seiso.mesh.coordinator import build_plan
+
+    out = build_plan(
+        channel="ch-1",
+        job_type="finetune",
+        nodes=2,
+        master_addr="127.0.0.1",
+        gpus_per_node=1,
+    )
+    assert out["plan"]["distributed_master_addr"] == "127.0.0.1"
+
+
+def test_import_claim_materialize_dry_run_e2e(
+    mesh_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    """Full secondary-path loop without requiring GPUs or real peers."""
+    monkeypatch.setenv("SEISO_MESH_ALLOW_LOOPBACK", "1")
+    from seiso.mesh.coordinator import (
+        build_plan,
+        import_signed_plan,
+        load_plan,
+        prepare_worker,
+    )
+    from seiso.training.config import TrainConfig
+
+    plan_out = build_plan(
+        channel="ch-e2e",
+        job_type="finetune",
+        nodes=2,
+        master_addr="127.0.0.1",
+        gpus_per_node=1,
+        preset="smoke",
+    )
+    event = plan_out["nostr_event"]
+    job_id = plan_out["plan"]["job_id"]
+
+    # Simulate peer: wipe local plan file, re-import from signed event only.
+    plan_path = Path(plan_out["plan_path"])
+    plan_path.unlink()
+    imported = import_signed_plan(event)
+    assert imported["plan"]["job_id"] == job_id
+    assert Path(imported["plan_path"]).is_file()
+    assert verify_event(imported["nostr_event"])
+
+    base = tmp_path / "base_train.yaml"
+    base.write_text(
+        "\n".join(
+            [
+                "model_id: hf-internal-testing/tiny-random-LlamaForCausalLM",
+                "dataset: ./data/sample.jsonl",
+                "output_dir: ./.test_outputs/mesh-e2e",
+                "method: lora",
+                "quant: 16bit",
+                "epochs: 1",
+                "batch_size: 1",
+                "max_seq_length: 128",
+                "lora_r: 4",
+                "lora_alpha: 8",
+                "gradient_checkpointing: false",
+                "eval_split_ratio: 0",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    prepared = prepare_worker(
+        job_id,
+        node_rank=1,
+        base_config=base,
+        dry_run=True,
+    )
+    assert prepared["rank"] == 1
+    assert prepared["config_path"]
+    assert prepared["launch"]["dry_run"] is True
+    assert prepared["launch"]["command"][-1] == prepared["config_path"]
+    assert "train" in prepared["launch"]["command"]
+
+    cfg = TrainConfig.from_yaml(Path(prepared["config_path"]))
+    assert cfg.distributed_num_nodes == 2
+    assert cfg.distributed_node_rank == 1
+    assert cfg.distributed_master_addr == "127.0.0.1"
+    assert cfg.distributed_nproc_per_node == 1
+    assert cfg.multi_gpu is True
+
+    reloaded = load_plan(job_id)
+    assert reloaded["ranks"][1]["status"] == "claimed"
+    assert reloaded["ranks"][1]["claimed_by"].startswith("npub1")
+    assert reloaded["ranks"][0]["status"] == "pending"
+
+
+def test_buzz_kind9_content_embed_roundtrip(mesh_env: Path) -> None:
+    """Buzz rejects --kind 31251; peers embed the signed event as kind-9 content."""
+    import json
+
+    from seiso.mesh.coordinator import build_plan, import_signed_plan
+    from seiso.mesh.nostr_bind import SEISO_MESH_PLAN_KIND
+
+    plan_out = build_plan(
+        channel="ch-buzz",
+        job_type="finetune",
+        nodes=2,
+        master_addr="10.0.0.9",
+        gpus_per_node=1,
+    )
+    event = plan_out["nostr_event"]
+    assert event["kind"] == SEISO_MESH_PLAN_KIND
+    assert verify_event(event)
+    # Simulate `jq -c .nostr_event | buzz messages send --content -`
+    kind9_content = json.dumps(event, separators=(",", ":"), ensure_ascii=False)
+    assert "token_fingerprint" not in kind9_content
+    assert "SEISO_MESH_TOKEN" not in kind9_content
+    peer_event = json.loads(kind9_content)
+    assert verify_event(peer_event)
+    Path(plan_out["plan_path"]).unlink()
+    imported = import_signed_plan(peer_event)
+    assert imported["plan"]["job_id"] == plan_out["plan"]["job_id"]
+    assert imported["nostr_event"]["id"] == event["id"]
+
+
+def test_claim_rank_refuses_foreign_claimer(
+    mesh_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SEISO_MESH_ALLOW_LOOPBACK", "1")
+    from seiso.mesh.coordinator import build_plan, claim_rank, load_plan
+
+    plan_out = build_plan(
+        channel="ch-1",
+        job_type="finetune",
+        nodes=2,
+        master_addr="127.0.0.1",
+        gpus_per_node=1,
+    )
+    job_id = plan_out["plan"]["job_id"]
+    claim_rank(plan_out["plan"], node_rank=0)
+
+    other = generate_keypair()
+    monkeypatch.setenv("BUZZ_PRIVATE_KEY", other.nsec)
+    with pytest.raises(RuntimeError, match="already claimed"):
+        claim_rank(load_plan(job_id), node_rank=0)
+
+
+def test_import_signed_plan_refuses_bad_kind(mesh_env: Path) -> None:
+    from seiso.mesh.coordinator import build_plan, import_signed_plan
+
+    plan_out = build_plan(
+        channel="ch-1",
+        job_type="finetune",
+        nodes=2,
+        master_addr="10.0.0.2",
+        gpus_per_node=1,
+    )
+    event = dict(plan_out["nostr_event"])
+    event["kind"] = 1
+    with pytest.raises(RuntimeError, match="expected kind|signature"):
+        import_signed_plan(event)
+
+
+def test_prepare_worker_launch_requires_base_config(mesh_env: Path) -> None:
+    from seiso.mesh.coordinator import build_plan, prepare_worker
+
+    plan_out = build_plan(
+        channel="ch-1",
+        job_type="finetune",
+        nodes=2,
+        master_addr="10.0.0.2",
+        gpus_per_node=1,
+    )
+    with pytest.raises(ValueError, match="--base-config"):
+        prepare_worker(plan_out["plan"]["job_id"], node_rank=0, launch=True)
 
 
 def json_dumps(obj: object) -> str:

@@ -344,9 +344,10 @@ Default protocol fee is 5% (`SEISO_PROTOCOL_FEE_BPS=500`) added on top of comput
 Failed/cancelled jobs refund escrow to the prepaid session balance (not Lightning).
 See [pay/marketplace.md](pay/marketplace.md).
 
-## `seiso mesh` (experimental)
+## `seiso mesh` (experimental secondary)
 
-> **Not functional yet — do not use.** Experimental scaffolding — do not rely on it for real multi-node jobs yet.
+> **Secondary / opt-in.** Local single-node Forge/CLI stays primary. Mesh is
+> Buzz-agent-only multi-node coordination — not available from the Forge UI.
 
 Buzz-**agent**-only multi-node / shared training. Opt-in (`SEISO_ALLOW_MESH=1` +
 valid `BUZZ_PRIVATE_KEY` nsec); plans are **NIP-01 / BIP-340** signed. **No**
@@ -362,12 +363,15 @@ export SEISO_ALLOW_MESH=1
 export SEISO_MESH_TOKEN=…   # ≥16 chars; out-of-band; never post to Buzz
 export BUZZ_PRIVATE_KEY=nsec1…   # must be a valid Nostr secret (signing key)
 # optional: export SEISO_MESH_TRUSTED_NPUBS=npub1planner…
+# optional single-host smoke: export SEISO_MESH_ALLOW_LOOPBACK=1
 seiso mesh announce --channel "$CHANNEL" --gpus 2 >announce.json
 jq -c .nostr_event announce.json | buzz messages send --channel "$CHANNEL" --content -
 seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2 --master-addr 10.0.0.1 --gpus-per-node 2 >plan.json
 jq -c .nostr_event plan.json | buzz messages send --channel "$CHANNEL" --content -
-seiso mesh worker --plan "$JOB_ID" --rank 0 >worker.json  # --rank required; verifies Nostr sig
-jq -c .nostr_event worker.json | buzz messages send --channel "$CHANNEL" --content -
+# peers:
+seiso mesh import-plan --event plan_event.json
+seiso mesh worker --plan "$JOB_ID" --rank 0 -c configs/smoke_train_gpu.yaml --dry-run
+seiso mesh worker --plan "$JOB_ID" --rank 1 -c configs/smoke_train_gpu.yaml --launch
 ```
 
 ## `seiso agent` (Buzz-facing signed status)

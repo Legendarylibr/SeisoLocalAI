@@ -328,12 +328,14 @@ Full guide: [pay/marketplace.md](pay/marketplace.md).
 
 ## Opt-in Buzz mesh
 
-> **Not functional yet — do not use.** Experimental scaffolding only.
+> Secondary / opt-in Buzz-agent path. Local single-node training stays primary.
 
 | Symptom | Check |
 |---------|--------|
-| `seiso mesh` refuses | `SEISO_ALLOW_MESH=1` and a shared `SEISO_MESH_TOKEN` (out-of-band — never post to Buzz) |
-| Peers don’t join | Same token + channel; master addr reachable; plan `world_size` / ranks match |
+| `seiso mesh` refuses | `SEISO_ALLOW_MESH=1`, `BUZZ_PRIVATE_KEY` (nsec), and shared `SEISO_MESH_TOKEN` (≥16 chars; never post to Buzz) |
+| Loopback master refused | Real multi-host needs a reachable addr; for single-host smoke only set `SEISO_MESH_ALLOW_LOOPBACK=1` |
+| Peers don’t join | Import signed plan (`seiso mesh import-plan`); same token + channel; master addr reachable; ranks claimed with `--rank` |
+| Worker only prints overlay | Pass `--base-config` to materialize; `--dry-run` / `--launch` to preview or start train |
 | Confused with marketplace | Mesh has **no** protocol fee; paid remote compute is [pay/marketplace.md](pay/marketplace.md) |
 
 Full guide: [training/mesh.md](training/mesh.md).

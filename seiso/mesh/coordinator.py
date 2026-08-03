@@ -1,9 +1,10 @@
 """Mesh announce / plan / worker helpers (Buzz is the control plane).
 
-Not functional yet — experimental scaffolding. Requires SEISO_ALLOW_MESH=1 and
+Experimental **secondary** multi-node path. Requires SEISO_ALLOW_MESH=1 and
 a valid Buzz agent ``BUZZ_PRIVATE_KEY`` nsec. Plans/announces/heartbeats are
 NIP-01 events signed with BIP-340 Schnorr. Peers also share an out-of-band
-``SEISO_MESH_TOKEN`` (HMAC-bound per job+pubkey). Forge UI cannot start mesh.
+``SEISO_MESH_TOKEN`` (HMAC-bound per job+pubkey). Forge UI cannot start mesh;
+local single-node training stays the primary path.
 
 **Relay only with signing:** channel/relay authority is the signed
 ``nostr_event``. Unsigned receipts are local pointers. Seiso does not NIP-98
@@ -15,16 +16,20 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import os
 import socket
 import time
 import uuid
 from pathlib import Path
 from typing import Any, cast
 
+import yaml
+
 from seiso.agent.nostr_identity import require_buzz_nsec
 from seiso.agent.receipts import agent_receipt, channel_safe_plan_view
-from seiso.mesh.flags import mesh_token, require_mesh_allowed
+from seiso.mesh.flags import mesh_allow_loopback, mesh_token, require_mesh_allowed
 from seiso.mesh.nostr_bind import (
+    SEISO_MESH_PLAN_KIND,
     receipt_nostr_fields,
     relay_policy_note,
     relay_signed_event,
@@ -33,6 +38,8 @@ from seiso.mesh.nostr_bind import (
     sign_mesh_plan,
     verify_mesh_plan_nostr,
 )
+from seiso.research.nostr.events import verify_event
+from seiso.research.nostr.keys import npub_from_hex
 from seiso.security import SecurityError, resolve_data_dir, safe_join
 
 # Weak shared secrets are dictionary-attackable if fingerprints ever leak.
@@ -172,10 +179,15 @@ def build_plan(
             "distributed_nproc_per_node (heterogeneous defaults disagree on world size)"
         )
     token = _require_strong_mesh_token(mesh_token())
-    if master_addr.strip() in {"127.0.0.1", "localhost"} and nodes >= 2:
+    if (
+        master_addr.strip() in {"127.0.0.1", "localhost"}
+        and nodes >= 2
+        and not mesh_allow_loopback()
+    ):
         raise ValueError(
             "distributed_master_addr must be a reachable multi-host address when "
-            "nodes>=2 (refusing 127.0.0.1/localhost)"
+            "nodes>=2 (refusing 127.0.0.1/localhost). For single-host smoke only, "
+            "set SEISO_MESH_ALLOW_LOOPBACK=1."
         )
     job_id = uuid.uuid4().hex
     jt = job_type.strip().lower()
@@ -236,6 +248,21 @@ def build_plan(
     }
 
 
+def _plan_path(job_id: str, data_dir: Path | None = None) -> Path:
+    return safe_join(mesh_root(data_dir), "plans", f"{job_id}.json")
+
+
+def save_plan(plan: dict[str, Any], data_dir: Path | None = None) -> Path:
+    """Persist a verified plan under the sandboxed ``mesh/plans/`` directory."""
+    job_id = str(plan.get("job_id") or "").strip()
+    if not job_id:
+        raise ValueError("Plan is missing job_id")
+    path = _plan_path(job_id, data_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps(plan, indent=2) + "\n", encoding="utf-8")
+    return path
+
+
 def load_plan(plan_path: str | Path, data_dir: Path | None = None) -> dict[str, Any]:
     """Load a plan only from the sandboxed ``mesh/plans/`` directory.
 
@@ -257,6 +284,306 @@ def load_plan(plan_path: str | Path, data_dir: Path | None = None) -> dict[str, 
     if not path.is_file():
         raise FileNotFoundError(plan_path)
     return cast(dict[str, Any], json.loads(path.read_text(encoding="utf-8")))
+
+
+def import_signed_plan(
+    event: dict[str, Any],
+    *,
+    data_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Import a relayed NIP-01 mesh plan event into the local sandbox.
+
+    Reconstructs local-only ``token_fingerprint`` and pending ranks from the
+    signed body + ``SEISO_MESH_TOKEN``. Peers never receive the HMAC over Buzz.
+    """
+    require_mesh_allowed()
+    if not isinstance(event, dict) or not verify_event(event):
+        raise RuntimeError("Refusing import: mesh plan Nostr event signature is invalid")
+    if int(event.get("kind") or 0) != SEISO_MESH_PLAN_KIND:
+        raise RuntimeError(
+            f"Refusing import: expected kind {SEISO_MESH_PLAN_KIND}, "
+            f"got {event.get('kind')}"
+        )
+    try:
+        body = json.loads(str(event.get("content") or ""))
+    except json.JSONDecodeError as exc:
+        raise RuntimeError("Mesh plan Nostr event content is not JSON") from exc
+    if not isinstance(body, dict):
+        raise RuntimeError("Mesh plan Nostr event content must be a JSON object")
+    job_id = str(body.get("job_id") or "").strip()
+    if not job_id:
+        raise RuntimeError("Imported plan is missing job_id")
+    pubkey = str(event.get("pubkey") or "").strip().lower()
+    if not pubkey:
+        raise RuntimeError("Imported plan event is missing pubkey")
+    token = _require_strong_mesh_token(mesh_token())
+    nnodes = int(body.get("distributed_num_nodes") or 0)
+    if nnodes < 2:
+        raise ValueError("Imported mesh plan must have distributed_num_nodes>=2")
+    master_addr = str(body.get("distributed_master_addr") or "").strip()
+    if master_addr in {"127.0.0.1", "localhost"} and not mesh_allow_loopback():
+        raise ValueError(
+            "Imported plan uses loopback master_addr; set "
+            "SEISO_MESH_ALLOW_LOOPBACK=1 for single-host smoke only"
+        )
+    plan: dict[str, Any] = {
+        **body,
+        "token_fingerprint": _token_fingerprint(
+            token, job_id=job_id, pubkey_hex=pubkey
+        ),
+        "created_at": float(event.get("created_at") or time.time()),
+        "ranks": [
+            {
+                "rank": i,
+                "distributed_node_rank": i,
+                "status": "pending",
+            }
+            for i in range(nnodes)
+        ],
+        "nostr": {
+            "alg": "bip340-schnorr",
+            "nip01": True,
+            "kind": SEISO_MESH_PLAN_KIND,
+            "npub": npub_from_hex(pubkey),
+            "pubkey": pubkey,
+            "event_id": str(event.get("id") or ""),
+            "event": dict(event),
+        },
+    }
+    verify_mesh_plan_nostr(plan)
+    _verify_plan_bindings(plan)
+    path = save_plan(plan, data_dir)
+    nostr = plan["nostr"]
+    receipt = agent_receipt(
+        role="import",
+        status="imported",
+        job_id=job_id,
+        type=plan.get("job_type"),
+        world_size=nnodes,
+        world_size_nodes=nnodes,
+        **receipt_nostr_fields(nostr),
+    )
+    return {
+        "plan": plan,
+        "plan_public": channel_safe_plan_view(plan),
+        "plan_path": str(path),
+        "buzz_receipt": receipt,
+        "agent_receipt": receipt,
+        "nostr_event": relay_signed_event(nostr),
+        "note": relay_policy_note(),
+    }
+
+
+def claim_rank(
+    plan: dict[str, Any],
+    *,
+    node_rank: int,
+    data_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Claim a plan rank locally (idempotent for the same worker npub)."""
+    require_mesh_allowed()
+    _verify_plan_bindings(plan)
+    pair = require_buzz_nsec(feature="Mesh claim rank")
+    nnodes = int(plan["distributed_num_nodes"])
+    if node_rank < 0 or node_rank >= nnodes:
+        raise ValueError("node_rank out of range")
+    ranks = plan.get("ranks")
+    if not isinstance(ranks, list) or len(ranks) != nnodes:
+        plan["ranks"] = [
+            {"rank": i, "distributed_node_rank": i, "status": "pending"}
+            for i in range(nnodes)
+        ]
+        ranks = plan["ranks"]
+    slot = ranks[node_rank]
+    if not isinstance(slot, dict):
+        raise RuntimeError(f"Plan rank slot {node_rank} is corrupt")
+    claimed_by = str(slot.get("claimed_by") or "").strip()
+    if claimed_by and claimed_by != pair.npub:
+        raise RuntimeError(
+            f"Rank {node_rank} already claimed by {claimed_by} "
+            f"(this worker is {pair.npub})"
+        )
+    slot["rank"] = node_rank
+    slot["distributed_node_rank"] = node_rank
+    slot["status"] = "claimed"
+    slot["claimed_by"] = pair.npub
+    slot["claimed_at"] = time.time()
+    plan_path = save_plan(plan, data_dir)
+    heartbeat = buzz_heartbeat(plan, node_rank=node_rank, status="claimed")
+    return {
+        "plan": plan,
+        "plan_path": str(plan_path),
+        "rank": node_rank,
+        "claimed_by": pair.npub,
+        **heartbeat,
+    }
+
+
+def materialize_worker_config(
+    plan: dict[str, Any],
+    *,
+    node_rank: int,
+    base_config: str | Path,
+    data_dir: Path | None = None,
+) -> dict[str, Any]:
+    """Merge plan overlay into a base train YAML and write a sandboxed worker config."""
+    require_mesh_allowed()
+    _verify_plan_bindings(plan)
+    nnodes = int(plan["distributed_num_nodes"])
+    if node_rank < 0 or node_rank >= nnodes:
+        raise ValueError("node_rank out of range")
+    base_path = Path(base_config)
+    if not base_path.is_file():
+        raise FileNotFoundError(f"Base train config not found: {base_path}")
+    raw = yaml.safe_load(base_path.read_text(encoding="utf-8")) or {}
+    if not isinstance(raw, dict):
+        raise ValueError("Base train config must be a YAML mapping")
+    overlay = worker_train_config_overlay(plan, node_rank=node_rank)
+    merged = {**raw, **overlay}
+    # Validate against TrainConfig so bad overlays fail before launch.
+    from seiso.training.config import TrainConfig
+
+    cfg = TrainConfig.model_validate(merged)
+    job_id = str(plan["job_id"])
+    out_dir = safe_join(mesh_root(data_dir), "plans", job_id)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    out_path = safe_join(out_dir, f"rank-{node_rank}-train.yaml")
+    dumped = cfg.model_dump(mode="json")
+    out_path.write_text(
+        yaml.safe_dump(dumped, default_flow_style=False, sort_keys=False),
+        encoding="utf-8",
+    )
+    return {
+        "config_path": str(out_path),
+        "overlay": overlay,
+        "env": worker_env(plan, node_rank=node_rank),
+        "job_id": job_id,
+        "rank": node_rank,
+    }
+
+
+def worker_launch_command(config_path: str | Path) -> list[str]:
+    """Build the operator-facing ``seiso train`` command for a worker config."""
+    import shutil
+
+    resolved = str(Path(config_path).resolve())
+    seiso_bin = shutil.which("seiso") or "seiso"
+    return [seiso_bin, "train", "--config", resolved]
+
+
+def launch_worker_train(
+    config_path: str | Path,
+    *,
+    dry_run: bool = False,
+    env: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Optionally launch ``seiso train`` for a materialized mesh worker config.
+
+    ``dry_run=True`` returns the command without executing (CI / CPU smoke).
+    Real multi-host jobs still need GPUs + reachable ``master_addr`` peers.
+    """
+    require_mesh_allowed()
+    path = Path(config_path)
+    if not path.is_file():
+        raise FileNotFoundError(config_path)
+    cmd = worker_launch_command(path)
+    result: dict[str, Any] = {
+        "command": cmd,
+        "config_path": str(path),
+        "dry_run": dry_run,
+    }
+    if dry_run:
+        result["status"] = "dry_run"
+        return result
+
+    # Apply mesh worker env for the in-process train invocation.
+    previous: dict[str, str | None] = {}
+    updates = dict(env or {})
+    updates.setdefault("SEISO_AGENT", "1")
+    updates.setdefault("SEISO_TRAINING_SURFACE", "agent")
+    for key, value in updates.items():
+        previous[key] = os.environ.get(key)
+        os.environ[key] = value
+    try:
+        from seiso_cli.main import app as seiso_app
+
+        exit_code = seiso_app(
+            args=["train", "--config", str(path.resolve())],
+            standalone_mode=False,
+        )
+        code = int(exit_code or 0)
+    except SystemExit as exc:
+        code = int(exc.code or 0) if not isinstance(exc.code, str) else 1
+    finally:
+        for key, old in previous.items():
+            if old is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = old
+
+    result["returncode"] = code
+    result["status"] = "ok" if code == 0 else "failed"
+    if code != 0:
+        raise RuntimeError(
+            f"Mesh worker train failed (exit {code}): {' '.join(cmd)}"
+        )
+    return result
+
+
+def prepare_worker(
+    plan_ref: str | Path,
+    *,
+    node_rank: int,
+    base_config: str | Path | None = None,
+    launch: bool = False,
+    dry_run: bool = False,
+    data_dir: Path | None = None,
+) -> dict[str, Any]:
+    """E2E worker path: verify plan → claim rank → materialize → optional launch."""
+    require_mesh_allowed()
+    plan = load_plan(plan_ref, data_dir)
+    claim = claim_rank(plan, node_rank=node_rank, data_dir=data_dir)
+    plan = claim["plan"]
+    out: dict[str, Any] = {
+        "job_id": plan.get("job_id"),
+        "rank": node_rank,
+        "claimed_by": claim.get("claimed_by"),
+        "env": worker_env(plan, node_rank=node_rank),
+        "train_config_overlay": worker_train_config_overlay(plan, node_rank=node_rank),
+        "buzz_receipt": claim["buzz_receipt"],
+        "agent_receipt": claim["agent_receipt"],
+        "nostr_event": claim["nostr_event"],
+        "note": claim["note"],
+        "surface": "agent",
+        "plan_path": claim.get("plan_path"),
+    }
+    if base_config is not None:
+        materialized = materialize_worker_config(
+            plan,
+            node_rank=node_rank,
+            base_config=base_config,
+            data_dir=data_dir,
+        )
+        out["config_path"] = materialized["config_path"]
+        out["overlay"] = materialized["overlay"]
+        if launch or dry_run:
+            launch_out = launch_worker_train(
+                materialized["config_path"],
+                dry_run=dry_run or not launch,
+                env=materialized["env"],
+            )
+            out["launch"] = launch_out
+            status = "launched" if launch and not dry_run else "ready"
+            hb = buzz_heartbeat(plan, node_rank=node_rank, status=status)
+            out["buzz_receipt"] = hb["buzz_receipt"]
+            out["agent_receipt"] = hb["agent_receipt"]
+            out["nostr_event"] = hb["nostr_event"]
+    elif launch:
+        raise ValueError(
+            "mesh worker --launch requires --base-config so a train YAML can be "
+            "materialized from the plan overlay"
+        )
+    return out
 
 
 def worker_env(plan: dict[str, Any], *, node_rank: int) -> dict[str, str]:

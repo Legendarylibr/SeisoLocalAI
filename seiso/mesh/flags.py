@@ -28,3 +28,8 @@ def require_mesh_allowed() -> None:
 
 def mesh_token() -> str:
     return (os.environ.get("SEISO_MESH_TOKEN") or "").strip()
+
+
+def mesh_allow_loopback() -> bool:
+    """Opt-in loopback master for single-host mesh smoke (never the default)."""
+    return _truthy(os.environ.get("SEISO_MESH_ALLOW_LOOPBACK"))

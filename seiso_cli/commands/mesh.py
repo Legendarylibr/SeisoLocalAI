@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import json
+import sys
+from pathlib import Path
 from typing import Annotated, Any
 
 import typer
@@ -12,9 +14,9 @@ from seiso_cli.console import console
 mesh_app = typer.Typer(
     name="mesh",
     help=(
-        "Experimental Buzz-agent multi-node mesh (opt-in). "
+        "Experimental Buzz-agent multi-node mesh (opt-in secondary path). "
         "Requires SEISO_ALLOW_MESH=1 and BUZZ_PRIVATE_KEY. "
-        "Not available from the Forge UI. Not functional for real multi-node yet."
+        "Not available from the Forge UI. Local single-node training stays primary."
     ),
     no_args_is_help=True,
 )
@@ -22,6 +24,26 @@ mesh_app = typer.Typer(
 
 def _print_json(data: Any) -> None:
     console.print_json(json.dumps(data, default=str))
+
+
+def _load_event_json(raw: str) -> dict[str, Any]:
+    text = raw.strip()
+    if text == "-":
+        text = sys.stdin.read()
+    path = Path(text)
+    if path.is_file():
+        text = path.read_text(encoding="utf-8")
+    try:
+        data = json.loads(text)
+    except json.JSONDecodeError as exc:
+        raise typer.BadParameter(f"invalid JSON event: {exc}") from exc
+    if not isinstance(data, dict):
+        raise typer.BadParameter("event must be a JSON object")
+    # Allow wrapping { "nostr_event": {...} } from prior CLI output.
+    inner = data.get("nostr_event")
+    if isinstance(inner, dict) and "sig" in inner:
+        return inner
+    return data
 
 
 @mesh_app.command("announce")
@@ -92,6 +114,39 @@ def mesh_plan(
     _print_json(safe)
 
 
+@mesh_app.command("import-plan")
+def mesh_import_plan(
+    event: Annotated[
+        str,
+        typer.Option(
+            "--event",
+            help="NIP-01 plan event JSON, path, or '-' for stdin",
+        ),
+    ],
+) -> None:
+    """Import a relayed signed plan event into the local mesh/plans sandbox."""
+    from seiso.mesh.coordinator import import_signed_plan
+    from seiso.mesh.flags import require_mesh_allowed
+
+    require_mesh_allowed()
+    try:
+        ev = _load_event_json(event)
+        out = import_signed_plan(ev)
+    except Exception as exc:
+        console.print(f"[red]{exc}[/]")
+        raise typer.Exit(1) from exc
+    safe = {
+        "plan_public": out.get("plan_public"),
+        "plan_path": out.get("plan_path"),
+        "buzz_receipt": out.get("buzz_receipt"),
+        "agent_receipt": out.get("agent_receipt"),
+        "nostr_event": out.get("nostr_event"),
+        "note": out.get("note"),
+        "job_id": (out.get("plan") or {}).get("job_id"),
+    }
+    _print_json(safe)
+
+
 @mesh_app.command("worker")
 def mesh_worker(
     plan: Annotated[str, typer.Option(help="Plan job_id (sandboxed under mesh/plans/)")],
@@ -105,44 +160,75 @@ def mesh_worker(
             ),
         ),
     ],
-    print_env: Annotated[bool, typer.Option("--print-env", help="Print env/config only")] = True,
+    base_config: Annotated[
+        str | None,
+        typer.Option(
+            "--base-config",
+            "-c",
+            help="Base train YAML merged with the plan overlay",
+        ),
+    ] = None,
+    launch: Annotated[
+        bool,
+        typer.Option(
+            "--launch/--no-launch",
+            help="After materialize, run seiso train on the worker config",
+        ),
+    ] = False,
+    dry_run: Annotated[
+        bool,
+        typer.Option(
+            "--dry-run",
+            help="Materialize + print launch command without training",
+        ),
+    ] = False,
+    print_env: Annotated[
+        bool,
+        typer.Option(
+            "--print-env/--no-print-env",
+            help="Include env/overlay in JSON (default on)",
+        ),
+    ] = True,
 ) -> None:
-    """Prepare worker env for Accelerate multi-node (does not auto-launch GPU job)."""
-    from seiso.mesh.coordinator import (
-        buzz_heartbeat,
-        load_plan,
-        worker_env,
-        worker_train_config_overlay,
-    )
+    """Claim rank, materialize train YAML, optionally launch Accelerate train."""
+    from seiso.mesh.coordinator import prepare_worker
     from seiso.mesh.flags import require_mesh_allowed
 
     require_mesh_allowed()
     try:
-        p = load_plan(plan)
-        env = worker_env(p, node_rank=rank)
-        overlay = worker_train_config_overlay(p, node_rank=rank)
-        heartbeat = buzz_heartbeat(p, node_rank=rank, status="joining")
+        out = prepare_worker(
+            plan,
+            node_rank=rank,
+            base_config=base_config,
+            launch=launch,
+            dry_run=dry_run,
+        )
     except Exception as exc:
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
-    out = {
-        "env": env,
-        "train_config_overlay": overlay,
-        "buzz_receipt": heartbeat["buzz_receipt"],
-        "agent_receipt": heartbeat["agent_receipt"],
-        "nostr_event": heartbeat["nostr_event"],
-        "note": heartbeat["note"],
-        "surface": "agent",
-        "next": (
-            "Apply train_config_overlay to your train YAML / Accelerate launch "
-            "(Seiso honors the overlay, not env-only NNODES). "
-            "Relay only the top-level signed nostr_event: "
-            "`jq -c .nostr_event <this.json> | buzz messages send --channel $CHANNEL --content -` "
-            "(Buzz kind-9 embed; do not --kind 31251). "
-            "Unsigned receipts are local pointers, not channel authority. "
-            "Mesh does not charge protocol fees. Not functional for real multi-node yet."
-        ),
-    }
+    if not print_env:
+        out.pop("env", None)
+        out.pop("train_config_overlay", None)
+    next_hint = (
+        "Relay only the top-level signed nostr_event: "
+        "`jq -c .nostr_event <this.json> | buzz messages send --channel $CHANNEL --content -` "
+        "(Buzz kind-9 embed; do not --kind 31251). "
+        "Unsigned receipts are local pointers, not channel authority. "
+        "Mesh does not charge protocol fees."
+    )
+    if out.get("config_path") and not (launch or dry_run):
+        next_hint = (
+            f"Materialized {out['config_path']}. "
+            "Re-run with --launch to start training, or "
+            f"`seiso train --config {out['config_path']}`. " + next_hint
+        )
+    elif not out.get("config_path"):
+        next_hint = (
+            "Pass --base-config path/to/train.yaml to materialize a worker "
+            "config (and --launch / --dry-run to start or preview train). "
+            + next_hint
+        )
+    out["next"] = next_hint
     _print_json(out)
 
 
