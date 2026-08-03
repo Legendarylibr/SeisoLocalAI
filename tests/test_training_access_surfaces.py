@@ -40,6 +40,65 @@ def test_frontend_surface_exposes_full_training_config(
     assert surface["mesh"]["available_on_this_surface"] is False
 
 
+def test_desktop_local_training_needs_neither_buzz_nor_mesh(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Desktop Forge / plain ``seiso train`` must work with Buzz+mesh completely unset.
+
+    Mesh is only for Buzz-room agent multi-node — never a prerequisite for local runs.
+    """
+    for key in (
+        "SEISO_ALLOW_MESH",
+        "SEISO_MESH_TOKEN",
+        "SEISO_MESH_ALLOW_LOOPBACK",
+        "BUZZ_PRIVATE_KEY",
+        "BUZZ_AUTH_TAG",
+        "SEISO_AGENT",
+        "SEISO_TRAINING_SURFACE",
+    ):
+        monkeypatch.delenv(key, raising=False)
+
+    assert buzz_agent_present() is False
+    from seiso.mesh.flags import mesh_allowed, require_mesh_allowed
+
+    assert mesh_allowed() is False
+    with pytest.raises(RuntimeError, match="SEISO_ALLOW_MESH"):
+        require_mesh_allowed()
+
+    surface = frontend_training_surface()
+    assert surface["mesh"]["available_on_this_surface"] is False
+    assert surface["mesh"]["buzz_agent_present"] is False
+    assert resolve_training_surface() == TrainingSurface.FRONTEND
+
+    # Local single-node (including multi-GPU DDP nnodes=1) stays open.
+    assert_surface_distributed_config(
+        FRONTEND_SURFACE,
+        {"distributed_num_nodes": 1, "multi_gpu": True},
+    )
+
+    from seiso.training.config import TrainConfig
+    from seiso.training.multi_gpu import detect_training_layout, resolve_distributed_plan
+
+    cfg = TrainConfig.from_yaml(Path("configs/smoke_train_cpu.yaml"))
+    assert int(cfg.distributed_num_nodes) == 1
+    plan = resolve_distributed_plan(cfg, detect_training_layout())
+    assert plan.nnodes == 1
+
+    # Mesh CLI helpers stay fail-closed — desktop never needs them.
+    from seiso.mesh.coordinator import announce, build_plan
+
+    with pytest.raises(RuntimeError, match="SEISO_ALLOW_MESH"):
+        announce(channel="desktop", gpus=1)
+    with pytest.raises(RuntimeError, match="SEISO_ALLOW_MESH"):
+        build_plan(
+            channel="desktop",
+            job_type="finetune",
+            nodes=2,
+            master_addr="10.0.0.1",
+            gpus_per_node=1,
+        )
+
+
 def test_frontend_refuses_multinode_config() -> None:
     with pytest.raises(ValueError, match="Buzz-agent/mesh-only"):
         assert_surface_distributed_config(
