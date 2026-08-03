@@ -92,6 +92,7 @@ def test_launch_worker_command_includes_multinode_args(monkeypatch: pytest.Monke
 
     monkeypatch.setenv("SEISO_ALLOW_MESH", "1")
     monkeypatch.setenv("BUZZ_PRIVATE_KEY", generate_keypair().nsec)
+    monkeypatch.setenv("SEISO_MESH_JOB_ID", "job-test-multinode")
     cfg = TrainConfig(
         model_id="m",
         dataset="/tmp/data.jsonl",
@@ -116,6 +117,33 @@ def test_launch_worker_command_includes_multinode_args(monkeypatch: pytest.Monke
     assert "--machine_rank=1" in cmd
     assert "--main_process_ip=10.0.0.2" in cmd
     assert "--main_process_port=29555" in cmd
+
+
+def test_launch_worker_command_refuses_multinode_without_mesh_job(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    from seiso.research.nostr.keys import generate_keypair
+
+    monkeypatch.setenv("SEISO_ALLOW_MESH", "1")
+    monkeypatch.setenv("BUZZ_PRIVATE_KEY", generate_keypair().nsec)
+    monkeypatch.delenv("SEISO_MESH_JOB_ID", raising=False)
+    cfg = TrainConfig(
+        model_id="m",
+        dataset="/tmp/data.jsonl",
+        multi_gpu=True,
+        distributed_nproc_per_node=2,
+        distributed_num_nodes=2,
+        distributed_node_rank=0,
+        distributed_master_addr="10.0.0.2",
+    )
+    plan = resolve_distributed_plan(
+        cfg,
+        GpuLayout(
+            world_size=1, local_rank=0, device="cuda", use_ddp=False, device_count=2
+        ),
+    )
+    with pytest.raises(ValueError, match="SEISO_MESH_JOB_ID"):
+        launch_worker_command("/tmp/cfg.yaml", plan)
 
 
 def test_resolve_distributed_plan_refuses_multinode_without_buzz_mesh(

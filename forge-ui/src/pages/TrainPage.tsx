@@ -1966,10 +1966,22 @@ export function TrainPage() {
           <div className="card studio-card">
             <StudioCardHeader
               icon="C"
-              title="Cloud target"
-              description="Provider, region, and GPU capacity for distributed launchers"
+              title="Cloud target metadata"
+              description="Labels + encrypted credentials only — does not provision instances or start remote training"
             />
             <StudioCardBody>
+              <div className="status-callout status-callout-warn" role="status">
+                <div className="status-callout-body">
+                  <strong className="status-callout-title">Metadata only</strong>
+                  <p className="status-callout-text">
+                    Enabling this tab records provider/region/instance labels on the job
+                    config. Seiso will <strong>not</strong> create cloud VMs, start remote
+                    DDP, or launch a cloud vLLM server. Provision the host yourself, then
+                    point local training at a reachable URL (for slime:
+                    <code> vllm_base_url</code>). See docs/training/multi-gpu.md.
+                  </p>
+                </div>
+              </div>
               <label className="studio-checkbox-item studio-checkbox-item-standalone">
                 <input
                   type="checkbox"
@@ -1982,7 +1994,7 @@ export function TrainPage() {
                     }
                   }}
                 />
-                Use cloud GPUs for distributed training
+                Attach cloud target metadata to this job (no remote launch)
               </label>
               <div className="option-grid">
                 <div className="form-field">

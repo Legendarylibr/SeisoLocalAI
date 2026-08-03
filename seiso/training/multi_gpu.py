@@ -320,6 +320,33 @@ def configure_distributed_training_args(
     return args
 
 
+def mesh_worker_context_present() -> bool:
+    """True when this process is a mesh-materialized worker (per-node train)."""
+    return bool((os.environ.get("SEISO_MESH_JOB_ID") or "").strip())
+
+
+def assert_multinode_accelerate_launch_allowed(plan: DistributedPlan) -> None:
+    """Refuse one-box multi-machine Accelerate spawns outside mesh workers.
+
+    Multi-host DDP still requires an operator (or ``seiso mesh worker``) to start
+    train on **each** node with a matching plan/rank. Emitting
+    ``--num_machines=N`` from a bare ``seiso train`` without mesh context is the
+    footgun that looks like elastic/torchrun single-invocation spawn.
+    """
+    if plan.nnodes <= 1:
+        return
+    if mesh_worker_context_present():
+        return
+    raise ValueError(
+        "Multi-node Accelerate launch (distributed_num_nodes>1) requires a mesh "
+        "worker context (SEISO_MESH_JOB_ID). One `seiso train` does not spawn "
+        "remote machines. On each node run "
+        "`seiso mesh worker --plan <job> --rank N --base-config … --launch "
+        "--confirm-launch`, or keep distributed_num_nodes=1 for local multi-GPU. "
+        "See docs/training/mesh.md."
+    )
+
+
 def launch_worker_command(
     config_path: str,
     nproc: int | DistributedPlan,
@@ -328,6 +355,7 @@ def launch_worker_command(
     if isinstance(nproc, DistributedPlan):
         plan = nproc
         nproc_value = plan.nproc_per_node
+        assert_multinode_accelerate_launch_allowed(plan)
     else:
         plan = None
         nproc_value = int(nproc)
