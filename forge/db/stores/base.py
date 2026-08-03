@@ -118,7 +118,6 @@ class DatabaseCore:
             "CREATE INDEX IF NOT EXISTS idx_hub_publish_jobs_user_created ON hub_publish_jobs(user_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_compress_jobs_user_created ON compress_jobs(user_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user_created ON distill_rl_jobs(user_id, created_at DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user_created ON rl_quant_jobs(user_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_providers_user_created ON providers(user_id, created_at DESC)",
         ):
             await conn.execute(statement)

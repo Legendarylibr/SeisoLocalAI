@@ -9,7 +9,7 @@ from forge.db.store import Database
 from forge.services.user_paths import assert_user_path
 
 # Sources that represent models created inside Seiso (not hub downloads or manual scans).
-PUSHABLE_SOURCES = frozenset({"training", "export", "rl_quant"})
+PUSHABLE_SOURCES = frozenset({"training", "export"})
 
 
 async def get_model_for_user(db: Database, model_id: str, user_id: str) -> dict | None:
@@ -35,7 +35,7 @@ async def assert_pushable_model(db: Database, *, model_id: str, user_id: str) ->
         raise ValueError("Model not found")
     if not is_pushable_model(model):
         raise ValueError(
-            "Only Seiso training, export, or RL quant outputs can be published to Hugging Face"
+            "Only Seiso training or export outputs can be published to Hugging Face"
         )
     return model
 

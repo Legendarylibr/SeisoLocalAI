@@ -18,7 +18,6 @@ _GPU_TASK_KINDS = frozenset(
         "export",
         "compress",
         "distill_rl",
-        "rl_quant",
         "download",
         "experiment",
         "inference",
@@ -114,7 +113,6 @@ def running_gpu_task_kinds(*, exclude_job_id: str | None = None) -> list[str]:
         deps.get_export_orchestrator,
         deps.get_compress_orchestrator,
         deps.get_distill_rl_orchestrator,
-        deps.get_rl_quant_orchestrator,
     ]
     active: list[str] = _active_tracked_gpu_task_kinds(exclude_job_id=exclude_job_id)
     for getter in getters:

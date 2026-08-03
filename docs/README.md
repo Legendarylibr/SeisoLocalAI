@@ -1,5 +1,8 @@
 # Seiso documentation
 
+Adaptive RL quantization research: [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization).
+
+
 Complete guide to installing, running, and extending **Seiso Local AI** — a free local workspace for fine-tuning, quantization, distillation, compression, and reinforcement learning workflows.
 
 **Repository:** [github.com/Legendarylibr/SeisoLocalAI](https://github.com/Legendarylibr/SeisoLocalAI)
@@ -26,7 +29,6 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Run each training pipeline step by step | [training/pipelines.md](training/pipelines.md) |
 | Single-GPU / multi-GPU slime post-training | [training/quickstart.md § Slime](training/quickstart.md#slime-post-training) · [multi-gpu.md](training/multi-gpu.md) |
 | External NVIDIA NeMo RL (cite upstream) | [training/quickstart.md § NeMo RL](training/quickstart.md#nemo-rl) · [cli.md § seiso nemo-rl](cli.md#seiso-nemo-rl) · [pipelines.md](training/pipelines.md#nemo-rl) |
-| RL quant from CLI | [cli.md § seiso rl-quant](cli.md#seiso-rl-quant) · [compression.md](compression.md) |
 | Use Cursor / Continue with local models | [getting-started.md § Connect external tools](getting-started.md#connect-external-tools-cursor-continue-etc) |
 | Export to GGUF or Hugging Face Hub | [getting-started.md § Step 6](getting-started.md#step-6--export-and-deploy) · [cli.md](cli.md) |
 | Compress / distill / quantize models | [compression.md](compression.md) |
@@ -190,14 +192,11 @@ seiso train --config configs/example_training_slime.yaml
 # External NeMo RL (requires SEISO_NEMO_RL_ROOT checkout; dry-run: configs/smoke_nemo_rl.yaml)
 seiso nemo-rl --config configs/example_training_nemo_rl.yaml
 
-# RL quant (CLI → $SEISO_DATA_DIR/rl_quant/cli/<job_id>/)
-seiso rl-quant run --preset minimal --kernel-rl
 
 # Distill-RL (CLI → $SEISO_DATA_DIR/distill_rl/cli/<job_id>/; smoke preset uses gpt2)
 seiso distill-rl run --preset smoke
 
 # Quant regression study (CLI → study output_dir in YAML)
-seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml
 
 # LLM compression (CLI → $SEISO_DATA_DIR/compress/local/cli-<job_id>/runs/<run_id>/)
 seiso compress run --preset smoke
@@ -228,7 +227,6 @@ Seiso/
 │   ├── export/         # Merge, GGUF, Hub publish
 │   ├── compress/       # LLM compression bootstrap
 │   ├── distill_rl/     # Teacher distill + DPO pipeline
-│   ├── rl_quant/       # Adaptive RL quant + kernel policy bridge
 │   ├── experiments/    # Research studies (quant regression, HF deploy eval)
 │   └── security/       # NVIDIA boundary gates
 ├── seiso_cli/          # CLI entrypoints
@@ -238,8 +236,6 @@ Seiso/
 │   └── security/       # Auth, CSRF, path sandbox
 ├── forge-ui/           # React + TypeScript + Vite (GPL-3.0)
 ├── seiso/codellama_compress/ # Bundled LLM compression implementation
-├── seiso/adaptive_quant/     # Bundled adaptive RL quant implementation
-├── seiso/analysis/           # RL quant analysis CLI/helpers
 ├── configs/            # Example YAML/JSON configs
 ├── data/               # Sample training JSONL
 ├── deploy/             # Caddy, nginx, systemd templates

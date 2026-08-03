@@ -1,14 +1,15 @@
 # Model compression
 
-Seiso integrates three compression / alignment pipelines. LLM compression, Distill-RL, and RL quant also have `seiso` CLI subcommands.
+Seiso integrates two compression / alignment pipelines. LLM compression and Distill-RL also have `seiso` CLI subcommands.
 
 | Pipeline | Forge page | API prefix | CLI |
 |----------|------------|------------|-----|
 | LLM compression | `/compress` | `/api/compress` | `seiso compress run` |
 | Distill-RL (teacher → DPO) | `/distill-rl` | `/api/distill-rl` | `seiso distill-rl run` |
-| Adaptive RL quant (GGUF) | `/rl-quant` | `/api/rl-quant` | `seiso rl-quant run` |
 
-Bundled sources: `seiso/codellama_compress/`, `seiso/adaptive_quant/`, and `seiso/analysis/`.
+Bundled source: `seiso/codellama_compress/`.
+
+Adaptive RL quantization research lives in [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization).
 
 ## Install extras
 
@@ -25,7 +26,6 @@ Optional per pipeline:
 | `.[compress-quant]` | GPTQ / AWQ for LLM compression pipeline (Linux NVIDIA; needs train stack) |
 | `.[compress-eval]` | lm-eval harness for LLM compression evaluate stage |
 
-RL quant uses the integrated `seiso/rl_quant/` bridge with the bundled `seiso.adaptive_quant` package. No separate pip extra — install `.[train]` for GPU stages.
 
 Install example:
 
@@ -224,62 +224,13 @@ Requires `.[train]` for GPU stages (same stack as LLM compression distillation).
 
 ---
 
-## Adaptive RL quantization
-
-Trains a reinforcement-learning policy for adaptive GGUF quantization levels. Optionally co-trains CUDA kernel launch profiles (`kernel_rl_enabled`).
-
-**Auto-sweep (default on):** Grid-searches learning rates (and reward weights on `post_train`) before the full training run. Disable with `--no-auto-sweep` or `auto_sweep: false`. Custom grid via `--sweep-config` or API `sweep_config`.
-
-### Presets
-
-| Preset | Backend | Notes |
-|--------|---------|-------|
-| `minimal` | simulator | Fast smoke (256 episodes) |
-| `reproducible` | simulator | Fixed seeds, logged artifacts (Forge default) |
-| `post_train` | simulator | Links fine-tune checkpoint for quality sidecar |
-
-Backends: `simulator` (default) or `llama_cpp` (requires `--gguf-path`). Training backend: `stdlib` (default) or `pytorch`.
-
-### Output layout
-
-```
-{SEISO_DATA_DIR}/rl_quant/{user_id}/{job_id}/
-├── sweep/              # when auto_sweep runs
-├── recommendation.json
-└── …
-```
-
-CLI writes under `{SEISO_DATA_DIR}/rl_quant/cli/<job_id>/`.
-
-### Forge
-
-1. `seiso forge` → **RL Quant** (`/rl-quant`)
-2. Enable **CUDA kernel RL** optionally; choose preset and checkpoint/GGUF paths
-3. Toggle auto-sweep in the job config (or disable with `--no-auto-sweep` on CLI)
-
-### CLI
-
-```bash
-seiso rl-quant run --preset minimal --training-episodes 256
-seiso rl-quant run --preset reproducible --kernel-rl --training-episodes 512
-seiso rl-quant run --kernel-rl --kernel-live-benchmark   # NVIDIA CUDA micro-bench
-seiso rl-quant run --preset minimal --no-auto-sweep
-seiso rl-quant profiles                                  # list kernel launch profiles
-```
-
-Smoke config reference: `configs/rl_quant_smoke.json`.
-
-Integrated pipeline only — use `seiso rl-quant run` for the Forge-equivalent path.
-
----
-
 ## Platform notes
 
-| Platform | LLM compress | Distill-RL | RL quant |
-|----------|--------------|------------|----------|
-| Linux NVIDIA | ✓ (CUDA kernels in training stages) | ✓ | ✓ |
-| Linux AMD ROCm | ✓ (Triton fallback) | ✓ | ✓ |
-| Windows NVIDIA | ✓ (CUDA JIT) | ✓ | ✓ (simulator; live CUDA bench if GPU available) |
-| macOS | CPU/MPS (slow for large models) | CPU/MPS (slow for large models) | ✓ (simulator / analytic kernel metrics) |
+| Platform | LLM compress | Distill-RL |
+|----------|--------------|------------|
+| Linux NVIDIA | ✓ (CUDA kernels in training stages) | ✓ |
+| Linux AMD ROCm | ✓ (Triton fallback) | ✓ |
+| Windows NVIDIA | ✓ (CUDA JIT) | ✓ |
+| macOS | CPU/MPS (slow for large models) | CPU/MPS (slow for large models) |
 
-For pipeline details, use this guide and the CLI help for `seiso compress`, `seiso distill-rl`, and `seiso rl-quant`.
+For pipeline details, use this guide and the CLI help for `seiso compress` and `seiso distill-rl`.

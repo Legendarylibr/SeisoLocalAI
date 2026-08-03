@@ -194,7 +194,6 @@ def create_app() -> FastAPI:
         models,
         providers,
         recipes,
-        rl_quant,
         system,
         training,
     )
@@ -206,7 +205,6 @@ def create_app() -> FastAPI:
     app.include_router(inference.router, prefix=prefix)
     app.include_router(training.router, prefix=prefix)
     app.include_router(export.router, prefix=prefix)
-    app.include_router(rl_quant.router, prefix=prefix)
     app.include_router(compress.router, prefix=prefix)
     app.include_router(distill_rl.router, prefix=prefix)
     app.include_router(recipes.router, prefix=prefix)

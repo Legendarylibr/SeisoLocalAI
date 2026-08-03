@@ -138,10 +138,6 @@ Documentation = "https://github.com/Legendarylibr/SeisoLocalAI#readme"
 include = ["seiso*", "seiso_cli*", "forge*"]
 
 [tool.setuptools.package-data]
-"seiso.adaptive_quant.configs" = ["*.json"]
-"seiso.adaptive_quant.native" = ["*.cpp"]
-"seiso.adaptive_quant.prompts" = ["*.json"]
-"seiso.adaptive_quant.ui.static" = ["*.html", "*.css", "*.js"]
 "seiso.kernels.cuda" = ["*.cpp", "*.cu", "*.cuh"]
 "seiso.kernels.cuda.include" = ["*.cuh"]
 
@@ -208,8 +204,6 @@ ignored-modules = [
   "kernels",
   "psutil",
   "seiso.codellama_compress",
-  "adaptive_rl_quant",
-  "seiso.adaptive_quant",
   "sentence_transformers",
   "triton",
   "flash_attn",

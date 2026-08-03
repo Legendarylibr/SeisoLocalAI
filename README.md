@@ -44,7 +44,6 @@ Seiso combines a **web workspace (Forge)** and a **Python core (CLI + library)**
 | Merge, GGUF, Hub publish | Export | `seiso export` |
 | LLM distill → prune → quant | Compress | `seiso compress run` |
 | Teacher distill + DPO alignment | Distill-RL | `seiso distill-rl run` |
-| RL quant + CUDA kernel policy | RL Quant | `seiso rl-quant run` |
 | Visual data/recipe pipelines | Recipe Studio | — |
 | RAG knowledge bases | Knowledge | — |
 | Opt-in remote sats marketplace (Ark + L402) — **not functional, do not use yet** | — | `seiso pay` ([docs](docs/pay/marketplace.md)) |
@@ -356,7 +355,6 @@ After `seiso forge` (or `start`), browse to **http://127.0.0.1:8765**:
 | Export | `/export` | Merge LoRA, GGUF quant, Hugging Face publish |
 | Compress | `/compress` | LLM distill → prune (Llama-family) → finetune → quant |
 | Distill-RL | `/distill-rl` | Teacher → student distillation + DPO (auto-sweep) |
-| RL Quant | `/rl-quant` | Adaptive GGUF quantization via RL (auto-sweep) |
 | Recipe Studio | `/recipes` | Visual `@xyflow/react` graph editor |
 | Integrations | `/integrations` | Route to OpenAI, Anthropic, vLLM |
 | Knowledge | `/knowledge` | RAG corpus ingest and retrieval |
@@ -384,9 +382,6 @@ Forge details: **[docs/forge.md](docs/forge.md)**
 | `seiso compress speculative` | Speculative decoding (draft + target) |
 | `seiso distill-rl run` | Teacher distill → preference rollouts → DPO |
 | `seiso distill-rl presets` | List distill-RL presets and stages |
-| `seiso rl-quant run` | RL quantization (+ optional `--kernel-rl`) |
-| `seiso rl-quant profiles` | List CUDA kernel RL launch profiles |
-| `seiso experiment quant-regression` | Multi-quant train + GGUF export + deploy-quant regression study |
 | `seiso inference` | One-shot inference |
 | `seiso bench-inference` | Inference load / TTFT / tok/s benchmark |
 | `seiso-bench-kernels` | Benchmark fused GPU training kernels |
@@ -401,14 +396,10 @@ seiso train --config configs/example_lora.yaml
 # Example: export CLI checkpoint to GGUF
 seiso export --checkpoint ./outputs/lora-run/checkpoint-<timestamp> --formats merged,gguf
 
-# Example: RL quant with CUDA kernel co-training
-seiso rl-quant run --preset minimal --kernel-rl --training-episodes 256
-
 # Example: distill-RL smoke (teacher → DPO)
 seiso distill-rl run --preset smoke
 
 # Example: quant regression study (train → export → eval)
-seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml
 ```
 
 Full reference: **[docs/cli.md](docs/cli.md)**
@@ -424,8 +415,6 @@ Seiso/
 ├── forge/              # FastAPI backend, auth, orchestrators, SSE job streaming
 ├── forge-ui/           # React 19 + TypeScript + Vite frontend
 ├── seiso/codellama_compress/ # Bundled LLM compression implementation
-├── seiso/adaptive_quant/     # Bundled adaptive RL quant implementation
-├── seiso/analysis/           # RL quant analysis CLI/helpers
 ├── configs/            # Example YAML/JSON configs
 ├── deploy/             # Caddy, nginx, systemd, HTTPS env templates
 ├── docs/               # Documentation
@@ -444,7 +433,7 @@ Backend orchestrators spawn isolated workers with **SSE log streaming**:
 | `forge/orchestrators/knowledge` | RAG ingest and retrieve |
 | `forge/orchestrators/compress` | LLM distillation, pruning, quant |
 | `forge/orchestrators/distill_rl` | Teacher distill + DPO preference alignment |
-| `forge/orchestrators/rl_quant` | Adaptive RL GGUF quant policy |
+| `` | Adaptive RL GGUF quant policy |
 | `forge/orchestrators/hub_publish` | Hugging Face Hub publish jobs (via Export) |
 
 Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused CUDA/Triton kernels**.
@@ -468,7 +457,10 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 
 ---
 
-## Features in depth
+## Features
+
+> Adaptive RL quantization research: [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization).
+ in depth
 
 ### Training
 
@@ -512,7 +504,6 @@ Three integrated pipelines ([compression.md](docs/compression.md)):
 
 1. **LLM compression** — distill → MLP prune (Llama-family) → recovery finetune → GPTQ/AWQ → speculative decoding. Any HF causal LM; override teacher/student via CLI or Forge.
 2. **Distill-RL** — teacher KL distillation → preference rollouts → DPO fine-tuning with auto hyperparameter sweep (`seiso distill-rl run`)
-3. **RL quantization** — train a policy for adaptive GGUF quant levels with auto sweep (`seiso rl-quant run`, optional `--kernel-rl`)
 
 ---
 
@@ -536,7 +527,6 @@ All user data lives under **`SEISO_DATA_DIR`** (default below):
 ├── checkpoints/      # Training outputs (per user)
 ├── exports/          # Merged / GGUF / LoRA exports
 ├── compress/         # LLM compression artifacts
-├── rl_quant/         # RL quant outputs
 ├── distill_rl/       # Distillation / RL artifacts
 ├── recipes/          # Recipe Studio job data
 ├── uploads/          # Datasets and user files

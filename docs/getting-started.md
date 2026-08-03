@@ -223,13 +223,11 @@ GGUF export requires `llama.cpp` (set `LLAMA_CPP_DIR` or install system `convert
 |---------|-------|-------|
 | Model compression (any HF causal LM; Llama-family prune) | `/compress` | [compression.md](compression.md) · `seiso compress run` |
 | Teacher distill + DPO alignment | `/distill-rl` | [compression.md](compression.md) · `seiso distill-rl run` |
-| RL adaptive GGUF quantization | `/rl-quant` | [compression.md](compression.md) · `seiso rl-quant run` |
 | Local RAG corpus | `/knowledge` | [forge.md](forge.md) |
 | Visual recipe graphs | `/recipes` | [forge.md](forge.md) |
 | External providers (OpenAI, vLLM) | `/integrations` | [forge.md](forge.md) |
 | Multi-GPU training | Training Studio checkbox | [training/multi-gpu.md](training/multi-gpu.md) |
 | Fused GPU kernels | Training config / Studio | [training/kernels.md](training/kernels.md) |
-| Quant regression study (CLI) | `seiso experiment quant-regression` | [cli.md](cli.md#seiso-experiment) |
 | HTTPS / LAN access | `deploy/` + `.env` | [deployment/reverse-proxy.md](deployment/reverse-proxy.md) |
 
 ## Data directory layout
@@ -251,7 +249,6 @@ Default data directory (override with `SEISO_DATA_DIR`):
 ├── checkpoints/      # Training outputs (per user)
 ├── exports/          # Merged / GGUF / LoRA exports
 ├── compress/         # LLM compression artifacts ({user_id}/{job_id}/runs/<run_id>/)
-├── rl_quant/         # RL quant policy outputs
 ├── distill_rl/       # Distillation / RL artifacts
 ├── recipes/          # Recipe Studio job data
 ├── knowledge/        # RAG vector stores
@@ -276,3 +273,5 @@ See also the canonical tree in [README.md](../README.md#data--storage).
 - **Security hardening:** [README.md](../README.md#security) and [forge.md](forge.md)
 - **Opt-in remote marketplace (Ark + L402) — not functional yet, do not use:** [pay/marketplace.md](pay/marketplace.md) — self-hosted stays free
 - **Buzz shared / multi-node training (secondary / opt-in):** [training/mesh.md](training/mesh.md) · skill [seiso-orchestrate](../.agents/skills/seiso-orchestrate/SKILL.md)
+
+Adaptive RL quantization research: [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization).

@@ -84,8 +84,7 @@ Presets under `configs/` for agent/CI loops (not all run in default `ci-fast`):
 | `configs/smoke_train_gpu_e2e.yaml` | Longer GPU e2e |
 | `configs/smoke_slime_cpu.yaml` | Slime GRPO CPU smoke |
 | `configs/smoke_nemo_rl.yaml` | NeMo RL dry-run / smoke |
-| `configs/rl_quant_smoke.json` | RL quant product smoke |
-| `configs/distill_rl_smoke.json` | Distill-RL smoke |
+| `configs/distill_rl_smoke.json` | Distill-RL pipeline smoke |
 
 ### Test detail
 
@@ -211,3 +210,5 @@ Lint/type/test jobs target first-party code only:
 - `seiso/`, `forge/`, `seiso_cli/`, `tests/`
 
 `forge-ui/dist/` build output is excluded.
+
+Adaptive RL quantization research: [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization).

@@ -181,9 +181,7 @@ def infer_pipeline_and_run_id(
         or manifest.get("schema")
         or "seiso"
     )
-    if pipeline.startswith("seiso.adaptive_quant"):
-        pipeline = "adaptive_quant"
-    elif pipeline in {"lora", "qlora", "full", "slime", "nemo_rl"}:
+    if pipeline in {"lora", "qlora", "full", "slime", "nemo_rl"}:
         pipeline = "training"
     elif "format" in manifest and "file_checksums_sha256" in manifest:
         pipeline = "export"

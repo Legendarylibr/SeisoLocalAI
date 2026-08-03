@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Drop-in llama-cli shim backed by llama-cpp-python (GPU when available).
 
-adaptive_quant invokes ``llama-cli`` as a subprocess; this shim accepts the same
+legacy quant regression tooling invoked ``llama-cli`` as a subprocess; this shim accepts the same
 core flags and prints timing lines that ``parse_llama_cpp_metrics`` understands.
 """
 

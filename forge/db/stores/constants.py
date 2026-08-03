@@ -8,7 +8,6 @@ ENCRYPTED_COLUMNS: dict[str, tuple[str, ...]] = {
     # Job configs may contain paths / hub metadata; encrypt at rest.
     "training_jobs": ("config_json",),
     "export_jobs": ("config_json",),
-    "rl_quant_jobs": ("config_json",),
     "compress_jobs": ("config_json",),
     "distill_rl_jobs": ("config_json",),
     "hub_publish_jobs": ("config_json",),
@@ -60,19 +59,6 @@ CREATE TABLE IF NOT EXISTS export_jobs (
     updated_at TEXT NOT NULL
 );
 
-CREATE TABLE IF NOT EXISTS rl_quant_jobs (
-    id TEXT PRIMARY KEY,
-    user_id TEXT NOT NULL,
-    status TEXT NOT NULL,
-    config_json TEXT NOT NULL,
-    output_dir TEXT,
-    recommendation_path TEXT,
-    recommendation_json TEXT DEFAULT '{}',
-    gguf_quants_json TEXT DEFAULT '[]',
-    error_text TEXT,
-    created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
-);
 
 CREATE TABLE IF NOT EXISTS compress_jobs (
     id TEXT PRIMARY KEY,
@@ -170,8 +156,6 @@ CREATE INDEX IF NOT EXISTS idx_compress_jobs_user ON compress_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_compress_jobs_user_created ON compress_jobs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user ON distill_rl_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user_created ON distill_rl_jobs(user_id, created_at DESC);
-CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user ON rl_quant_jobs(user_id);
-CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user_created ON rl_quant_jobs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_hub_publish_jobs_user ON hub_publish_jobs(user_id);
 CREATE INDEX IF NOT EXISTS idx_hub_publish_jobs_user_created ON hub_publish_jobs(user_id, created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_providers_user ON providers(user_id);
@@ -205,16 +189,6 @@ _STAGE_PIPELINE_LIST_COLUMNS = (
     "created_at",
     "updated_at",
 )
-_RL_QUANT_LIST_COLUMNS = (
-    "id",
-    "user_id",
-    "status",
-    "output_dir",
-    "recommendation_path",
-    "gguf_quants_json",
-    "created_at",
-    "updated_at",
-)
 _UPSERT_MODEL_SQL = """INSERT INTO local_models
    (id, user_id, name, path, source, format, size_bytes, metadata_json, created_at)
    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -228,12 +202,11 @@ _UPSERT_MODEL_SQL = """INSERT INTO local_models
 _JOB_ERROR_TABLES = (
     "training_jobs",
     "export_jobs",
-    "rl_quant_jobs",
     "compress_jobs",
     "distill_rl_jobs",
     "hub_publish_jobs",
 )
-_CONFIG_JOB_TABLES = frozenset({"rl_quant_jobs", "compress_jobs", "distill_rl_jobs"})
+_CONFIG_JOB_TABLES = frozenset({"compress_jobs", "distill_rl_jobs"})
 
 
 def column_list(columns: tuple[str, ...]) -> str:

@@ -550,16 +550,6 @@ async def test_compress_rejects_host_config_file(app, auth_client):
     assert res.status_code == 403
 
 
-@pytest.mark.asyncio
-async def test_rl_quant_rejects_host_config_file(app, auth_client):
-    client, _token, headers, _tmp = auth_client
-    res = await client.post(
-        "/api/rl-quant/jobs",
-        headers=headers,
-        json={"preset": "minimal", "config_file": "/etc/passwd"},
-    )
-    assert res.status_code == 403
-
 
 def test_code_exec_blocks_operator_attrgetter():
     err = _validate_code(

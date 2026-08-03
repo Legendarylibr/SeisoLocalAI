@@ -22,10 +22,6 @@ class ExportStartRequest(BaseModel):
     hub_repo: str | None = Field(
         default=None, description="Deprecated — use hub.username + hub.model_name"
     )
-    rl_quant_job_id: str | None = Field(
-        default=None,
-        description="Apply GGUF quants from a completed RL quant recommendation job",
-    )
 
 
 class PublishToHubRequest(BaseModel):

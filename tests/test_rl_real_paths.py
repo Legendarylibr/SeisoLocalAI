@@ -955,40 +955,6 @@ async def test_forge_distill_rejects_cross_user_hf_dataset_in_config_file(
     assert exc_info.value.status_code == 403
 
 
-def test_forge_rl_quant_rejects_cross_user_model_in_config_file(tmp_path: Path):
-    """config_file must not smuggle a victim-scoped llama_cpp_model past Forge."""
-    from fastapi import HTTPException
-
-    from forge.api.routes.rl_quant import (
-        RLQuantStartRequest,
-        _prepare_rl_quant_config,
-    )
-    from forge.config import ForgeSettings
-
-    attacker = "user-a"
-    victim = "user-b"
-    victim_gguf = tmp_path / "exports" / victim / "job1" / "model.gguf"
-    victim_gguf.parent.mkdir(parents=True)
-    victim_gguf.write_bytes(b"GGUF")
-
-    cfg_path = tmp_path / "uploads" / attacker / "rl.json"
-    cfg_path.parent.mkdir(parents=True)
-    cfg_path.write_text(
-        json.dumps(
-            {
-                "preset": "minimal",
-                "llama_cpp_model": str(victim_gguf),
-            }
-        ),
-        encoding="utf-8",
-    )
-
-    settings = ForgeSettings(data_dir=tmp_path)
-    body = RLQuantStartRequest(preset="minimal", config_file=str(cfg_path))
-    with pytest.raises(HTTPException) as exc_info:
-        _prepare_rl_quant_config(body, attacker, settings)
-    assert exc_info.value.status_code == 403
-
 
 def test_distill_rejects_outcome_false_for_grounded_sources(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("SEISO_ALLOW_TINY_RL", "1")

@@ -71,7 +71,6 @@ def check_static_ui(client: httpx.Client, report: Report) -> None:
         "/export",
         "/compress",
         "/distill-rl",
-        "/rl-quant",
     ):
         r = client.get(f"{BASE}{path}")
         report.add(
@@ -256,8 +255,6 @@ def check_other_pages(
         ("GET /compress/jobs", "GET", "/compress/jobs"),
         ("GET /distill-rl/presets", "GET", "/distill-rl/presets"),
         ("GET /distill-rl/jobs", "GET", "/distill-rl/jobs"),
-        ("GET /rl-quant/presets", "GET", "/rl-quant/presets"),
-        ("GET /rl-quant/jobs", "GET", "/rl-quant/jobs"),
         ("POST /recipes/jobs (empty recipe)", "POST", "/recipes/jobs"),
         ("GET /knowledge/bases", "GET", "/knowledge/bases"),
         ("GET /providers", "GET", "/providers"),

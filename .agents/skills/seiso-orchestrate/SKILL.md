@@ -3,7 +3,7 @@ name: seiso-orchestrate
 description: >-
   Orchestrate Seiso Local AI (Forge + seiso CLI) from a generic coding agent,
   with optional Buzz channel receipts. Use when the user mentions Seiso, Forge,
-  local fine-tuning, GGUF export, distill-rl, rl-quant, Nostr provenance, Buzz,
+  local fine-tuning, GGUF export, distill-rl, Nostr provenance, Buzz,
   or buzz-cli for agent-driven train/compress/export jobs.
 ---
 
@@ -134,7 +134,6 @@ else → ask human
 | Train (LoRA/QLoRA/slime) | `seiso train --config configs/…yaml` |
 | Compress | `seiso compress --config …` |
 | Distill-RL | `seiso distill-rl --config …` |
-| RL quant | `seiso rl-quant --config …` |
 | Export / GGUF | `seiso export …` |
 | Chat smoke (local free) | `seiso chat …` or `POST $SEISO_FORGE_URL/v1/chat/completions` |
 | Remote marketplace | `seiso pay quote\|session\|job …` |

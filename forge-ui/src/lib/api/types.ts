@@ -549,25 +549,6 @@ export type TrainingMetricsPayload = {
   updated_at?: number | null;
 };
 
-export type RLQuantJob = {
-  id: string;
-  status: string;
-  config_json: string;
-  output_dir: string | null;
-  recommendation_path: string | null;
-  gguf_quants: string[];
-  error_text?: string | null;
-  created_at: string;
-};
-
-export type RLQuantPreset = {
-  id: string;
-  label: string;
-  backend: string;
-  training_backend: string;
-  stages: string[];
-};
-
 export type CompressJob = {
   id: string;
   status: string;

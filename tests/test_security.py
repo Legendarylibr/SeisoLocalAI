@@ -101,7 +101,6 @@ def test_user_scoped_data_roots_cover_tenant_categories():
         "exports",
         "compress",
         "distill_rl",
-        "rl_quant",
         "recipes",
     }
     assert expected == USER_SCOPED_DATA_ROOTS

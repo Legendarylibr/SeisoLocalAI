@@ -146,5 +146,5 @@ def rank_gguf_filenames(
     return sorted(filenames, key=score)
 
 
-# Backward-compatible alias used across adaptive_quant.
+# Backward-compatible alias used across GGUF export paths.
 QUANT_BITS = KNOWN_QUANT_BITS

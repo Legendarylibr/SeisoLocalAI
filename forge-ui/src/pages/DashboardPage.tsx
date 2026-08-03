@@ -14,7 +14,6 @@ import {
   IconCpu,
   IconMemory,
   IconGpu,
-  IconQuant,
   IconRecipes,
   IconKnowledge,
 } from "@/components/Icons";
@@ -28,14 +27,6 @@ const GOALS = [
 ] as const;
 
 const RESEARCH_PIPELINES = [
-  {
-    id: "rl-quant",
-    title: "RL Quantization",
-    desc: "Reward-guided adaptive GGUF quantization with reproducible sweeps.",
-    path: "/rl-quant",
-    tag: "Research",
-    Icon: IconQuant,
-  },
   {
     id: "compress",
     title: "Code Compression",

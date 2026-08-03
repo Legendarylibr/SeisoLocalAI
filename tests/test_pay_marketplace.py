@@ -119,7 +119,6 @@ def test_rl_dry_run_jobs(pay_env: Path) -> None:
     for jt, preset in (
         ("slime", "smoke"),
         ("distill_rl", "smoke"),
-        ("rl_quant", "minimal"),
     ):
         job = start_job(
             session_id=created["session_id"],

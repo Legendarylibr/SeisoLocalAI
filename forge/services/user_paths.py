@@ -253,49 +253,6 @@ def pick_user_download_file(
     raise SecurityError(f"No downloadable file matching {pattern!r}")
 
 
-def assert_rl_quant_input_paths(
-    sandbox_root: Path,
-    user_id: str,
-    paths: dict[str, str],
-) -> None:
-    """Validate merged RL-quant filesystem inputs after config_file/preset load.
-
-    ``prompt_library_path`` may live under the adaptive_quant bundle (presets) or
-    the caller's user tree. Binaries use :func:`assert_llama_cpp_binary`.
-    """
-    from seiso.rl_quant.bootstrap import bundle_root
-    from seiso.rl_quant.config_builder import (
-        RL_QUANT_BINARY_PATH_KEYS,
-        RL_QUANT_DATA_PATH_KEYS,
-    )
-    from seiso.security import assert_user_scoped_path, assert_within
-
-    bundle = bundle_root().resolve()
-    for key, raw in paths.items():
-        if key in RL_QUANT_BINARY_PATH_KEYS:
-            assert_llama_cpp_binary(raw)
-            continue
-        if key not in RL_QUANT_DATA_PATH_KEYS:
-            continue
-        path = Path(raw).expanduser()
-        if key == "prompt_library_path":
-            candidate = path if path.is_absolute() else bundle / path
-            try:
-                assert_within(bundle, candidate.resolve())
-                continue
-            except (OSError, SecurityError):
-                pass
-        if path.exists() or path.is_symlink():
-            assert_user_path(sandbox_root, user_id, path)
-        elif path.is_absolute():
-            assert_user_scoped_path(sandbox_root, user_id, path)
-        else:
-            raise SecurityError(
-                f"{key} must be an absolute path under your data directory "
-                f"or a bundle-relative prompt library"
-            )
-
-
 def assert_llama_cpp_binary(target: str | Path) -> Path:
     """Ensure llama.cpp binary path is an existing regular file in allowed locations."""
     import os

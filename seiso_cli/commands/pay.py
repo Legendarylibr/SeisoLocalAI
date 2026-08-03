@@ -38,7 +38,7 @@ def _require_allow() -> None:
 def pay_quote(
     type_: Annotated[
         str,
-        typer.Option("--type", help="finetune|slime|distill_rl|rl_quant|nemo_rl|inference"),
+        typer.Option("--type", help="finetune|slime|distill_rl|nemo_rl|inference"),
     ],
     preset: Annotated[str | None, typer.Option(help="smoke|minimal|…")] = None,
     prompt_tokens: Annotated[int, typer.Option(help="For inference quotes")] = 0,

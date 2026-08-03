@@ -83,7 +83,7 @@ To run a second Forge intentionally, change **both** `SEISO_PORT` and `SEISO_DAT
 
 ### Process model
 
-Forge runs as a **single uvicorn worker** by default. Job orchestrators (training, export, compress, distill-RL, RL quant), live SSE log streams, in-memory rate limiting, and loaded inference models all live in that one process.
+Forge runs as a **single uvicorn worker** by default. Job orchestrators (training, export, compress, distill-RL), live SSE log streams, in-memory rate limiting, and loaded inference models all live in that one process.
 
 | Constraint | Why |
 |------------|-----|
@@ -104,8 +104,6 @@ For production behind a reverse proxy, terminate TLS upstream and run **one** Fo
 | `/export` | Export | Merge LoRA, GGUF, Hub publish from checkpoints |
 | `/compress` | Compress | LLM distillation / prune (Llama-family) / quant pipeline |
 | `/distill-rl` | Distill-RL | Teacher → student distillation + DPO alignment |
-| `/rl-quant` | RL Quant | Adaptive GGUF quantization policy training |
-| `/recipes` | Recipe Studio | Visual graph editor for data/recipe jobs |
 | `/knowledge` | Knowledge | RAG corpus ingest and retrieval |
 | `/integrations` | Integrations | External providers + Nostr provenance |
 | `/settings` | Settings | HF token, hardware info, security toggles |
@@ -162,8 +160,6 @@ There is no password path. Generated secrets are shown once in the browser; an e
 | `/api/export` | Export jobs, Hub publish |
 | `/api/compress` | LLM compression jobs |
 | `/api/distill-rl` | Distill → rollout → DPO jobs |
-| `/api/rl-quant` | RL quantization jobs |
-| `/api/recipes` | Recipe graph execution |
 | `/api/knowledge` | RAG ingest and retrieve |
 | `/api/providers` | External LLM provider configs |
 | `/api/system` | Hardware detection, metrics |
@@ -240,3 +236,5 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 | `SEISO_MODEL_ROUTER_URL` | — | Router base URL (e.g. `http://127.0.0.1:8780`) |
 
 HTTPS reverse-proxy deployment: [deployment/reverse-proxy.md](deployment/reverse-proxy.md) and [deploy/README.md](../deploy/README.md).
+
+Adaptive RL quantization research: [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization).

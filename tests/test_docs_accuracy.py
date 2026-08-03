@@ -144,13 +144,16 @@ def test_repository_layout_snippet_matches_core_packages():
 
 
 def test_cli_docs_cover_experiment_command():
-    """seiso experiment quant-regression must appear in user-facing CLI docs."""
+    """Experiment CLI stub points researchers to Adaptive-RL-Quantization."""
     cli_doc = _read("docs/cli.md")
     readme = _read("README.md")
     assert "seiso experiment" in cli_doc
-    assert "quant-regression" in cli_doc
-    assert "configs/examples/quant_regression_study.yaml" in cli_doc
-    assert "seiso experiment" in readme and "quant-regression" in readme
+    assert "Adaptive-RL-Quantization" in cli_doc
+    assert "seiso experiment" in readme
+    from seiso_cli.main import app
+
+    group_names = {g.name for g in app.registered_groups}
+    assert "experiment" in group_names
 
 
 def test_cli_docs_cover_provenance_nostr():
@@ -215,18 +218,6 @@ def test_cli_docs_cover_nemo_rl_training():
     assert "nemo-rl" in registered
 
 
-def test_docs_do_not_reference_nonexistent_rl_quant_extra():
-    """pyproject.toml has no [rl-quant] optional extra — docs must not claim one."""
-    for rel in ("docs/compression.md", "docs/install.md"):
-        text = _read(rel)
-        assert (
-            ".[rl-quant]" not in text
-        ), f"{rel} references nonexistent .[rl-quant] extra"
-        assert (
-            "`rl-quant`" not in text or "seiso rl-quant" in text or "rl_quant/" in text
-        ), f"{rel} may list rl-quant as pip extra"
-
-
 def test_smoke_configs_exist_and_are_referenced():
     """F6-04: smoke presets must exist and be discoverable from AGENTS/docs."""
     smokes = [
@@ -235,7 +226,6 @@ def test_smoke_configs_exist_and_are_referenced():
         "configs/smoke_train_moe_cpu.yaml",
         "configs/smoke_slime_cpu.yaml",
         "configs/smoke_nemo_rl.yaml",
-        "configs/rl_quant_smoke.json",
         "configs/distill_rl_smoke.json",
     ]
     agents = _read("AGENTS.md")
