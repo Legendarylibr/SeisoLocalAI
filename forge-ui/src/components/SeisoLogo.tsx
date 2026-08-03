@@ -1,12 +1,7 @@
-import mascotUrl from "@/assets/seiso-mascot.png";
 import wordmarkUrl from "@/assets/seiso-wordmark.png";
 
+/** Primary Seiso logo — detailed wordmark used everywhere in the UI. */
 export function SeisoLogoMark({ className }: { className?: string }) {
-  return <img src={mascotUrl} alt="" className={className} draggable={false} />;
-}
-
-/** Full detailed SEISO wordmark (warm glitch style). */
-export function SeisoWordmark({ className }: { className?: string }) {
   return (
     <img
       src={wordmarkUrl}
@@ -15,4 +10,9 @@ export function SeisoWordmark({ className }: { className?: string }) {
       draggable={false}
     />
   );
+}
+
+/** Alias kept for call sites that ask for the wordmark by name. */
+export function SeisoWordmark({ className }: { className?: string }) {
+  return <SeisoLogoMark className={className} />;
 }

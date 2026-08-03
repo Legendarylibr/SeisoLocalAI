@@ -67,18 +67,13 @@ export function Layout({ children, fullBleed = false }: { children: React.ReactN
       />
 
       <aside className={`sidebar${navOpen ? " sidebar-open" : ""}`}>
-        <div className="sidebar-mascot" aria-hidden>
-          <SeisoLogoMark className="sidebar-mascot-img" />
-        </div>
-
-        <NavLink to="/" className="brand sidebar-elevated" style={{ textDecoration: "none", color: "inherit" }}>
-          <span className="brand-mark">
-            <SeisoLogoMark className="brand-logo-img" />
-          </span>
-          <span className="brand-text">
-            <span className="brand-name">Seiso</span>
-            <span className="brand-tagline">Local AI platform</span>
-          </span>
+        <NavLink
+          to="/"
+          className="brand brand-wordmark sidebar-elevated"
+          style={{ textDecoration: "none", color: "inherit" }}
+          aria-label="Seiso home"
+        >
+          <SeisoLogoMark className="sidebar-brand-wordmark" />
         </NavLink>
 
         <div className="sidebar-nav sidebar-elevated">
