@@ -26,7 +26,7 @@ _ACK_WSL_ENV = "SEISO_NVIDIA_WSL_ACK"
 _SKIP_BOUNDARY_ENV = "SEISO_SKIP_NVIDIA_BOUNDARY"
 _ABORT_ENV = "SEISO_ABORT_ON_SECURITY_BYPASS"
 
-# Backward compatibility with adaptive-rl-quant env vars
+# Legacy env var aliases (historical adaptive-rl-quant names)
 _LEGACY_ACK = {
     _ACK_HOST_VENV_ENV: "ADAPTIVE_RL_NVIDIA_HOST_VENV_ACK",
     _ACK_SECURE_VM_ENV: "ADAPTIVE_RL_NVIDIA_SECURE_VM",

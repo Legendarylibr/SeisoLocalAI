@@ -112,7 +112,6 @@ in [../troubleshooting.md](../troubleshooting.md#nemo-rl-checkout-or-uv-not-foun
 Run the documented quant regression study with the example config:
 
 ```bash
-seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml
 ```
 
 For adaptive quant flows, prefer smoke-sized request counts until reports and

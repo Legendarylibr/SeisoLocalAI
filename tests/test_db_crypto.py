@@ -305,7 +305,6 @@ async def test_ordered_list_indexes_exist(db: Database):
         "export_jobs": "idx_export_jobs_user_created",
         "compress_jobs": "idx_compress_jobs_user_created",
         "distill_rl_jobs": "idx_distill_rl_jobs_user_created",
-        "rl_quant_jobs": "idx_rl_quant_jobs_user_created",
         "providers": "idx_providers_user_created",
     }
     for table, index in expected.items():

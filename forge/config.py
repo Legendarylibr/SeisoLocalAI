@@ -248,7 +248,6 @@ class ForgeSettings(BaseSettings):
             "artifacts",
             "recipes",
             "uploads",
-            "rl_quant",
             "compress",
             "distill_rl",
             "hf_cache",

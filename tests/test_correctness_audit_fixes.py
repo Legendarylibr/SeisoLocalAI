@@ -71,46 +71,6 @@ async def test_inference_execute_stale_finally_keeps_newer_epoch(tmp_path: Path)
     assert orch._active_generation_user_id == "user-a"
 
 
-def test_rl_quant_checkpoint_path_is_export_source_not_quality(tmp_path: Path):
-    from seiso.rl_quant.config_builder import _path_overrides
-
-    ckpt = tmp_path / "checkpoints" / "run"
-    ckpt.mkdir(parents=True)
-    overrides = _path_overrides(
-        {"checkpoint_path": str(ckpt), "gguf_export": True},
-        product=None,
-    )
-    assert overrides.get("llama_cpp_gguf_export_source") == str(ckpt)
-    assert overrides.get("llama_cpp_gguf_export_enabled") is True
-    assert "external_quality_path" not in overrides
-
-
-def test_rl_quant_quality_sidecar_still_sets_external_quality(tmp_path: Path):
-    from seiso.rl_quant.config_builder import _path_overrides
-
-    side = tmp_path / "scores.json"
-    side.write_text("{}", encoding="utf-8")
-    overrides = _path_overrides({"quality_sidecar": str(side)}, product=None)
-    assert overrides["external_quality_path"] == str(side)
-
-
-def test_external_quality_applied_requires_external_sources():
-    from types import SimpleNamespace
-
-    from seiso.adaptive_quant.recommendation import _external_quality_applied
-
-    ok = [
-        SimpleNamespace(metrics=SimpleNamespace(perplexity_source="external:perplexity"))
-    ]
-    miss = [
-        SimpleNamespace(
-            metrics=SimpleNamespace(perplexity_source="simulator_missing_external_perplexity")
-        )
-    ]
-    assert _external_quality_applied(ok) is True
-    assert _external_quality_applied(miss) is False
-    assert _external_quality_applied([]) is False
-
 
 def test_nemo_relative_dotdot_override_is_sandboxed(tmp_path: Path, monkeypatch):
     from seiso.nemo_rl.config import NeMoRLConfig

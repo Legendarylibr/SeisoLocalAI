@@ -52,10 +52,10 @@ User
         └── db (aiosqlite + field-level AES-GCM crypto)
 ```
 
-- **Core** (`seiso/`): Training, inference, export, kernels, compress, distill_rl, rl_quant, experiments, models, hardware, memory, platform, security helpers, bundled package wrappers.
+- **Core** (`seiso/`): Training, inference, export, kernels, compress, distill_rl, experiments, models, hardware, memory, platform, security helpers, bundled package wrappers.
 - **Forge** (`forge/`): Web server, job orchestration + SSE streaming, persistence, auth/onboarding, security middleware, model registry/inventory, Compat API.
 - **UI** (`forge-ui/`): React + TS + Vite + xyflow (recipes). Talks REST + SSE. Built assets served by Forge SPA fallback.
-- **Bundled packages**: `seiso.codellama_compress`, `seiso.adaptive_quant`, and `analysis` are part of this repository and are bootstrapped at runtime (no separate pip package). Seiso provides config translation, job wrapping, UI/CLI surfaces, kernel bridge, and manifests.
+- **Bundled packages**: `seiso.codellama_compress` are part of this repository and are bootstrapped at runtime (no separate pip package). Seiso provides config translation, job wrapping, UI/CLI surfaces, kernel bridge, and manifests.
 
 ### Job & Orchestration Model
 - `forge/orchestrators/base.py`: `Orchestrator` ABC, `JobRecord`, status, SSE log/metrics queues, cancellation, subprocess tracking.
@@ -65,7 +65,7 @@ User
 
 ### Data & Paths
 - Override via `SEISO_DATA_DIR` / `SEISO_INSTALL_DIR` or env.
-- Layout (user-scoped): `hf_cache/`, `models/`, `checkpoints/`, `exports/`, `compress/`, `distill_rl/`, `rl_quant/`, `knowledge/`, `forge.db` (encrypted cols), runtime.json, etc.
+- Layout (user-scoped): `hf_cache/`, `models/`, `checkpoints/`, `exports/`, `compress/`, `distill_rl/`, `knowledge/`, `forge.db` (encrypted cols), runtime.json, etc.
 - Strong sandboxing: `safe_join`, `assert_within`, user_id in all queries.
 
 ### Config
@@ -80,7 +80,7 @@ User
 - **Repro**: Manifests (hash chained via bundled replay), provenance, seeds, snapshots.
 - **Inference**: Model pool with unload, native Linux sidecar isolation, backends auto-select, speculative, context limits, external router client mode.
 
-Entry points: `start` script, `seiso` CLI (`forge`, `train`, `slime`, `nemo-rl`, `chat`, `export`, `compress`, `distill-rl`, `rl-quant`, `experiment`, …), `forge.main:create_app`, `seiso-train-worker`, `seiso-bench-kernels`.
+Entry points: `start` script, `seiso` CLI (`forge`, `train`, `slime`, `nemo-rl`, `chat`, `export`, `compress`, `distill-rl`, `experiment`, …), `forge.main:create_app`, `seiso-train-worker`, `seiso-bench-kernels`.
 
 ---
 
@@ -122,17 +122,8 @@ Entry points: `start` script, `seiso` CLI (`forge`, `train`, `slime`, `nemo-rl`,
 - Multi-seed + auto-sweep + paper bundle.
 - Cross-pipeline (compression + adaptive alignment).
 
-### RL Quant
-- Adaptive RL for GGUF quant policy (per-tensor/layer).
-- Optional `--kernel-rl` co-trains discrete CUDA kernel profiles.
-- `seiso/rl_quant/{runner.py,config_builder.py,sweep.py,kernel_integration.py}`
-- Product presets (`minimal` / `reproducible` / `post_train`) live in one registry: `seiso/rl_quant/presets.py` (API metadata, aliases, defaults, sweep grids).
-- Heavy use of bundled adaptive RL quant internals via `named_preset`.
 
 ### Quant regression experiments
-- `seiso experiment quant-regression` — multi-quant QLoRA training, GGUF export, HF + llama.cpp deploy-quant regression.
-- `seiso/experiments/{quant_regression.py,hf_deploy_regression.py}`
-- Config: `configs/examples/quant_regression_study.yaml`
 
 ### Fused Kernels (unique strength)
 - Native CUDA (rms_norm, swiglu, lora_delta, lora_qkv, cross_entropy) + Triton + PyTorch fallback.
@@ -162,7 +153,7 @@ Entry points: `start` script, `seiso` CLI (`forge`, `train`, `slime`, `nemo-rl`,
 - These are largely pre-existing / baseline-managed. Not blocking for smoke usage.
 
 ### Tests
-- Broad coverage parallel to features (`test_training_*`, `test_*_backends`, `test_kernels*`, `test_rl_quant*`, `test_distill_rl*`, `test_compress`, `test_export*`, `test_gguf*`, security, db, hardware, e2e, etc.).
+- Broad coverage parallel to features (`test_training_*`, `test_*_backends`, `test_kernels*`, `test_distill_rl*`, `test_distill_rl*`, `test_compress`, `test_export*`, `test_gguf*`, security, db, hardware, e2e, etc.).
 - conftest provides temp data dir, auth client, hardware guards.
 - Sample run: 36/37 passed quickly (1 hardware enum mismatch — env-specific).
 
@@ -214,7 +205,7 @@ Seiso maps learning **signals** to proper algorithms (not proxies that look rela
 | Instruction / chat labels | Response-masked SFT (CE) | `method: lora/full` + TRL SFT | Full-sequence CE on chat; packing + response masks together |
 | Verifiable tasks (math/code/choice) | Online GRPO (group-relative advantages + PPO clip) | `method: slime` + `rl_verify`, or `method: nemo_rl` (external [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL)) | Format/process-dominated rewards; zero-spread groups |
 | Preference pairs (chosen/rejected) | Offline DPO (Rafailov) | Distill-RL / `compute_dpo_loss`, or `method: nemo_rl` + `nemo_rl_recipe: dpo` | Silent chosen-only SFT labeled “alignment” |
-| Quantization policy | PPO/VPG/AWR on discrete actions | `rl_quant` / `adaptive_quant` | Simulator-only metrics claimed as deploy quality |
+| Quantization policy | PPO/VPG/AWR on discrete actions | external research repo | Simulator-only metrics claimed as deploy quality |
 
 **SFT:** `preference_as_sft` defaults **false** — preference datasets refuse train unless explicitly opted in (chosen-only SFT; rejected discarded). Packing is incompatible with `train_on_responses_only` on chat-style formats (validator + runtime disable).
 
@@ -352,7 +343,7 @@ Executed full live review + testing per follow-up request:
   - Error surfaced cleanly via `error_text` (Pydantic validation in one test case).
 - **All tasks tested live**:
   - Inference/chat: /v1/models + /v1/chat/completions (small generation succeeded, returned "Hi! How can I...").
-  - CLI: `seiso rl-quant profiles`, compress, train direct all respond.
+  - CLI: compress, train direct all respond.
   - Training tests (`test_training_*.py` + preprocess/models): 30+ passed.
   - Jobs list / recs / models endpoints authenticated OK.
 - **"Uses the full dataset + properly formats"**: Confirmed in core (no max_train_samples unless explicitly in extra), preprocess keeps all valid, recs + UI flags set chat + responses_only for message datasets. UI now reliably propagates the settings.

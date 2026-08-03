@@ -7,7 +7,7 @@ stay on disk (or Hugging Face). This does **not** resume training and is
 
 ## What it proves
 
-After a compress / distill-rl / adaptive_quant / training / export run writes a
+After a compress / distill-rl / training / export run writes a
 manifest, Seiso can seal:
 
 - `manifest_sha256` (local JSON with the mutable `nostr` receipt excluded)
@@ -188,7 +188,7 @@ owner npub.
 
 | Goal | Command / path |
 |------|----------------|
-| Re-check local artifact hashes | `seiso compress manifest-verify`, adaptive_quant replay CLIs |
+| Re-check local artifact hashes | `seiso compress manifest-verify` |
 | Check external commitment | `seiso provenance verify` |
 | Prove a held row was in the train corpus | `seiso provenance dataset-prove` / `dataset-verify-proof` |
 

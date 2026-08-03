@@ -507,14 +507,9 @@ def _run_dpo(
     preferences_path: Path,
     on_log: Callable[[str], None] | None,
 ) -> Path:
-    from seiso.rl_quant.bootstrap import require_adaptive_quant
-
-    require_adaptive_quant()
-    from seiso.adaptive_quant.llm_alignment.config import DPOSettings
-    from seiso.adaptive_quant.llm_alignment.dpo_trainer import DPOTrainer
-    from seiso.adaptive_quant.llm_alignment.preference_data import (
-        load_preference_dataset,
-    )
+    from seiso.distill_rl.dpo.config import DPOSettings
+    from seiso.distill_rl.dpo.dpo_trainer import DPOTrainer
+    from seiso.distill_rl.dpo.preference_data import load_preference_dataset
 
     settings = DPOSettings(
         sft_model_path=str(model_dir),

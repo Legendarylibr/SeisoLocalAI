@@ -219,7 +219,7 @@ def build_app():
         scopes = set(session.get("scopes") or [])
         if jt == "finetune" and "finetune" not in scopes:
             raise HTTPException(403, "scope finetune required")
-        if jt in {"slime", "distill_rl", "rl_quant", "nemo_rl"} and "rl" not in scopes:
+        if jt in {"slime", "distill_rl", "nemo_rl"} and "rl" not in scopes:
             raise HTTPException(403, "scope rl required")
         dry_run = bool(body.get("dry_run"))
         try:

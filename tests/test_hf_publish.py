@@ -55,7 +55,6 @@ def test_write_hub_artifacts(tmp_path: Path):
 def test_pushable_sources():
     assert is_pushable_model({"source": "export"})
     assert is_pushable_model({"source": "training"})
-    assert is_pushable_model({"source": "rl_quant"})
     assert is_pushable_model({"source": "export:job-1:merged"})
     assert is_pushable_model({"source": "training:job-1"})
     assert not is_pushable_model({"source": "hf:meta-llama/Llama"})

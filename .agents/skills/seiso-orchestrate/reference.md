@@ -48,10 +48,9 @@ SEISO_NO_OPEN=1 seiso forge --no-open
 seiso train --config configs/smoke_train_cpu.yaml
 seiso train --config configs/example_lora.yaml
 
-# Compress / distill / rl-quant (research)
+# Compress / distill (research)
 seiso compress --help
 seiso distill-rl --help
-seiso rl-quant --help
 
 # Export
 seiso export --help
@@ -103,7 +102,7 @@ Never send `$KEY` to Buzz.
 ```text
 ## Seiso marketplace run
 - mode: paid
-- type: finetune|slime|distill_rl|rl_quant|nemo_rl|inference
+- type: finetune|slime|distill_rl|nemo_rl|inference
 - status: completed|failed
 - compute_sats: …
 - protocol_fee_sats: …

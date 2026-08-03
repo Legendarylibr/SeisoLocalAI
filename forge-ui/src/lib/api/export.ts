@@ -23,7 +23,6 @@ export const exportApi = {
     checkpoint: string,
     formats: string[],
     hub?: HubPublishFields,
-    rlQuantJobId?: string,
     profile?: string,
     ggufQuantizations?: string[],
   ) =>
@@ -35,7 +34,6 @@ export const exportApi = {
         profile: profile || null,
         gguf_quantizations: ggufQuantizations?.length ? ggufQuantizations : undefined,
         hub: hub || null,
-        rl_quant_job_id: rlQuantJobId || null,
       }),
     }),
   startPublishToHub: (body: {

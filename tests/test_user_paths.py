@@ -34,7 +34,6 @@ def test_data_dir_layout_matches_docs(tmp_path: Path, monkeypatch):
         "artifacts",
         "recipes",
         "uploads",
-        "rl_quant",
         "compress",
         "distill_rl",
         "hf_cache",

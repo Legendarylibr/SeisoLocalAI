@@ -416,23 +416,6 @@ def test_forge_pipeline_defaults_are_product_presets():
     assert CompressStartRequest().preset == "full"
 
 
-def test_rl_quant_keeps_gguf_export_when_gguf_path_promotes_backend():
-    """gguf_path implies llama_cpp — do not clear export using default simulator."""
-    from forge.api.routes.rl_quant import (
-        RLQuantStartRequest,
-        _effective_rl_quant_backend,
-    )
-
-    config = RLQuantStartRequest(
-        gguf_path="/tmp/model.gguf",
-        gguf_export=True,
-        backend="simulator",
-    ).model_dump()
-    assert _effective_rl_quant_backend(config) == "llama_cpp"
-    if _effective_rl_quant_backend(config) == "simulator":
-        config["gguf_export"] = False
-    assert config["gguf_export"] is True
-
 
 def test_emit_standard_artifacts_skips_orphan_distill_by_default(tmp_path: Path):
     from seiso.rl_verify.synth_code import emit_standard_artifacts

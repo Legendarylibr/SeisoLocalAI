@@ -13,7 +13,7 @@ from seiso_cli.commands.forge import doctor, forge
 from seiso_cli.commands.mesh import mesh_app
 from seiso_cli.commands.nemo_rl import nemo_rl
 from seiso_cli.commands.pay import pay_app
-from seiso_cli.commands.pipelines import compress_app, distill_rl_app, rl_quant_app
+from seiso_cli.commands.pipelines import compress_app, distill_rl_app
 from seiso_cli.commands.provenance import provenance_app
 from seiso_cli.commands.slime import slime
 from seiso_cli.commands.train import train
@@ -36,7 +36,6 @@ app.command(name="export")(export_cmd)
 app.command(name="inference")(inference_cmd)
 app.command(name="bench-inference")(bench_inference_cmd)
 
-app.add_typer(rl_quant_app, name="rl-quant")
 app.add_typer(compress_app, name="compress")
 app.add_typer(distill_rl_app, name="distill-rl")
 app.add_typer(experiment_app, name="experiment")

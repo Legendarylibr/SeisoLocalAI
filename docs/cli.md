@@ -218,72 +218,10 @@ Config references: `configs/distill_rl_smoke.json`, `configs/distill_rl_reproduc
 
 See [compression.md](compression.md).
 
-## `seiso rl-quant`
-
-Adaptive RL quantization + optional CUDA kernel profile co-training (`seiso.adaptive_quant`). **Auto-sweep** (default on) grid-searches learning rates before the full run.
-
-```bash
-# Fast smoke (simulator backend, analytic kernel metrics)
-seiso rl-quant run --preset minimal --training-episodes 256
-
-# Kernel RL — joint quant policy + CUDA launch profiles
-seiso rl-quant run --preset reproducible --kernel-rl --training-episodes 512
-
-# Live CUDA micro-benchmarks (NVIDIA GPU; slower, ground-truth)
-seiso rl-quant run --kernel-rl --kernel-live-benchmark
-
-# Disable hyperparameter sweep
-seiso rl-quant run --preset minimal --no-auto-sweep
-
-# Custom sweep grid (JSON/TOML)
-seiso rl-quant run --preset minimal --sweep-config configs/my_sweep.json
-
-# List tunable kernel profiles
-seiso rl-quant profiles
-
-# Machine-readable summary
-seiso rl-quant run --preset minimal --kernel-rl --json
-```
-
-Presets: `minimal` | `reproducible` | `post_train`. Backends: `simulator` (default) | `llama_cpp`.
-
-Outputs: `{SEISO_DATA_DIR}/rl_quant/cli/<job_id>/` (CLI user `cli`).
-
-Forge equivalent: **RL Quant** page (`/rl-quant`) or `POST /api/rl-quant/jobs`.
-
-Config reference: `configs/rl_quant_smoke.json`.
 
 ## `seiso experiment`
 
-Research benchmarks and regression studies (headless; no Forge server required).
-
-### `seiso experiment quant-regression`
-
-Train one model at several QLoRA quants, export GGUFs, and measure deployment-quant regression (HF merged-weight eval and/or llama.cpp route eval).
-
-```bash
-# Default study config (Qwen 3B + MetaMathQA)
-seiso experiment quant-regression
-
-# Custom base training YAML (quant overridden per run)
-seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml
-
-# Compare training quants and GGUF export variants
-seiso experiment quant-regression \
-  --quants 4bit,8bit,16bit \
-  --gguf-quants q4_k_m,q8_0,f16 \
-  --measurement both
-
-# Reuse checkpoints from a prior study
-seiso experiment quant-regression --study-dir ~/.seiso/experiments/my-study --skip-training
-
-# Machine-readable report
-seiso experiment quant-regression --json
-```
-
-Requires `.[train]` and `llama.cpp` (`LLAMA_CPP_DIR` or system `convert_hf_to_gguf`) for GGUF export / route eval. Outputs land under the study `output_dir` from the base YAML (default example: `~/.seiso/experiments/quant-regression-qwen3b-metamath/`).
-
-Config reference: `configs/examples/quant_regression_study.yaml`.
+Adaptive RL quantization and quant-regression studies moved to the standalone [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization) research repo. The product CLI keeps an `experiment` group that prints a pointer when invoked without subcommands.
 
 ## `seiso provenance`
 
@@ -446,6 +384,4 @@ See [training/multi-gpu.md](training/multi-gpu.md).
 | Knowledge ingest / retrieve | `/knowledge` | `/api/knowledge` |
 | Recipe graph jobs | `/recipes` | `/api/recipes` |
 
-Compression and distill-RL pipelines also have CLI equivalents (`seiso compress run`, `seiso distill-rl run`, `seiso rl-quant run`).
-
-Prefer `seiso rl-quant run` for the integrated pipeline; the bundled `seiso.adaptive_quant` package provides the research internals.
+Compression and distill-RL pipelines also have CLI equivalents (`seiso compress run`, `seiso distill-rl run`).

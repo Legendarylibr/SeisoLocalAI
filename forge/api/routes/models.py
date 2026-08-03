@@ -396,12 +396,12 @@ async def register_local(
     existing = await db.get_model_by_path(user_id, str(path))
     if existing:
         return existing
-    # Clients may not claim Seiso-created provenance (training/export/rl_quant).
+    # Clients may not claim Seiso-created provenance (training/export).
     source = (body.source or "manual").strip() or "manual"
     if source.split(":")[0] in PUSHABLE_SOURCES:
         raise HTTPException(
             400,
-            "source cannot be training, export, or rl_quant for manual registration",
+            "source cannot be training or export for manual registration",
         )
     return await db.add_model(
         user_id=user_id,

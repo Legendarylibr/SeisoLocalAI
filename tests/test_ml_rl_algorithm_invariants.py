@@ -19,7 +19,7 @@ from seiso.training.config import TrainConfig, TrainMethod
 def test_dpo_empty_completion_logps_are_refused():
     import torch
 
-    from seiso.adaptive_quant.llm_alignment.dpo_loss import get_batch_logps
+    from seiso.distill_rl.dpo.dpo_loss import get_batch_logps
 
     # All labels masked → no completion tokens after causal shift.
     logits = torch.zeros(2, 4, 5)
@@ -31,7 +31,7 @@ def test_dpo_empty_completion_logps_are_refused():
 def test_dpo_empty_completion_sentinel_opt_in():
     import torch
 
-    from seiso.adaptive_quant.llm_alignment.dpo_loss import get_batch_logps
+    from seiso.distill_rl.dpo.dpo_loss import get_batch_logps
 
     logits = torch.zeros(2, 4, 5)
     labels = torch.full((2, 4), -100)
@@ -42,7 +42,7 @@ def test_dpo_empty_completion_sentinel_opt_in():
 
 
 def test_dpo_collator_joint_tokenizes_prompt_completion():
-    from seiso.adaptive_quant.llm_alignment.data_collator import DPODataCollator
+    from seiso.distill_rl.dpo.data_collator import DPODataCollator
 
     class _Tok:
         pad_token_id = 0
@@ -547,7 +547,7 @@ def test_train_config_slime_multi_epoch_applies_kl_coef(tmp_path, monkeypatch):
 
 
 def test_dpo_uses_sum_logps_by_default():
-    from seiso.adaptive_quant.llm_alignment.config import DPOSettings
+    from seiso.distill_rl.dpo.config import DPOSettings
     from seiso.distill_rl.config import DistillRLConfig
 
     settings = DPOSettings()
@@ -555,67 +555,8 @@ def test_dpo_uses_sum_logps_by_default():
     assert DistillRLConfig.model_fields["dpo_average_log_prob"].default is False
 
 
-def test_recommendation_evidence_simulator_not_deploy_claimable():
-    from seiso.rl_quant.recommendation import recommendation_evidence
-
-    meta = recommendation_evidence(
-        {
-            "evidence_level": "simulator",
-            "deploy_quality_claimable": False,
-        }
-    )
-    assert meta["evidence_level"] == "simulator"
-    assert meta["deploy_quality_claimable"] is False
-    assert meta["deploy_quality_note"]
 
 
-def test_recommendation_evidence_ignores_false_simulator_claimable_flag():
-    from seiso.rl_quant.recommendation import recommendation_evidence
-
-    meta = recommendation_evidence(
-        {
-            "evidence_level": "simulator",
-            "deploy_quality_claimable": True,
-        }
-    )
-    assert meta["deploy_quality_claimable"] is False
-
-
-def test_recommendation_evidence_llama_cpp_needs_external_quality():
-    from seiso.rl_quant.recommendation import recommendation_evidence
-
-    meta = recommendation_evidence(
-        {
-            "evidence_level": "local_llama_cpp",
-            "deploy_quality_claimable": True,
-        }
-    )
-    assert meta["deploy_quality_claimable"] is False
-    assert meta["deploy_quality_note"]
-
-    meta_ok = recommendation_evidence(
-        {
-            "evidence_level": "local_llama_cpp",
-            "deploy_quality_claimable": True,
-            "external_quality": True,
-        }
-    )
-    assert meta_ok["deploy_quality_claimable"] is True
-
-
-def test_recommendation_evidence_reads_nested_research_level():
-    from seiso.rl_quant.recommendation import recommendation_evidence
-
-    meta = recommendation_evidence(
-        {
-            "research": {
-                "evidence": {"level": "simulator"},
-                "measurement": {"external_quality": False},
-            }
-        }
-    )
-    assert meta["evidence_level"] == "simulator"
-    assert meta["deploy_quality_claimable"] is False
 
 
 def test_slime_http_rollout_refuses_disabled_weight_sync(tmp_path, monkeypatch):
@@ -693,39 +634,6 @@ def test_verifier_correct_ugly_outranks_wrong_pretty():
     assert wrong_pretty.passed is False
 
 
-def test_recommendation_evidence_rejects_aggregate_deploy_claim():
-    from seiso.rl_quant.recommendation import recommendation_evidence
-
-    meta = recommendation_evidence(
-        {
-            "evidence_level": "multiseed_aggregate",
-            "deploy_quality_claimable": True,
-            "external_quality": True,
-        }
-    )
-    assert meta["deploy_quality_claimable"] is False
-    assert meta["deploy_quality_note"]
-
-
-def test_claims_validation_multiseed_inherits_simulator_invalids():
-    from seiso.adaptive_quant.configuration import FrameworkConfig
-    from seiso.adaptive_quant.pipeline.research_contract import (
-        EVIDENCE_MULTISEED,
-        build_claims_validation,
-    )
-
-    claims = build_claims_validation(
-        config=FrameworkConfig(backend="simulator"),
-        summary={},
-        metrics={},
-        evidence_level=EVIDENCE_MULTISEED,
-    )
-    assert claims["evidence_level"] == EVIDENCE_MULTISEED
-    assert claims["deployment_grade"] is False
-    assert "seed_or_trial_aggregate_statistics" in claims["valid_claims"]
-    assert "policy_learning_dynamics" in claims["valid_claims"]
-    assert "real_hardware_latency_claims" in claims["invalid_claims"]
-    assert "llm_weight_updates" in claims["invalid_claims"]
 
 
 def test_slime_refuses_field_reward_without_opt_in(tmp_path, monkeypatch):
@@ -862,7 +770,7 @@ def test_auto_code_reward_skips_empty_rollouts():
 
 
 def test_dpo_rejects_identical_chosen_rejected():
-    from seiso.adaptive_quant.llm_alignment.preference_data import _normalize_preference_row
+    from seiso.distill_rl.dpo.preference_data import _normalize_preference_row
 
     with pytest.raises(ValueError, match="identical chosen/rejected"):
         _normalize_preference_row(
@@ -872,7 +780,7 @@ def test_dpo_rejects_identical_chosen_rejected():
 
 
 def test_dpo_beta_must_be_positive():
-    from seiso.adaptive_quant.llm_alignment.config import DPOSettings
+    from seiso.distill_rl.dpo.config import DPOSettings
     from seiso.distill_rl.config import DistillRLConfig
 
     with pytest.raises(ValueError, match="beta must be > 0"):
@@ -892,16 +800,6 @@ def test_dpo_beta_must_be_positive():
             }
         )
 
-
-def test_claims_validation_simulator_export_not_valid_claim():
-    from seiso.adaptive_quant.configuration import FrameworkConfig
-    from seiso.adaptive_quant.pipeline.research_contract import _claim_boundary
-
-    cfg = FrameworkConfig(backend="simulator")
-    object.__setattr__(cfg, "llama_cpp_gguf_export_enabled", True)
-    boundary = _claim_boundary(cfg, "simulator")
-    assert "exported_gguf_from_recommendation_quant_type" not in boundary["valid_claims"]
-    assert "exported_gguf_from_recommendation_quant_type" in boundary["invalid_claims"]
 
 
 def test_clipped_policy_loss_respects_asymmetric_bounds():
@@ -1163,7 +1061,7 @@ def test_backprop_uses_no_sync_until_final_microbatch(tmp_path):
 def test_dpo_loss_identity_equals_log2():
     import torch
 
-    from seiso.adaptive_quant.llm_alignment.dpo_loss import compute_dpo_loss
+    from seiso.distill_rl.dpo.dpo_loss import compute_dpo_loss
 
     zeros = torch.zeros(4)
     loss, metrics = compute_dpo_loss(zeros, zeros, zeros, zeros, beta=0.1)
@@ -1174,7 +1072,7 @@ def test_dpo_loss_identity_equals_log2():
 def test_dpo_reward_margin_matches_beta_times_logits():
     import torch
 
-    from seiso.adaptive_quant.llm_alignment.dpo_loss import compute_dpo_loss
+    from seiso.distill_rl.dpo.dpo_loss import compute_dpo_loss
 
     pc = torch.tensor([1.0, 0.5])
     pr = torch.tensor([0.0, 0.25])

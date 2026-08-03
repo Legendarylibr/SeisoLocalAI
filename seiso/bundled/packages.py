@@ -9,8 +9,3 @@ CODELLAMA: BundledPackage = make_bundled_package(
     "seiso.codellama_compress",
     missing_hint="Expected seiso.codellama_compress",
 )
-ADAPTIVE_QUANT: BundledPackage = make_bundled_package(
-    "seiso/adaptive_quant",
-    "seiso.adaptive_quant",
-    missing_hint="Expected seiso.adaptive_quant",
-)

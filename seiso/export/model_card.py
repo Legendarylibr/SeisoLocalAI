@@ -12,7 +12,7 @@ from typing import Any
 from seiso.io.jsonl import read_json_file
 
 _FINETUNE_TYPES = frozenset(
-    {"lora", "qlora", "full", "embedding", "slime", "nemo_rl", "rl_quant", "compress"}
+    {"lora", "qlora", "full", "embedding", "slime", "nemo_rl", "compress"}
 )
 
 

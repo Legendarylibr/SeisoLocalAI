@@ -18,7 +18,6 @@ class MaintenanceMixin:
                 "job_events",
                 "distill_rl_jobs",
                 "compress_jobs",
-                "rl_quant_jobs",
                 "hub_publish_jobs",
                 "export_jobs",
                 "training_jobs",

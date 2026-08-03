@@ -28,7 +28,7 @@ _JOB_LOCK = threading.Lock()
 _RUNNING = False
 
 # Allowlisted job types → CLI argv builder
-_RL_TYPES = frozenset({"slime", "distill_rl", "rl_quant", "nemo_rl"})
+_RL_TYPES = frozenset({"slime", "distill_rl", "nemo_rl"})
 
 
 def _append_log(job: dict[str, Any], line: str, data_dir: Path | None) -> None:
@@ -218,10 +218,6 @@ def _cli_command(job: dict[str, Any], artifact: Path) -> list[str]:
     if jt == "distill_rl":
         args = [py, "-m", "seiso_cli.main", "distill-rl", "run", "--preset", preset]
         return args
-
-    if jt == "rl_quant":
-        p = "minimal" if preset in {"smoke", "minimal", ""} else preset
-        return [py, "-m", "seiso_cli.main", "rl-quant", "run", "--preset", p]
 
     if jt == "nemo_rl":
         if not (os.environ.get("SEISO_NEMO_RL_ROOT") or "").strip():

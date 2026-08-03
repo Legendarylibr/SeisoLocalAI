@@ -30,14 +30,6 @@ def format_stage_pipeline_job(row: dict) -> dict:
     return out
 
 
-def format_rl_quant_job(row: dict) -> dict:
-    """Decode gguf_quants_json / recommendation_json on an RL quant row."""
-    out = dict(row)
-    out["gguf_quants"] = _parse_json_field(row, "gguf_quants_json", [])
-    out["recommendation"] = _parse_json_field(row, "recommendation_json", {})
-    return out
-
-
 def stage_presets_response(
     presets: dict[str, dict[str, Any]],
     stage_order: tuple[str, ...] | list[str],

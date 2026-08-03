@@ -43,7 +43,6 @@ describe("API payloads", () => {
       ["gguf"],
       undefined,
       undefined,
-      undefined,
       ["q4_k_m", "q8_0"],
     );
 
@@ -57,7 +56,6 @@ describe("API payloads", () => {
           profile: null,
           gguf_quantizations: ["q4_k_m", "q8_0"],
           hub: null,
-          rl_quant_job_id: null,
         }),
       }),
     );

@@ -25,7 +25,6 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: "Studio",
     items: [
       { to: "/train", label: "Train", icon: "train", desc: "LoRA fine-tuning" },
-      { to: "/rl-quant", label: "RL Quant", icon: "quant", desc: "Reward-guided quant" },
       { to: "/compress", label: "Compress", icon: "compress", desc: "Distill & prune LLMs" },
       { to: "/distill-rl", label: "Distill-RL", icon: "train", desc: "Distill + DPO alignment" },
       { to: "/export", label: "Export", icon: "export", desc: "Publish to Hub" },
@@ -42,7 +41,7 @@ export function Layout({ children, fullBleed = false }: { children: React.ReactN
   const location = useLocation();
   const { logout } = useAuth();
   const isChat = location.pathname === "/chat";
-  const isStudioCompact = /^\/(train|rl-quant|compress|distill-rl|export|recipes)(\/|$)/.test(location.pathname);
+  const isStudioCompact = /^\/(train|compress|distill-rl|export|recipes)(\/|$)/.test(location.pathname);
   const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {

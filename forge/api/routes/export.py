@@ -154,18 +154,6 @@ async def start_export(
         config["hub"] = redacted_hub
     gguf_quants = list(body.gguf_quantizations or ["q4_k_m"])
 
-    if body.rl_quant_job_id:
-        rl_job = await db.get_rl_quant_job(body.rl_quant_job_id, user_id)
-        if not rl_job:
-            raise HTTPException(404, "RL quant job not found")
-        if rl_job.get("status") != "completed":
-            raise HTTPException(400, "RL quant job is not completed")
-        stored = rl_job.get("gguf_quants_json") or "[]"
-        parsed = loads_json_field(stored, [])
-        if parsed:
-            gguf_quants = parsed
-        config["rl_quant_job_id"] = body.rl_quant_job_id
-
     hub_precheck_dict: dict[str, Any] | None = None
     if hub_repo and hub_metadata:
         from seiso.export.hub_precheck import (

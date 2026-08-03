@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { api, ExportJob, HubPublishFields, PublishableModel, RLQuantJob, subscribeSSE } from "@/lib/api";
+import { api, ExportJob, HubPublishFields, PublishableModel, subscribeSSE } from "@/lib/api";
 import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
 import { canPublishToHub } from "@/lib/hfAuth";
@@ -43,8 +43,6 @@ export function ExportPage() {
   const [ggufQuants, setGgufQuants] = useState<string[]>(["q4_k_m"]);
   const [hub, setHub] = useState<HubPublishFields>(emptyHub);
   const [pushOnExport, setPushOnExport] = useState(false);
-  const [rlQuantJobId, setRlQuantJobId] = useState("");
-  const [rlJobs, setRlJobs] = useState<RLQuantJob[]>([]);
   const [publishable, setPublishable] = useState<PublishableModel[]>([]);
   const [exportJobs, setExportJobs] = useState<ExportJob[]>([]);
   const [selectedModelId, setSelectedModelId] = useState("");
@@ -58,14 +56,12 @@ export function ExportPage() {
   const streamAbortRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    api.listRLQuantJobs().then(setRlJobs).catch(console.error);
     api.listPublishableOutputs().then(setPublishable).catch(console.error);
     api.listExportJobs().then(setExportJobs).catch(console.error);
     api.listExportProfiles().then(setProfiles).catch(console.error);
     return () => streamAbortRef.current?.();
   }, []);
 
-  const completedRlJobs = rlJobs.filter((j) => j.status === "completed" && j.gguf_quants?.length);
   const completedExports = exportJobs.filter((j) => j.status === "completed");
   const GGUF_QUANT_OPTIONS = ["q2_k", "q3_k_m", "q4_k_m", "q5_k_m", "q6_k", "q8_0", "f16"];
 
@@ -102,9 +98,8 @@ export function ExportPage() {
         checkpoint,
         formats,
         hubPayload,
-        rlQuantJobId || undefined,
         profile || undefined,
-        rlQuantJobId ? undefined : ggufQuants,
+        ggufQuants,
       );
       setLastExportJobId(res.job_id);
       streamAbortRef.current?.();
@@ -152,7 +147,7 @@ export function ExportPage() {
         hub: fields,
         formats,
         profile: profile || undefined,
-        gguf_quantizations: rlQuantJobId ? undefined : ggufQuants,
+        gguf_quantizations: ggufQuants,
       });
       const lines = [
         res.ok ? `Precheck passed for ${res.repo_id}` : `Precheck failed for ${res.repo_id}`,
@@ -268,17 +263,6 @@ export function ExportPage() {
                   ))}
                 </select>
               </div>
-              <div className="form-field">
-                <label>RL quant job (optional)</label>
-                <select value={rlQuantJobId} onChange={(e) => setRlQuantJobId(e.target.value)}>
-                  <option value="">Manual / default quants</option>
-                  {completedRlJobs.map((j) => (
-                    <option key={j.id} value={j.id}>
-                      {j.id.slice(0, 8)} — {j.gguf_quants.join(", ")}
-                    </option>
-                  ))}
-                </select>
-              </div>
             </div>
             <div className="form-field">
               <label>Formats</label>
@@ -295,7 +279,7 @@ export function ExportPage() {
                 ))}
               </div>
             </div>
-            {formats.includes("gguf") && !rlQuantJobId && (
+            {formats.includes("gguf") && (
               <div className="form-field">
                 <label>GGUF quantizations</label>
                 <div className="studio-chip-group">
