@@ -490,6 +490,44 @@ def test_import_claim_materialize_dry_run_e2e(
     assert reloaded["ranks"][0]["status"] == "pending"
 
 
+def test_materialize_refuses_job_type_method_mismatch(
+    mesh_env: Path, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    monkeypatch.setenv("SEISO_MESH_ALLOW_LOOPBACK", "1")
+    from seiso.mesh.coordinator import build_plan, materialize_worker_config
+
+    plan_out = build_plan(
+        channel="ch-mismatch",
+        job_type="finetune",
+        nodes=2,
+        master_addr="127.0.0.1",
+        gpus_per_node=1,
+    )
+    base = tmp_path / "slime_base.yaml"
+    base.write_text(
+        "\n".join(
+            [
+                "model_id: hf-internal-testing/tiny-random-LlamaForCausalLM",
+                "dataset: ./data/sample.jsonl",
+                "output_dir: ./.test_outputs/mesh-mismatch",
+                "method: slime",
+                "quant: 16bit",
+                "epochs: 1",
+                "batch_size: 1",
+                "max_seq_length: 128",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(ValueError, match="job_type=finetune"):
+        materialize_worker_config(
+            plan_out["plan"],
+            node_rank=0,
+            base_config=base,
+        )
+
+
 def test_buzz_kind9_content_embed_roundtrip(mesh_env: Path) -> None:
     """Buzz rejects --kind 31251; peers embed the signed event as kind-9 content."""
     import json

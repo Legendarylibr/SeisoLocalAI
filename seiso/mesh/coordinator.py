@@ -437,6 +437,28 @@ def claim_rank(
     }
 
 
+def _assert_base_method_matches_job_type(plan: dict[str, Any], cfg: Any) -> None:
+    """Refuse mismatched mesh job_type vs base-config TrainConfig.method.
+
+    ``job_type`` is integrity metadata on the plan; the runner method comes from
+    ``--base-config``. Silent slime↔finetune mismatches waste GPUs.
+    """
+    jt = str(plan.get("job_type") or "").strip().lower()
+    method = getattr(cfg, "method", None)
+    method_val = str(getattr(method, "value", method) or "").strip().lower()
+    if jt == "slime" and method_val != "slime":
+        raise ValueError(
+            f"Mesh plan job_type=slime requires base-config method=slime "
+            f"(got method={method_val!r}). Use a slime YAML or plan --type finetune."
+        )
+    if jt == "finetune" and method_val not in {"lora", "full", "embedding"}:
+        raise ValueError(
+            f"Mesh plan job_type=finetune requires base-config method in "
+            f"lora|full|embedding (got method={method_val!r}). "
+            "For GRPO use plan --type slime with a slime YAML."
+        )
+
+
 def materialize_worker_config(
     plan: dict[str, Any],
     *,
@@ -462,6 +484,7 @@ def materialize_worker_config(
     from seiso.training.config import TrainConfig
 
     cfg = TrainConfig.model_validate(merged)
+    _assert_base_method_matches_job_type(plan, cfg)
     job_id = str(plan["job_id"])
     out_dir = safe_join(mesh_root(data_dir), "plans", job_id)
     out_dir.mkdir(parents=True, exist_ok=True)

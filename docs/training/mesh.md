@@ -64,8 +64,13 @@ seiso mesh worker --plan "$JOB_ID" --rank 1 \
 
 `--dry-run` materializes the worker YAML and prints the `seiso train` command without starting GPUs. `--launch` claims the rank, writes `mesh/plans/<job_id>/rank-<n>-train.yaml`, and runs train.
 
-`protocol_fee_sats` on plans is always `0`; `market` is `false`.
+**Every node must run its own worker.** Mesh is not torchrun elastic: there is no
+central process that remotes onto peers. Wrong ranks / missing peers hang at DDP
+init (standard PyTorch behavior). Prefer matching `--base-config` method to the
+plan `job_type` (`finetune` → `lora|full|embedding`, `slime` → `slime`) —
+materialize refuses mismatches.
 
+`protocol_fee_sats` on plans is always `0`; `market` is `false`.
 Plans are sandboxed under `mesh/plans/<job_id>.json` — absolute foreign paths are refused. Each plan is a **NIP-01** event (kind `31251`) signed with the agent nsec (**BIP-340 Schnorr**). Workers verify the signature + body match, then check the shared `SEISO_MESH_TOKEN` HMAC (bound to job id + planner pubkey).
 
 ## Frontend vs agent
