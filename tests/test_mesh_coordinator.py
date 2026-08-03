@@ -15,11 +15,14 @@ def mesh_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("SEISO_ALLOW_MESH", "1")
     monkeypatch.setenv("SEISO_MESH_TOKEN", "test-mesh-token-ok")
+    # Unit tests are single-operator smoke — production requires trusted npubs.
+    monkeypatch.setenv("SEISO_MESH_ALLOW_ANY_PLANNER", "1")
     monkeypatch.setenv("BUZZ_PRIVATE_KEY", generate_keypair().nsec)
     monkeypatch.setenv("SEISO_AGENT", "1")
     monkeypatch.delenv("SEISO_MESH_TRUSTED_NPUBS", raising=False)
     monkeypatch.delenv("SEISO_MESH_TRUSTED_PUBKEYS", raising=False)
     monkeypatch.delenv("SEISO_MESH_ALLOW_LOOPBACK", raising=False)
+    monkeypatch.delenv("SEISO_MESH_CONFIRM_LAUNCH", raising=False)
     return tmp_path / "data"
 
 
@@ -183,6 +186,7 @@ def test_trusted_npub_allowlist(
         gpus_per_node=1,
     )
     planner_npub = plan_out["plan"]["nostr"]["npub"]
+    monkeypatch.delenv("SEISO_MESH_ALLOW_ANY_PLANNER", raising=False)
     monkeypatch.setenv("SEISO_MESH_TRUSTED_NPUBS", planner_npub)
     worker_env(plan_out["plan"], node_rank=0)
 
@@ -190,6 +194,85 @@ def test_trusted_npub_allowlist(
     monkeypatch.setenv("SEISO_MESH_TRUSTED_NPUBS", other.npub)
     with pytest.raises(RuntimeError, match="TRUSTED"):
         worker_env(plan_out["plan"], node_rank=0)
+
+
+def test_empty_trusted_allowlist_refused_without_opt_out(
+    mesh_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("SEISO_MESH_ALLOW_ANY_PLANNER", raising=False)
+    monkeypatch.delenv("SEISO_MESH_TRUSTED_NPUBS", raising=False)
+    monkeypatch.delenv("SEISO_MESH_TRUSTED_PUBKEYS", raising=False)
+    from seiso.mesh.coordinator import build_plan
+
+    with pytest.raises(RuntimeError, match="TRUSTED_NPUBS|ALLOW_ANY_PLANNER"):
+        build_plan(
+            channel="ch-1",
+            job_type="finetune",
+            nodes=2,
+            master_addr="10.0.0.2",
+            gpus_per_node=1,
+        )
+
+
+def test_launch_requires_confirm(
+    mesh_env: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("SEISO_MESH_ALLOW_LOOPBACK", "1")
+    from seiso.mesh.coordinator import build_plan, prepare_worker
+
+    plan_out = build_plan(
+        channel="ch-1",
+        job_type="finetune",
+        nodes=2,
+        master_addr="127.0.0.1",
+        gpus_per_node=1,
+    )
+    base = tmp_path / "base.yaml"
+    base.write_text(
+        "model_id: hf-internal-testing/tiny-random-LlamaForCausalLM\n"
+        "dataset: ./data/sample.jsonl\noutput_dir: ./out\nmethod: lora\nquant: 16bit\n"
+        "epochs: 1\nbatch_size: 1\nmax_seq_length: 128\nlora_r: 4\nlora_alpha: 8\n"
+        "gradient_checkpointing: false\neval_split_ratio: 0\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="confirm"):
+        prepare_worker(
+            plan_out["plan"]["job_id"],
+            node_rank=0,
+            base_config=base,
+            launch=True,
+            confirm_launch=False,
+        )
+
+
+def test_import_signed_plan_refuses_bad_job_type(mesh_env: Path) -> None:
+    import json
+    import os
+
+    from seiso.mesh.coordinator import build_plan, import_signed_plan
+    from seiso.research.nostr.events import sign_event
+    from seiso.research.nostr.keys import keypair_from_secret
+
+    plan_out = build_plan(
+        channel="ch-1",
+        job_type="finetune",
+        nodes=2,
+        master_addr="10.0.0.2",
+        gpus_per_node=1,
+    )
+    event = dict(plan_out["nostr_event"])
+    body = json.loads(event["content"])
+    body["job_type"] = "evil"
+    pair = keypair_from_secret(os.environ["BUZZ_PRIVATE_KEY"])
+    draft = {
+        "kind": event["kind"],
+        "created_at": event["created_at"],
+        "tags": event["tags"],
+        "content": json.dumps(body, separators=(",", ":"), sort_keys=True),
+    }
+    evil = sign_event(draft, pair)
+    with pytest.raises(ValueError, match="job_type"):
+        import_signed_plan(evil)
 
 
 def test_relay_signed_event_refuses_unsigned() -> None:

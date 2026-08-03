@@ -362,8 +362,8 @@ kind-9 `buzz messages send` (Buzz rejects `--kind 31251–31254`).
 export SEISO_ALLOW_MESH=1
 export SEISO_MESH_TOKEN=…   # ≥16 chars; out-of-band; never post to Buzz
 export BUZZ_PRIVATE_KEY=nsec1…   # must be a valid Nostr secret (signing key)
-# optional: export SEISO_MESH_TRUSTED_NPUBS=npub1planner…
-# optional single-host smoke: export SEISO_MESH_ALLOW_LOOPBACK=1
+# optional but recommended: export SEISO_MESH_TRUSTED_NPUBS=npub1planner…
+# (required unless SEISO_MESH_ALLOW_ANY_PLANNER=1 for single-operator smoke)
 seiso mesh announce --channel "$CHANNEL" --gpus 2 >announce.json
 jq -c .nostr_event announce.json | buzz messages send --channel "$CHANNEL" --content -
 seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2 --master-addr 10.0.0.1 --gpus-per-node 2 >plan.json
@@ -371,7 +371,7 @@ jq -c .nostr_event plan.json | buzz messages send --channel "$CHANNEL" --content
 # peers:
 seiso mesh import-plan --event plan_event.json
 seiso mesh worker --plan "$JOB_ID" --rank 0 -c configs/smoke_train_gpu.yaml --dry-run
-seiso mesh worker --plan "$JOB_ID" --rank 1 -c configs/smoke_train_gpu.yaml --launch
+seiso mesh worker --plan "$JOB_ID" --rank 1 -c configs/smoke_train_gpu.yaml --launch --confirm-launch
 ```
 
 ## `seiso agent` (Buzz-facing signed status)

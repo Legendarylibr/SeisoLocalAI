@@ -61,11 +61,11 @@ def _canonical_json(payload: dict[str, Any]) -> str:
 
 
 def _scrub_payload(fields: dict[str, Any]) -> dict[str, Any]:
-    """Drop denylisted secret keys from a payload before signing."""
-    from seiso.agent.receipts import _is_forbidden_field
+    """Drop denylisted secret keys and redact secret-shaped values before signing."""
+    from seiso.agent.receipts import _is_forbidden_field, _sanitize_receipt_value
 
     return {
-        key: value
+        key: _sanitize_receipt_value(value)
         for key, value in fields.items()
         if value is not None and not _is_forbidden_field(str(key))
     }

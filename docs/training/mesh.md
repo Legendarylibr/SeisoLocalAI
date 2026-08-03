@@ -11,8 +11,9 @@ Opt-in **shared / multi-node** coordination via a [Buzz](https://github.com/bloc
 1. `SEISO_ALLOW_MESH=1`
 2. A valid Buzz agent `BUZZ_PRIVATE_KEY` **nsec** (BIP-340 signing). `BUZZ_AUTH_TAG` alone cannot sign mesh plans in Seiso. Seiso does **not** NIP-98 to the Buzz relay — buzz-cli does that separately; Seiso signs local NIP-01 mesh events offline.
 3. A shared out-of-band `SEISO_MESH_TOKEN` (≥16 chars; never post the token or plan JSON to Buzz)
-4. Optional allowlist: `SEISO_MESH_TRUSTED_NPUBS` / `SEISO_MESH_TRUSTED_PUBKEYS` (comma-separated) so workers only accept plans from known agent keys
+4. **Planner allowlist (required):** `SEISO_MESH_TRUSTED_NPUBS` / `SEISO_MESH_TRUSTED_PUBKEYS` (comma-separated). Buzz room membership is **not** a Seiso ACL. For single-operator smoke only: `SEISO_MESH_ALLOW_ANY_PLANNER=1`.
 5. Optional single-host smoke: `SEISO_MESH_ALLOW_LOOPBACK=1` (permits `127.0.0.1` master — never the default)
+6. Train launch gate: `--launch` requires `--confirm-launch` (or `SEISO_MESH_CONFIRM_LAUNCH=1`) — only when a human asked to start training
 
 **Forge UI / frontend training cannot start mesh.** The Train studio keeps full **local** training config (including local multi-GPU DDP with `nnodes=1`); multi-node is agent-only. See `GET /api/training/surface`.
 
@@ -35,6 +36,7 @@ See [pay/marketplace.md](../pay/marketplace.md) and [`.agents/skills/seiso-orche
 export SEISO_ALLOW_MESH=1
 export SEISO_MESH_TOKEN="shared-out-of-band-secret"   # never post to Buzz
 export BUZZ_PRIVATE_KEY=nsec1…                        # Buzz agent identity (required)
+export SEISO_MESH_TRUSTED_NPUBS=npub1planner…         # required (or ALLOW_ANY_PLANNER=1 for smoke)
 export BUZZ_RELAY_URL=…
 export SEISO_AGENT=1                                  # generic agent surface marker
 
@@ -47,6 +49,7 @@ seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2 \
   --master-addr 10.0.0.1 --gpus-per-node 2
 # → plan JSON under ~/.seiso/mesh/plans/ + signed nostr_event
 #    gpus-per-node pins distributed_nproc_per_node on every worker
+#    Prefer a **private** Buzz channel: master_addr is in the signed plan.
 
 # Peers: import the signed event from Buzz (kind-9 content), then join
 jq -c .nostr_event <plan.json | buzz messages send --channel "$CHANNEL" --content -
@@ -54,8 +57,9 @@ jq -c .nostr_event <plan.json | buzz messages send --channel "$CHANNEL" --conten
 seiso mesh import-plan --event plan_event.json
 seiso mesh worker --plan "$JOB_ID" --rank 0 \
   --base-config configs/smoke_train_gpu.yaml --dry-run
+# Only after an explicit human ask to start training:
 seiso mesh worker --plan "$JOB_ID" --rank 1 \
-  --base-config configs/smoke_train_gpu.yaml --launch
+  --base-config configs/smoke_train_gpu.yaml --launch --confirm-launch
 ```
 
 `--dry-run` materializes the worker YAML and prints the `seiso train` command without starting GPUs. `--launch` claims the rank, writes `mesh/plans/<job_id>/rank-<n>-train.yaml`, and runs train.

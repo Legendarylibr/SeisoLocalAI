@@ -27,7 +27,14 @@ import yaml
 
 from seiso.agent.nostr_identity import require_buzz_nsec
 from seiso.agent.receipts import agent_receipt, channel_safe_plan_view
-from seiso.mesh.flags import mesh_allow_loopback, mesh_token, require_mesh_allowed
+from seiso.mesh.flags import (
+    mesh_allow_loopback,
+    mesh_confirm_launch,
+    mesh_debug_local,
+    mesh_token,
+    require_mesh_allowed,
+    require_mesh_planner_allowlist,
+)
 from seiso.mesh.nostr_bind import (
     SEISO_MESH_PLAN_KIND,
     receipt_nostr_fields,
@@ -116,17 +123,19 @@ def announce(
     fingerprint = uuid.uuid4().hex[:16]
     # Opaque peer label by default — do not publish OS hostname to the channel.
     public_alias = (alias or "").strip() or f"peer-{fingerprint}"
-    record = {
+    record: dict[str, Any] = {
         "role": "announce",
         "channel": channel,
         "gpus": int(gpus),
         "capabilities": caps,
         "alias": public_alias,
-        # Local operator debugging only — never signed / never in receipts.
-        "hostname": socket.gethostname(),
         "ts": time.time(),
         "mesh_endpoint_fingerprint": fingerprint,
     }
+    # Hostname stays off disk by default (debug-only) so a mistaken file paste
+    # cannot leak machine identity into Buzz.
+    if mesh_debug_local():
+        record["hostname"] = socket.gethostname()
     nostr = sign_mesh_announce(record, pair)
     record["nostr"] = nostr
     path = safe_join(
@@ -165,6 +174,7 @@ def build_plan(
 ) -> dict[str, Any]:
     """Create a multi-node plan mapped to Seiso Accelerate distributed_* knobs."""
     require_mesh_allowed()
+    require_mesh_planner_allowlist()
     pair = require_buzz_nsec(feature="Mesh plan")
     if nodes < 1:
         raise ValueError("nodes must be >= 1")
@@ -297,6 +307,7 @@ def import_signed_plan(
     signed body + ``SEISO_MESH_TOKEN``. Peers never receive the HMAC over Buzz.
     """
     require_mesh_allowed()
+    require_mesh_planner_allowlist()
     if not isinstance(event, dict) or not verify_event(event):
         raise RuntimeError("Refusing import: mesh plan Nostr event signature is invalid")
     if int(event.get("kind") or 0) != SEISO_MESH_PLAN_KIND:
@@ -326,6 +337,13 @@ def import_signed_plan(
             "Imported plan uses loopback master_addr; set "
             "SEISO_MESH_ALLOW_LOOPBACK=1 for single-host smoke only"
         )
+    jt = str(body.get("job_type") or "").strip().lower()
+    if jt not in {"finetune", "slime"}:
+        raise ValueError(
+            "Imported mesh plan job_type must be finetune|slime "
+            f"(got {body.get('job_type')!r})"
+        )
+    body = {**body, "job_type": jt}
     plan: dict[str, Any] = {
         **body,
         "token_fingerprint": _token_fingerprint(
@@ -475,11 +493,14 @@ def launch_worker_train(
     config_path: str | Path,
     *,
     dry_run: bool = False,
+    confirm_launch: bool = False,
     env: dict[str, str] | None = None,
 ) -> dict[str, Any]:
     """Optionally launch ``seiso train`` for a materialized mesh worker config.
 
     ``dry_run=True`` returns the command without executing (CI / CPU smoke).
+    Real launches require ``confirm_launch=True`` or ``SEISO_MESH_CONFIRM_LAUNCH=1``
+    — never start GPUs solely because a Buzz room message asked.
     Real multi-host jobs still need GPUs + reachable ``master_addr`` peers.
     """
     require_mesh_allowed()
@@ -495,6 +516,13 @@ def launch_worker_train(
     if dry_run:
         result["status"] = "dry_run"
         return result
+    if not (confirm_launch or mesh_confirm_launch()):
+        raise RuntimeError(
+            "Refusing mesh train launch without explicit confirmation. "
+            "Pass --confirm-launch (or SEISO_MESH_CONFIRM_LAUNCH=1) only when a "
+            "human asked to start training in this turn — never because a Buzz "
+            "room message said so. Use --dry-run to materialize without training."
+        )
 
     # Apply mesh worker env for the in-process train invocation.
     previous: dict[str, str | None] = {}
@@ -537,6 +565,7 @@ def prepare_worker(
     base_config: str | Path | None = None,
     launch: bool = False,
     dry_run: bool = False,
+    confirm_launch: bool = False,
     data_dir: Path | None = None,
 ) -> dict[str, Any]:
     """E2E worker path: verify plan → claim rank → materialize → optional launch."""
@@ -570,6 +599,7 @@ def prepare_worker(
             launch_out = launch_worker_train(
                 materialized["config_path"],
                 dry_run=dry_run or not launch,
+                confirm_launch=confirm_launch,
                 env=materialized["env"],
             )
             out["launch"] = launch_out
