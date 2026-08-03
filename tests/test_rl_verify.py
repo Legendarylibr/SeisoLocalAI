@@ -6,7 +6,7 @@ from pathlib import Path
 
 import pytest
 
-from seiso.distill_rl.outcome import ensure_thinking_completion, outcome_reward
+from seiso.distill_rl.outcome import outcome_reward
 from seiso.rl_verify import (
     final_answer_text,
     format_thinking_prompt,
@@ -21,10 +21,6 @@ def test_format_thinking_prompt_appends_instruction():
     text = format_thinking_prompt("Solve.", "Show work.")
     assert "Show work." in text
     assert text.endswith("<think>")
-
-
-def test_ensure_thinking_completion_is_noop():
-    assert ensure_thinking_completion("answer", enabled=True) == "answer"
 
 
 def test_closed_thinking_trace_detection():

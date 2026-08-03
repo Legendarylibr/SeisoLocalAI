@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from seiso.models.lora_targets import resolve_lora_target_modules
+from seiso.rl_verify.extract import split_thinking_trace
 from seiso.slime.config import SingleGpuSlimeConfig
 from seiso.slime.rewards import (
     contains_answer_reward,
@@ -17,6 +18,7 @@ from seiso.slime.rewards import (
     numeric_reward,
     resolve_reward,
 )
+from seiso.slime.rollout_generate import format_generation_prompt
 from seiso.slime.trainer import (
     Rollout,
     _append_jsonl_records,
@@ -34,7 +36,6 @@ from seiso.slime.trainer import (
     _empty_stats,
     _filter_rollout_groups,
     _final_output_dir,
-    _format_rollout_prompt,
     _freeze_multimodal_backbones,
     _group_reward_spread_mean,
     _group_verifier_stats,
@@ -53,7 +54,6 @@ from seiso.slime.trainer import (
     _sample_metadata,
     _sampling_batch_size,
     _score_completion,
-    _split_thinking_trace,
     _truncate_text,
 )
 
@@ -505,7 +505,13 @@ def test_thinking_prompt_is_appended_but_completion_is_not_rewritten(tmp_path: P
         output_dir=tmp_path / "out",
     )
 
-    prompt = _format_rollout_prompt("Solve it.", cfg)
+    class _Tok:
+        @staticmethod
+        def apply_chat_template(messages, tokenize=False, add_generation_prompt=True):
+            del tokenize, add_generation_prompt
+            return messages[0]["content"]
+
+    prompt = format_generation_prompt(_Tok(), "Solve it.", cfg)
 
     assert cfg.thinking_instruction in prompt
     assert prompt.endswith("<think>")
@@ -570,7 +576,7 @@ def test_experimental_process_reward_only_when_weighted(tmp_path: Path):
         min_thinking_tokens=4,
     )
 
-    trace, final, complete = _split_thinking_trace(
+    trace, final, complete = split_thinking_trace(
         "<think>First check. Actually revise.</think>The answer is 7."
     )
 
