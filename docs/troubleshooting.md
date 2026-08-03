@@ -142,25 +142,31 @@ SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.co
 
 **Symptom:** `Seiso CLI missing at …/Seiso/.venv/bin/seiso` or `seiso: command not found` right after install on native Linux.
 
-**Cause:** Usually the pip install did not finish (install TUI reported success too early, or heavy extras like PyTorch / llama.cpp failed). The installer now installs core `[forge,dev]` first so the CLI exists before optional training stacks.
+**Cause:** Usually the pip install did not finish (install TUI reported success too early, or heavy extras like PyTorch / llama.cpp failed). On failure the installer falls back to core `[forge]` first so the CLI exists, then retries optional training/inference extras.
 
 **Fix:**
 ```bash
-SEISO_NO_BANNER=1 start
+SEISO_NO_BANNER=1 seiso-start
+# or: SEISO_NO_BANNER=1 start
 ```
 
 If that still fails, inspect the log and reinstall core extras manually:
 ```bash
 cat "$HOME/Seiso/.seiso-install.log" | tail -50
 source "$HOME/Seiso/.venv/bin/activate"
-pip install -U pip wheel setuptools hatchling
-pip install -e "$HOME/Seiso[forge,dev]"
+pip install -U pip wheel 'setuptools>=83'
+pip install -e "$HOME/Seiso[forge]"
 "$HOME/Seiso/.venv/bin/seiso" forge
 ```
 
-Optional training/inference extras can be added afterward:
+Optional training/inference extras can be added afterward (pick your platform):
 ```bash
-pip install -e "$HOME/Seiso[train,llamacpp,dev]"
+# Linux NVIDIA:
+pip install -e "$HOME/Seiso[train,cuda,llamacpp]"
+# Linux CPU / ROCm base:
+# pip install -e "$HOME/Seiso[train,llamacpp]"
+# macOS Apple Silicon:
+# pip install -e "$HOME/Seiso[train,llamacpp,mlx]"
 ```
 
 ## Flash Attention / flash-attn wheel build fails

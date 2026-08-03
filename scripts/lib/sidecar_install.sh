@@ -59,11 +59,11 @@ seiso_native_linux_nvidia() {
 }
 
 seiso_should_require_sidecar() {
-  [[ "${SEISO_REQUIRE_SIDECAR:-0}" == "1" ]] && return 0
+  # Hard-fail only when the user explicitly sets SEISO_REQUIRE_SIDECAR=1.
+  # Profiles no longer force a hard fail — missing Ollama/llama-swap should not
+  # abort a long successful pip install; chat shows setup guidance instead.
   [[ "${SEISO_SIDECAR_OPTIONAL:-0}" == "1" ]] && return 1
-  case "${SEISO_INSTALL_PROFILE:-}" in
-    linux-nvidia|linux-nvidia-native) return 0 ;;
-  esac
+  [[ "${SEISO_REQUIRE_SIDECAR:-0}" == "1" ]] && return 0
   return 1
 }
 
@@ -134,7 +134,8 @@ seiso_seed_sidecar_env() {
   seiso_env_set_default "SEISO_LLAMASWAP_URL" "http://127.0.0.1:8080"
   seiso_env_set_default "SEISO_OLLAMA_URL" "http://127.0.0.1:11434"
   seiso_env_set_default "SEISO_LLAMASWAP_ENGINE" "auto"
-  seiso_env_set_default "SEISO_REQUIRE_SIDECAR" "1"
+  # Soft by default: Forge starts even if Ollama install fails (no sudo / offline).
+  # Set SEISO_REQUIRE_SIDECAR=1 explicitly to hard-fail install/start.
   seiso_env_set_default "OLLAMA_FLASH_ATTENTION" "1"
   seiso_env_set_default "OLLAMA_KV_CACHE_TYPE" "q8_0"
   seiso_env_set_default "OLLAMA_NUM_PARALLEL" "1"
@@ -214,8 +215,7 @@ seiso_sidecar_stack_ready() {
 seiso_verify_sidecar_stack() {
   local ollama_url="${SEISO_OLLAMA_URL:-http://127.0.0.1:11434}"
   local swap_url="${SEISO_LLAMASWAP_URL:-http://127.0.0.1:8080}"
-
-  seiso_should_require_sidecar || return 0
+  local msg
 
   if seiso_sidecar_stack_ready; then
     if seiso_ollama_health_ok "$ollama_url"; then
@@ -226,10 +226,16 @@ seiso_verify_sidecar_stack() {
     return 0
   fi
 
-  seiso_die \
-    "Native Linux NVIDIA GGUF chat requires Ollama or llama-swap. \
-Install with: curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-nvidia.sh | bash \
-(or start Ollama at $ollama_url). Override with SEISO_REQUIRE_SIDECAR=0 for dev."
+  msg="Ollama/llama-swap not reachable (GGUF chat needs a sidecar on native Linux NVIDIA). \
+Install Ollama or run: curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/scripts/bootstrap/linux-nvidia.sh | bash \
+(or start Ollama at $ollama_url). Forge can still start; chat will show setup guidance."
+
+  if seiso_should_require_sidecar; then
+    seiso_die "Native Linux NVIDIA GGUF chat requires Ollama or llama-swap. $msg Set SEISO_REQUIRE_SIDECAR=0 or SEISO_SIDECAR_OPTIONAL=1 to continue without a sidecar."
+  fi
+
+  seiso_warn "$msg"
+  return 0
 }
 
 seiso_run_sidecar_install_phase() {

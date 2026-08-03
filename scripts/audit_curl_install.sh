@@ -99,10 +99,10 @@ else
 fi
 
 if rg -q 'seiso_pip_bootstrap' "$ROOT/scripts/lib/common.sh" 2>/dev/null \
-  && rg -q 'hatchling' "$ROOT/scripts/lib/common.sh" 2>/dev/null; then
-  ok "install worker bootstraps hatchling before editable install"
+  && rg -q 'setuptools>=83' "$ROOT/scripts/lib/common.sh" 2>/dev/null; then
+  ok "install worker bootstraps setuptools>=83 before editable install"
 else
-  bad "install worker missing hatchling bootstrap (editable install may fail on fresh venvs)"
+  bad "install worker missing setuptools>=83 bootstrap (must match pyproject build-system)"
 fi
 
 if rg -q 'seiso_repair_linux_cuda_stack' "$ROOT/scripts/lib/common.sh" 2>/dev/null \
@@ -141,7 +141,7 @@ audit_venv="$(mktemp -d)/venv"
 python3 -m venv "$audit_venv"
 # shellcheck disable=SC1091
 source "$audit_venv/bin/activate"
-python -m pip install -U pip wheel setuptools hatchling -q
+python -m pip install -U pip wheel 'setuptools>=83' -q
 if python -m pip install -e "${clone_dir}[forge,train,dev]" --dry-run >/dev/null 2>&1; then
   ok "pip dry-run [forge,train,dev] succeeds"
 else
