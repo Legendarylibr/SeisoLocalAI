@@ -121,7 +121,7 @@ class TrainingOrchestrator(Orchestrator):
             raise ValueError(
                 "Forge refuses multi-node Accelerate launches (nnodes>1). "
                 "Use local multi-GPU (nnodes=1) from the UI, or a Buzz agent + "
-                "`seiso mesh` for multi-node (experimental, not functional yet)."
+                "`seiso mesh` for multi-node (experimental secondary path)."
             )
         self._emit_log(job_id, f"Starting training: {config.model_id}")
         if resolved := config.extra.get("resolved_model_path"):

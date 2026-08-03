@@ -135,8 +135,8 @@ must still provide `vllm_base_url`.
 
 Multi-GPU checkbox is disabled when `training_defaults.multi_gpu_available` is false.
 
-## Buzz mesh (experimental)
+## Buzz mesh (experimental secondary)
 
-> **Not functional yet — do not use.**
-
-For trusted peers coordinating multi-node jobs over a Buzz channel (no marketplace fee), see [mesh.md](mesh.md) (`SEISO_ALLOW_MESH=1`). Mesh plans map onto the same `distributed_*` / Accelerate knobs documented above.
+Opt-in Buzz-agent multi-node path (`SEISO_ALLOW_MESH=1`). Local `nnodes=1`
+remains the default. See [mesh.md](mesh.md) — plans map onto the same
+`distributed_*` / Accelerate knobs documented above.

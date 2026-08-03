@@ -491,6 +491,9 @@ export type TrainingSurface = {
     operator_mesh_flag_set: boolean;
     buzz_agent_present: boolean;
     not_functional_yet?: boolean;
+    secondary_path?: boolean;
+    nostr_signed_plans?: boolean;
+    sig_alg?: string;
   };
   agent_surface?: string;
   buzz_compatible: boolean;
