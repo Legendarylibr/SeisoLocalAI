@@ -17,11 +17,13 @@
 #   SEISO_NO_BANNER=1   Skip glitch install TUI
 #   SEISO_VERBOSE=1     Show full pip/UI package manager output (no TUI overlay)
 #   SEISO_NO_OPEN=1     Do not open the browser after Forge starts
-#   SEISO_SKIP_FLASH_ATTN=0  Try optional Flash Attention during install (NVIDIA Linux)
+#   SEISO_SKIP_FLASH_ATTN=1 Skip Flash Attention during install (default: skip; set 0 to try)
 #   SEISO_FAST_INSTALL=1    Skip PyTorch/training extras (Forge + GGUF chat only)
 #   SEISO_INSTALL_PROFILE=… Target install: linux-nvidia, linux-cpu, linux-rocm, wsl-nvidia, macos, chat
 #   SEISO_INSTALL_DEV=1     Include dev extras (pytest, ruff, mypy, …)
 #   SEISO_INSTALL_EXTRAS=…  Override auto-detected pip extras (e.g. forge,train,cuda)
+#   SEISO_REQUIRE_SIDECAR=1 Hard-fail install/start if Ollama/llama-swap missing (default: soft warn)
+#   SEISO_GIT_PULL=1        On start/reinstall of an existing clone, git pull --ff-only
 set -euo pipefail
 
 REPO_URL="${SEISO_REPO_URL:-https://github.com/Legendarylibr/SeisoLocalAI.git}"
@@ -259,18 +261,11 @@ main() {
   extras="$(detect_platform_extras)"
   if [[ -n "${SEISO_INSTALL_PROFILE:-}" ]]; then
     log_unless_quiet "Install profile: ${SEISO_INSTALL_PROFILE} → [$extras]"
-    # Bash 3.2 (macOS /bin/bash) has no ${var,,}.
-    case "$(printf '%s' "$SEISO_INSTALL_PROFILE" | tr '[:upper:]' '[:lower:]')" in
-      linux-nvidia|linux-nvidia-native)
-        export SEISO_REQUIRE_SIDECAR="${SEISO_REQUIRE_SIDECAR:-1}"
-        ;;
-    esac
   else
     log_unless_quiet "Installing Python extras: [$extras]"
-    if declare -F seiso_native_linux_nvidia >/dev/null 2>&1 && seiso_native_linux_nvidia; then
-      export SEISO_REQUIRE_SIDECAR="${SEISO_REQUIRE_SIDECAR:-1}"
-    fi
   fi
+  # Sidecar hard-fail is opt-in (SEISO_REQUIRE_SIDECAR=1). Default is soft-warn so a
+  # missing Ollama install cannot abort a completed Python/UI install.
 
   install_log="$root/.seiso-install.log"
 

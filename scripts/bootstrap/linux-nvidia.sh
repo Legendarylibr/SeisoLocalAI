@@ -6,7 +6,8 @@
 set -euo pipefail
 
 export SEISO_INSTALL_PROFILE=linux-nvidia
-export SEISO_REQUIRE_SIDECAR="${SEISO_REQUIRE_SIDECAR:-1}"
+# Soft-warn if Ollama/llama-swap is missing (set SEISO_REQUIRE_SIDECAR=1 to hard-fail).
+export SEISO_REQUIRE_SIDECAR="${SEISO_REQUIRE_SIDECAR:-0}"
 
 RAW_BASE="${SEISO_RAW_BASE:-https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main}"
 

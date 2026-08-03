@@ -50,23 +50,31 @@ seiso_start_bin_dir() {
   printf '%s\n' "${SEISO_BIN_DIR:-$HOME/.local/bin}"
 }
 
+seiso_link_start_command() {
+  # Install a symlink into SEISO_BIN_DIR. Skip non-symlink collisions so we never
+  # clobber an unrelated tool (especially the generic name "start").
+  local start_script="$1" link_path="$2"
+  if [[ -e "$link_path" && ! -L "$link_path" ]]; then
+    seiso_warn "$link_path exists and is not a symlink — leaving it unchanged"
+    return 1
+  fi
+  ln -sf "$start_script" "$link_path"
+}
+
 seiso_install_start_command() {
   local root="$1"
-  local bin_dir start_script link_path
+  local bin_dir start_script
 
   bin_dir="$(seiso_start_bin_dir)"
   start_script="$root/start"
-  link_path="$bin_dir/start"
 
   [[ -f "$start_script" ]] || return 0
   chmod +x "$start_script" 2>/dev/null || true
 
   mkdir -p "$bin_dir"
-  if [[ -e "$link_path" && ! -L "$link_path" ]]; then
-    seiso_warn "$link_path exists and is not a symlink — leaving it unchanged"
-    return 0
-  fi
-  ln -sf "$start_script" "$link_path"
+  # Prefer the unambiguous name; keep "start" for backward compatibility when free.
+  seiso_link_start_command "$start_script" "$bin_dir/seiso-start" || true
+  seiso_link_start_command "$start_script" "$bin_dir/start" || true
 
   seiso_ensure_bin_on_path "$bin_dir"
 }
@@ -332,8 +340,27 @@ seiso_build_forge_ui() {
   seiso_ui_run_script "$root/forge-ui" build || return 1
 }
 
+seiso_python_venv_ok() {
+  # Debian/Ubuntu often ship python3 without python3-venv / ensurepip.
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - <<'PY' >/dev/null 2>&1
+import ensurepip
+import venv
+raise SystemExit(0)
+PY
+}
+
+seiso_build_tools_ok() {
+  # Native extensions (bitsandbytes, llama-cpp source builds, fused kernels)
+  # need a C/C++ toolchain. cmake helps llama-cpp and similar.
+  command -v gcc >/dev/null 2>&1 || return 1
+  command -v g++ >/dev/null 2>&1 || return 1
+  command -v make >/dev/null 2>&1 || return 1
+  return 0
+}
+
 seiso_ensure_system_deps() {
-  local missing=()
+  local missing=() need_pkgs=0
   command -v python3 >/dev/null 2>&1 || missing+=(python3)
   command -v git >/dev/null 2>&1 || missing+=(git)
   command -v curl >/dev/null 2>&1 || missing+=(curl)
@@ -341,9 +368,23 @@ seiso_ensure_system_deps() {
     command -v node >/dev/null 2>&1 || missing+=(node)
     command -v npm >/dev/null 2>&1 || missing+=(npm)
   fi
-  [[ ${#missing[@]} -eq 0 ]] && return 0
 
-  seiso_log "Installing missing system tools: ${missing[*]}"
+  # Even when python3/git/curl already exist, install venv headers + compilers
+  # when missing — minimal images commonly hit this gap.
+  if ((${#missing[@]} > 0)); then
+    need_pkgs=1
+  elif ! seiso_python_venv_ok; then
+    need_pkgs=1
+    seiso_log "Python venv support missing (python3-venv / ensurepip) — installing system packages"
+  elif ! seiso_build_tools_ok; then
+    need_pkgs=1
+    seiso_log "Build tools missing (gcc/g++/make) — installing system packages"
+  fi
+  [[ "$need_pkgs" -eq 1 ]] || return 0
+
+  if ((${#missing[@]} > 0)); then
+    seiso_log "Installing missing system tools: ${missing[*]}"
+  fi
 
   if command -v brew >/dev/null 2>&1; then
     local brew_pkgs=() dep
@@ -354,6 +395,10 @@ seiso_ensure_system_deps() {
         node|npm) [[ " ${brew_pkgs[*]} " == *" node "* ]] || brew_pkgs+=(node) ;;
       esac
     done
+    # Always ensure a compiler toolchain on macOS when Xcode CLT is absent.
+    if ! seiso_build_tools_ok; then
+      [[ " ${brew_pkgs[*]} " == *" gcc "* ]] || brew_pkgs+=(gcc)
+    fi
     if ((${#brew_pkgs[@]} > 0)); then
       brew install "${brew_pkgs[@]}" || return 1
     fi
@@ -649,7 +694,9 @@ seiso_pip_install_for_venv() {
 }
 
 seiso_pip_bootstrap() {
-  seiso_pip_install -U pip wheel "setuptools<82" hatchling
+  # Match pyproject build-system / [dev] pin (setuptools>=83, PYSEC-2026-3447).
+  # setuptools is the build backend; hatchling is not required.
+  seiso_pip_install -U pip wheel "setuptools>=83"
 }
 
 seiso_extras_without_llamacpp() {
@@ -764,9 +811,31 @@ PY
   return 0
 }
 
+seiso_maybe_git_pull() {
+  # Opt-in code upgrade for complete clones. Never force-resets local work.
+  # Repair of incomplete clones still uses install.sh sync_install_clone.
+  local root="$1"
+  [[ "${SEISO_GIT_PULL:-0}" == "1" ]] || return 0
+  [[ -d "$root/.git" ]] || return 0
+  local branch
+  branch="${SEISO_BRANCH:-main}"
+  seiso_log "SEISO_GIT_PULL=1 — fast-forwarding $root to origin/$branch"
+  git -C "$root" fetch --depth 1 origin "$branch" >/dev/null 2>&1 || {
+    seiso_warn "git fetch failed — continuing with local tree"
+    return 0
+  }
+  if git -C "$root" merge-base --is-ancestor HEAD "origin/$branch" 2>/dev/null \
+    && ! git -C "$root" merge-base --is-ancestor "origin/$branch" HEAD 2>/dev/null; then
+    git -C "$root" pull --ff-only origin "$branch" >/dev/null 2>&1 \
+      || seiso_warn "git pull --ff-only failed (local commits or dirty tree?) — continuing"
+  fi
+}
+
 seiso_ensure_installed() {
   local root="$1"
   local extras install_log
+
+  seiso_maybe_git_pull "$root"
 
   extras="$(seiso_detect_platform_extras)"
 

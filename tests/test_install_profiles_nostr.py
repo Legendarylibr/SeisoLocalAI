@@ -80,6 +80,41 @@ def test_install_profiles_all_include_forge():
     assert "npm ci" in common
 
 
+def test_pip_bootstrap_matches_pyproject_setuptools():
+    """Bootstrap must not pin setuptools below the build-system / [dev] floor."""
+    common = _common_sh()
+    assert "setuptools>=83" in common
+    assert "setuptools<82" not in common
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert "setuptools>=83" in pyproject
+
+
+def test_system_deps_check_venv_and_compilers_not_only_cli_names():
+    """Minimal images often have python3/git/curl but lack venv or gcc."""
+    common = _common_sh()
+    assert "seiso_python_venv_ok" in common
+    assert "seiso_build_tools_ok" in common
+    assert "ensurepip" in common
+    assert "python3-venv" in common
+
+
+def test_start_command_registers_seiso_start():
+    common = _common_sh()
+    assert "seiso-start" in common
+    assert "seiso_link_start_command" in common
+
+
+def test_sidecar_hard_fail_is_opt_in_only():
+    sidecar = (ROOT / "scripts/lib/sidecar_install.sh").read_text(encoding="utf-8")
+    # Must not force hard-fail solely from install profile name.
+    assert "linux-nvidia|linux-nvidia-native) return 0" not in sidecar
+    assert "SEISO_REQUIRE_SIDECAR" in sidecar
+    # Seeded .env must not force REQUIRE=1 (breaks offline / no-sudo machines).
+    seed_block = sidecar.split("seiso_seed_sidecar_env")[1].split("seiso_sidecar_fallback")[0]
+    assert 'SEISO_REQUIRE_SIDECAR" "1"' not in seed_block
+    assert 'SEISO_REQUIRE_SIDECAR" "1"' not in seed_block.replace(" ", "")
+
+
 def test_named_install_profiles_documented_in_common():
     common = _common_sh()
     for profile in _NAMED_PROFILES:

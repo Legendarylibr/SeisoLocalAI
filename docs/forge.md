@@ -99,7 +99,7 @@ For production behind a reverse proxy, terminate TLS upstream and run **one** Fo
 |------|------|---------|
 | `/` | Dashboard | Workspace overview and quick links |
 | `/hub` | Model Hub | Browse and download catalog models |
-| `/chat` | Chat | Local inference (GGUF, MLX, PyTorch); native Linux NVIDIA GGUF uses llama-swap sidecar by default; **Free memory** unloads models from RAM/VRAM without changing selection |
+| `/chat` | Chat | Local inference (GGUF, MLX, PyTorch); native Linux NVIDIA GGUF uses Ollama first (llama-swap fallback); **Free memory** unloads models from RAM/VRAM without changing selection |
 | `/train` | Training Studio | LoRA / QLoRA fine-tuning with live SSE logs |
 | `/export` | Export | Merge LoRA, GGUF, Hub publish from checkpoints |
 | `/compress` | Compress | LLM distillation / prune (Llama-family) / quant pipeline |

@@ -49,12 +49,14 @@ Skip during install: `SEISO_SKIP_FLASH_ATTN=1 start`
 **Later sessions:**
 
 ```bash
-cd "$HOME/Seiso" && start
+cd "$HOME/Seiso" && seiso-start
+# or: start   # still registered when that name is free
 ```
 
-`start` checks the native Linux NVIDIA sidecar path before Forge. It prefers a
+`seiso-start` / `start` checks the native Linux NVIDIA sidecar path before Forge. It prefers a
 healthy Ollama API at `SEISO_OLLAMA_URL` and otherwise uses the `llamacpp`
-engine through llama-swap. Disable this with `SEISO_SIDECAR_AUTOSTART=0`.
+engine through llama-swap. Missing sidecars warn by default (Forge still starts);
+set `SEISO_REQUIRE_SIDECAR=1` to hard-fail. Disable autostart with `SEISO_SIDECAR_AUTOSTART=0`.
 
 Or from a clone with venv active:
 
