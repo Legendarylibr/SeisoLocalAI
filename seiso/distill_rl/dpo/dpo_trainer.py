@@ -8,7 +8,7 @@ import sys
 from collections.abc import Iterable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import torch
 from torch.utils.data import DataLoader
@@ -273,8 +273,8 @@ class DPOTrainer:
             if key not in examples[0]:
                 raise ValueError(f"Each preference example must include '{key}'.")
 
-        dataloader: Any = DataLoader(
-            examples,
+        dataloader = DataLoader(
+            cast(Any, examples),
             batch_size=self.settings.per_device_train_batch_size,
             shuffle=shuffle,
             collate_fn=self.collator,
