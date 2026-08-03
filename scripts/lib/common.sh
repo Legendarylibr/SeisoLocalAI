@@ -10,6 +10,29 @@ seiso_forge_url() {
   printf 'http://%s:%s' "${SEISO_HOST:-127.0.0.1}" "${SEISO_PORT:-8765}"
 }
 
+seiso_forge_instance_active() {
+  # True when /health is up, or a live process still holds SEISO_DATA_DIR/.forge.lock
+  # (lifespan may still be starting — port not listening yet).
+  local url="${1:-$(seiso_forge_url)}"
+  local lock pid
+  if curl -fsS --max-time 2 "${url}/health" >/dev/null 2>&1; then
+    return 0
+  fi
+  lock="${SEISO_DATA_DIR:-$HOME/.seiso}/.forge.lock"
+  [[ -f "$lock" ]] || return 1
+  pid="$(
+    python3 - "$lock" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    print(int(json.load(open(sys.argv[1])).get("pid") or 0))
+except Exception:
+    print(0)
+PY
+  )"
+  [[ -n "$pid" && "$pid" != "0" && -d "/proc/$pid" ]] || return 1
+  return 0
+}
+
 seiso_follow_symlinks() {
   local path="$1"
   [[ -n "$path" && -e "$path" ]] || return 1
@@ -25,20 +48,34 @@ seiso_follow_symlinks() {
   cd "$(dirname "$path")" && pwd
 }
 
+seiso_repo_layout_ok() {
+  local root="$1"
+  [[ -n "$root" && -f "$root/pyproject.toml" && -d "$root/seiso_cli" ]]
+}
+
 seiso_resolve_repo_for_start() {
+  # Prefer the repository that owns the invoked start/start.sh script, walking
+  # parents (scripts/start.sh → repo root). Only then fall back to SEISO_INSTALL_DIR.
   local install_dir="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
   local src="${1:-}"
+  local root candidate
 
   if [[ -n "$src" && -e "$src" ]]; then
-    local root
-    root="$(seiso_follow_symlinks "$src")" || return 1
-    if [[ -f "$root/pyproject.toml" && -d "$root/seiso_cli" ]]; then
-      printf '%s\n' "$root"
-      return 0
-    fi
+    root="$(seiso_follow_symlinks "$src")" || true
+    candidate="$root"
+    # Walk up a few levels: start (repo root), scripts/start.sh → scripts → repo.
+    local i
+    for ((i = 0; i < 5; i++)); do
+      if seiso_repo_layout_ok "$candidate"; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+      [[ -n "$candidate" && "$candidate" != "/" ]] || break
+      candidate="$(cd "$candidate/.." 2>/dev/null && pwd)" || break
+    done
   fi
 
-  if [[ -d "$install_dir/seiso_cli" && -f "$install_dir/pyproject.toml" ]]; then
+  if seiso_repo_layout_ok "$install_dir"; then
     printf '%s\n' "$install_dir"
     return 0
   fi
@@ -306,18 +343,53 @@ seiso_ui_pkg_manager() {
   fi
 }
 
+seiso_ui_bun_timeout_sec() {
+  # Bun can hang with 0% CPU on some hosts; never block install forever.
+  local t="${SEISO_BUN_INSTALL_TIMEOUT_SEC:-180}"
+  case "$t" in
+    ''|*[!0-9]*) t=180 ;;
+  esac
+  if [[ "$t" -lt 30 ]]; then
+    t=30
+  fi
+  printf '%s\n' "$t"
+}
+
+seiso_run_with_timeout() {
+  # Run command with a wall-clock timeout when `timeout` exists.
+  local sec="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --signal=TERM --kill-after=10s "${sec}s" "$@"
+  else
+    "$@"
+  fi
+}
+
 seiso_ui_install_deps() {
-  local ui_dir="$1" pm
+  local ui_dir="$1" pm bun_timeout
   pm="$(seiso_ui_pkg_manager)" || seiso_die "Bun or npm is required for Forge UI — install Bun (https://bun.sh) or Node.js 18+"
   if [[ "$pm" == "bun" ]]; then
     # Prefer frozen installs for reproducibility. If Dependabot (or a human)
     # bumped package-lock.json / package.json without regenerating bun.lock,
     # frozen fails and macOS/Linux `start` never builds Forge UI — fall back
     # once so local installs keep working, then warn to commit bun.lock.
-    if ! (cd "$ui_dir" && bun install --frozen-lockfile); then
-      seiso_warn "forge-ui/bun.lock out of sync — refreshing with bun install (commit the updated bun.lock)"
-      (cd "$ui_dir" && bun install) || return 1
+    # Wall-clock timeout: bun has been observed to hang after printing its version.
+    bun_timeout="$(seiso_ui_bun_timeout_sec)"
+    if seiso_run_with_timeout "$bun_timeout" bash -c "cd \"\$1\" && bun install --frozen-lockfile" _ "$ui_dir"; then
+      return 0
     fi
+    seiso_warn "bun install --frozen-lockfile failed or timed out after ${bun_timeout}s — retrying without freeze"
+    if seiso_run_with_timeout "$bun_timeout" bash -c "cd \"\$1\" && bun install" _ "$ui_dir"; then
+      seiso_warn "forge-ui/bun.lock may be out of sync — commit an updated bun.lock if package.json changed"
+      return 0
+    fi
+    if command -v npm >/dev/null 2>&1; then
+      seiso_warn "bun install hung or failed — falling back to npm ci for forge-ui"
+      (cd "$ui_dir" && npm ci --no-audit --no-fund) || return 1
+      return 0
+    fi
+    return 1
   else
     (cd "$ui_dir" && npm ci --no-audit --no-fund)
   fi
@@ -333,8 +405,18 @@ seiso_ui_run_script() {
   fi
 }
 
+seiso_forge_ui_dist_ready() {
+  local root="$1"
+  [[ -f "$root/forge-ui/dist/index.html" ]]
+}
+
 seiso_build_forge_ui() {
   local root="$1"
+  # Skip dependency install + rebuild when a production UI already exists unless forced.
+  if seiso_forge_ui_dist_ready "$root" && [[ "${SEISO_FORCE_UI:-0}" != "1" ]]; then
+    seiso_log "Forge UI dist present — skipping rebuild (set SEISO_FORCE_UI=1 to rebuild)"
+    return 0
+  fi
   seiso_ensure_bun || true
   seiso_ui_install_deps "$root/forge-ui" || return 1
   seiso_ui_run_script "$root/forge-ui" build || return 1
@@ -797,10 +879,17 @@ seiso_required_python_modules() {
 }
 
 seiso_python_modules_available() {
+  # CUDA-linked wheels (llama-cpp-python) need venv nvidia/* on LD_LIBRARY_PATH
+  # before import. Bare importlib checks falsely fail on native Linux NVIDIA and
+  # force a full reinstall on every `start` even when the stack is healthy.
   local root="$1" extras="$2" module
   [[ -x "$root/.venv/bin/python" ]] || return 1
   while IFS= read -r module; do
     [[ -n "$module" ]] || continue
+    if [[ "$module" == "llama_cpp" ]]; then
+      seiso_llamacpp_import_ok "$root" || return 1
+      continue
+    fi
     "$root/.venv/bin/python" - "$module" <<'PY' >/dev/null 2>&1 || return 1
 import importlib
 import sys
@@ -839,6 +928,15 @@ seiso_ensure_installed() {
 
   extras="$(seiso_detect_platform_extras)"
 
+  # Fast path: CLI + UI dist + CUDA-aware module imports — do not reinstall.
+  if [[ -x "$root/.venv/bin/seiso" ]] && seiso_forge_ui_dist_ready "$root" \
+    && seiso_python_modules_available "$root" "$extras"; then
+    if [[ "$extras" == *cuda* || "$extras" == *llamacpp* ]]; then
+      seiso_repair_linux_cuda_stack "$root" || true
+    fi
+    return 0
+  fi
+
   if [[ "$extras" == *cuda* ]]; then
     seiso_log "NVIDIA GPU detected — installing with CUDA extras"
     seiso_ensure_cu12_runtime "$root"
@@ -848,7 +946,8 @@ seiso_ensure_installed() {
     seiso_ensure_llamacpp "$root" || true
   fi
 
-  if [[ -x "$root/.venv/bin/seiso" && -f "$root/forge-ui/dist/index.html" ]] \
+  # Re-check after CUDA runtime / llamacpp ensure (may have fixed import path only).
+  if [[ -x "$root/.venv/bin/seiso" ]] && seiso_forge_ui_dist_ready "$root" \
     && seiso_python_modules_available "$root" "$extras"; then
     if [[ "$extras" == *cuda* || "$extras" == *llamacpp* ]]; then
       seiso_repair_linux_cuda_stack "$root" || true

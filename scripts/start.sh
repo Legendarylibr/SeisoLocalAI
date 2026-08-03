@@ -270,6 +270,17 @@ main() {
   fi
 
   forge_url="$(seiso_forge_url)"
+
+  # Already running (healthy or still in lifespan / holding the data-dir lock):
+  # open browser and exit instead of failing on the instance lock.
+  if seiso_forge_instance_active "$forge_url"; then
+    log "Forge is already running at $forge_url"
+    if [[ "${SEISO_NO_OPEN:-0}" != "1" ]]; then
+      seiso_open_browser "$forge_url" || true
+    fi
+    return 0
+  fi
+
   open_flag=""
   if [[ "${SEISO_NO_OPEN:-0}" != "1" ]]; then
     open_flag="--open"
