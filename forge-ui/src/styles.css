@@ -162,17 +162,20 @@ a:hover { color: #6eddd2; }
 
 .brand.brand-wordmark {
   display: block;
-  padding: 0.35rem 0.25rem 0.55rem;
+  padding: 0.2rem 0.15rem 0.4rem;
+  text-align: center;
 }
 
 .sidebar-brand-wordmark {
   display: block;
-  width: 100%;
+  width: 68%;
+  max-width: 9.25rem;
   height: auto;
+  margin: 0 auto;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-strong);
   box-shadow: var(--shadow-sm);
-  object-fit: cover;
+  object-fit: contain;
 }
 
 .brand-text {

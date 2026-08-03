@@ -348,21 +348,23 @@ def _subtitle(img: Image.Image, font_sub: ImageFont.ImageFont) -> Image.Image:
     tw = bbox[2] - bbox[0]
     th = bbox[3] - bbox[1]
     x = (W - tw) // 2
-    y = H // 2 + 148
+    y = H // 2 + 132
     # Soft shadow for legibility
     draw.text((x + 2, y + 2), label, font=font_sub, fill=(*DEEP, 160))
     draw.text((x, y), label, font=font_sub, fill=(*CREAM, 245))
     # Simple side rules — aligned to text midline
     mid = y + th // 2 + 2
-    draw.rectangle((x - 96, mid - 1, x - 18, mid + 2), fill=(*PINK, 190))
-    draw.rectangle((x + tw + 18, mid - 1, x + tw + 96, mid + 2), fill=(*GOLD, 190))
+    draw.rectangle((x - 72, mid - 1, x - 16, mid + 2), fill=(*PINK, 190))
+    draw.rectangle((x + tw + 16, mid - 1, x + tw + 72, mid + 2), fill=(*GOLD, 190))
     return Image.alpha_composite(img.convert("RGBA"), overlay)
 
 
 def generate(out: Path, seed: int = SEED) -> Path:
     rng = random.Random(seed)
-    font = _font(238, display=True)
-    font_sub = _font(48, display=False)
+    # Slightly smaller SEISO + larger subline so “Local first AI” stays
+    # readable when the dashboard logo is displayed smaller.
+    font = _font(210, display=True)
+    font_sub = _font(62, display=False)
     mascot = _load_mascot()
 
     bg = _warm_bg(rng, mascot)
