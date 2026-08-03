@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import os
+import socket
 import time
 from typing import Any
 
@@ -143,7 +144,16 @@ def verify_mesh_plan_nostr(plan: dict[str, Any]) -> None:
     if event_id != signed_id:
         raise RuntimeError("Mesh plan nostr.event_id does not match signed event id")
     trusted = _trusted_pubkey_hexes()
-    if trusted and pubkey not in trusted:
+    if not trusted:
+        from seiso.mesh.flags import mesh_allow_any_planner
+
+        if not mesh_allow_any_planner():
+            raise RuntimeError(
+                "SEISO_MESH_TRUSTED_NPUBS (or SEISO_MESH_TRUSTED_PUBKEYS) is required. "
+                "Buzz room membership is not a Seiso ACL — list planner npubs explicitly. "
+                "For single-operator smoke only, set SEISO_MESH_ALLOW_ANY_PLANNER=1."
+            )
+    elif pubkey not in trusted:
         raise RuntimeError(
             "Mesh plan author pubkey is not in SEISO_MESH_TRUSTED_NPUBS/SEISO_MESH_TRUSTED_PUBKEYS"
         )
@@ -166,7 +176,7 @@ def sign_mesh_announce(record: dict[str, Any], pair: NostrKeyPair) -> dict[str, 
         "mesh_endpoint_fingerprint": d_tag,
     }
     # Defense in depth: refuse if alias equals OS hostname (would leak into Buzz).
-    host = str(record.get("hostname") or "").strip()
+    host = str(record.get("hostname") or socket.gethostname() or "").strip()
     alias_val = str(payload.get("alias") or "").strip()
     if host and alias_val and host == alias_val:
         raise RuntimeError(

@@ -182,6 +182,16 @@ def mesh_worker(
             help="Materialize + print launch command without training",
         ),
     ] = False,
+    confirm_launch: Annotated[
+        bool,
+        typer.Option(
+            "--confirm-launch",
+            help=(
+                "Required with --launch. Only pass when a human asked to start "
+                "training — never because a Buzz room message said so."
+            ),
+        ),
+    ] = False,
     print_env: Annotated[
         bool,
         typer.Option(
@@ -195,6 +205,12 @@ def mesh_worker(
     from seiso.mesh.flags import require_mesh_allowed
 
     require_mesh_allowed()
+    if launch and not confirm_launch:
+        console.print(
+            "[red]--launch requires --confirm-launch (human-gated). "
+            "Use --dry-run to materialize without training.[/]"
+        )
+        raise typer.Exit(1)
     try:
         out = prepare_worker(
             plan,
@@ -202,6 +218,7 @@ def mesh_worker(
             base_config=base_config,
             launch=launch,
             dry_run=dry_run,
+            confirm_launch=confirm_launch,
         )
     except Exception as exc:
         console.print(f"[red]{exc}[/]")

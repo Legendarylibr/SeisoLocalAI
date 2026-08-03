@@ -236,3 +236,18 @@ def test_agent_receipt_scrubs_secrets() -> None:
     assert "token_fingerprint" not in view
     assert "hostname" not in view
     assert view["distributed_num_nodes"] == 2
+
+
+def test_agent_receipt_redacts_secret_shaped_message_values() -> None:
+    from seiso.agent.receipts import agent_receipt
+    from seiso.research.nostr.keys import generate_keypair
+
+    nsec = generate_keypair().nsec
+    receipt = agent_receipt(
+        role="train",
+        status="failed",
+        message=f"boom with {nsec} embedded",
+        note="SEISO_MESH_TOKEN=super-secret-shared-token",
+    )
+    assert receipt["message"] == "[redacted-secret]"
+    assert receipt["note"] == "[redacted-secret]"
