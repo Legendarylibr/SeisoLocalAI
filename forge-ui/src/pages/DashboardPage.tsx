@@ -14,7 +14,6 @@ import {
   IconCpu,
   IconMemory,
   IconGpu,
-  IconQuant,
   IconRecipes,
   IconKnowledge,
 } from "@/components/Icons";
