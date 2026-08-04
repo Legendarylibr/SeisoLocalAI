@@ -19,40 +19,6 @@ TOOL_CALL_CLOSE = "</tool_call>"
 _MAX_ARTIFACT_BYTES = 512_000
 _MAX_STRING_ARG_CHARS = 200_000
 
-
-def _validate_tool_arguments(spec: "ToolSpec", arguments: dict[str, Any]) -> str | None:
-    """Server-side schema checks — do not trust model-produced argument bags."""
-    props = spec.parameters.get("properties") or {}
-    required = spec.parameters.get("required") or []
-    if not isinstance(required, list):
-        required = []
-    for key in required:
-        if key not in arguments:
-            return f"Missing required argument: {key}"
-    for key, value in arguments.items():
-        if props and key not in props:
-            return f"Unexpected argument: {key}"
-        if not props:
-            continue
-        expected = props[key].get("type")
-        if expected == "string":
-            if not isinstance(value, str):
-                return f"Argument {key} must be a string"
-            if len(value) > _MAX_STRING_ARG_CHARS:
-                return f"Argument {key} exceeds max length"
-        elif expected == "integer" and not isinstance(value, int):
-            return f"Argument {key} must be an integer"
-        elif expected == "number" and not isinstance(value, (int, float)):
-            return f"Argument {key} must be a number"
-        elif expected == "boolean" and not isinstance(value, bool):
-            return f"Argument {key} must be a boolean"
-        elif expected == "object" and not isinstance(value, dict):
-            return f"Argument {key} must be an object"
-        elif expected == "array" and not isinstance(value, list):
-            return f"Argument {key} must be an array"
-    return None
-
-
 # Legacy pattern kept for stripping assistant text
 TOOL_CALL_PATTERN = re.compile(
     rf"{re.escape(TOOL_CALL_OPEN)}\s*(\{{.*?\}})\s*{re.escape(TOOL_CALL_CLOSE)}",
@@ -122,6 +88,39 @@ class ToolSpec:
     parameters: dict[str, Any]
     handler: ToolHandler
     async_handler: Callable[..., Awaitable[str]] | None = None
+
+
+def _validate_tool_arguments(spec: ToolSpec, arguments: dict[str, Any]) -> str | None:
+    """Server-side schema checks — do not trust model-produced argument bags."""
+    props = spec.parameters.get("properties") or {}
+    required = spec.parameters.get("required") or []
+    if not isinstance(required, list):
+        required = []
+    for key in required:
+        if key not in arguments:
+            return f"Missing required argument: {key}"
+    for key, value in arguments.items():
+        if props and key not in props:
+            return f"Unexpected argument: {key}"
+        if not props:
+            continue
+        expected = props[key].get("type")
+        if expected == "string":
+            if not isinstance(value, str):
+                return f"Argument {key} must be a string"
+            if len(value) > _MAX_STRING_ARG_CHARS:
+                return f"Argument {key} exceeds max length"
+        elif expected == "integer" and not isinstance(value, int):
+            return f"Argument {key} must be an integer"
+        elif expected == "number" and not isinstance(value, (int, float)):
+            return f"Argument {key} must be a number"
+        elif expected == "boolean" and not isinstance(value, bool):
+            return f"Argument {key} must be a boolean"
+        elif expected == "object" and not isinstance(value, dict):
+            return f"Argument {key} must be an object"
+        elif expected == "array" and not isinstance(value, list):
+            return f"Argument {key} must be an array"
+    return None
 
 
 @dataclass

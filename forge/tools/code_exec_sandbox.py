@@ -15,7 +15,6 @@ from forge.tools.code_exec_policy import (
     _TIMEOUT_SEC,
 )
 
-
 _MAX_NPROC = 32
 _MAX_FSIZE_BYTES = 10 * 1024 * 1024
 
