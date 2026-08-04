@@ -227,7 +227,7 @@ async def test_jwt_revocation_retained_until_expiry(monkeypatch):
             auth_mod.decode_token(token, settings)
 
     # Prune should not resurrect revoked tokens before JWT exp.
-    from jose import jwt
+    import jwt
 
     payload = jwt.decode(tokens[0], settings.secret_key, algorithms=[auth_mod.ALGORITHM])
     assert is_jti_revoked(str(payload["jti"]))

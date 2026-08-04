@@ -26,8 +26,12 @@ _LOCKED_VERSION = re.compile(
 # Declared floors for CVEs that must stay aligned across pyproject + lock.
 # (package, minimum version, where the floor must be declared)
 SECURITY_FLOOR_CHECKS: tuple[tuple[str, str, str], ...] = (
-    # CVE-2026-59885 / CVE-2026-59886 — pyasn1 REAL/OID DoS
-    ("pyasn1", "0.6.4", "forge"),
+    # CVE-2026-59881 / CVE-2026-69243 / CVE-2026-69244 — aiohttp HTTP/WS issues
+    ("aiohttp", "3.14.3", "forge"),
+    # CVE-2026-69247 — cryptography PKCS#7 Bleichenbacher oracle
+    ("cryptography", "50.0.0", "forge"),
+    # PyJWT 2.13+ clears known HS/JWK/crit advisories; replaces python-jose+ecdsa.
+    ("pyjwt", "2.13.0", "forge"),
     # CVE-2026-59890 — setuptools MANIFEST.in exclusion bypass
     ("setuptools", "83.0.0", "build-system"),
 )
