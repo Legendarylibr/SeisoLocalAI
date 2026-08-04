@@ -3,8 +3,7 @@
 # Or:      pip install -e ".[dev]" && pip install -r requirements-dev.txt
 
 setuptools>=83
-# Also pinned under [project.optional-dependencies].forge in pyproject.toml.
-pyasn1>=0.6.4
+# JWT: PyJWT (see [forge] in pyproject.toml). Historical pyasn1 floor removed with python-jose.
 ruff>=0.4
 mypy==2.3.0
 types-PyYAML>=6.0
