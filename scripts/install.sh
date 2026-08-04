@@ -12,7 +12,8 @@
 #   SEISO_BRANCH        Branch to clone (default: main)
 #   SEISO_START=0       Install only — do not launch Forge when finished (default: start)
 #   SEISO_SKIP_UI=1     Skip forge-ui build
-#   SEISO_USE_NPM=1     Use npm instead of Bun for forge-ui (Bun is default when available)
+#   SEISO_USE_NPM=1     Force npm for forge-ui (Linux prefers npm when Node 18+ is present)
+#   SEISO_USE_BUN=1     On Linux, prefer Bun even when npm is available
 #   SEISO_USE_UV=0      Use pip instead of uv for Python deps (uv is default when available)
 #   SEISO_NO_BANNER=1   Skip glitch install TUI
 #   SEISO_VERBOSE=1     Show full pip/UI package manager output (no TUI overlay)

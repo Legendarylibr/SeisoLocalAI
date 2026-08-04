@@ -145,7 +145,17 @@ SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.co
 **Cause:** Usually the pip install did not finish (install TUI reported success too early, or heavy extras like PyTorch / llama.cpp failed). On failure the installer falls back to core `[forge]` first so the CLI exists, then retries optional training/inference extras.
 
 **Related — `start` reinstalls every time on native Linux NVIDIA even though Forge already works:**
-older installers probed `import llama_cpp` without setting the venv CUDA library path (`libcudart.so.12`), which falsely failed and re-ran the full install (often hanging on `bun install`). Current `start` uses a CUDA-aware import probe, skips UI rebuild when `forge-ui/dist` exists, times out hung Bun installs, and if Forge is already healthy on the target port it opens the browser instead of starting a second instance.
+older installers probed `import llama_cpp` without setting the venv CUDA library path (`libcudart.so.12`), which falsely failed and re-ran the full install (often hanging on `bun install`). Current `start` uses a CUDA-aware import probe, skips UI rebuild when `forge-ui/dist` exists, prefers `npm ci` on Linux when Node 18+ is present, times out hung Bun installs (and skips the useless unfrozen retry on timeout), and if Forge is already healthy on the target port it opens the browser instead of starting a second instance.
+
+**Related — Forge UI never builds / install hangs on `bun install` (Linux):**
+Regression path: Dependabot refreshed `package-lock.json` without `bun.lock` → `bun install --frozen-lockfile` failed or hung → no `forge-ui/dist` → `start` looped. Recovery on a stuck host:
+
+```bash
+# Prefer the Dependabot-fresh npm lock (Node 18+ required):
+SEISO_USE_NPM=1 SEISO_FORCE_UI=1 SEISO_NO_BANNER=1 start
+# or manually:
+cd "$HOME/Seiso/forge-ui" && npm ci && npm run build
+```
 
 **Fix:**
 ```bash

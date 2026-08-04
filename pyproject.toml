@@ -78,7 +78,7 @@ forge = [
   "email-validator>=2.1",
   "aiosqlite>=0.20",
   "sse-starlette>=2.1",
-  "cryptography>=42",
+  "cryptography>=50",
   # Nostr provenance relay I/O (default-on; BIP-340 signing is pure-Python in-tree).
   "websockets>=12",
 ]
@@ -104,7 +104,7 @@ data-designer = [
 # Forge auth (npub/nsec) needs no extra; provenance attest/verify uses websockets.
 nostr = [
   "websockets>=12",
-  "cryptography>=42",
+  "cryptography>=50",
 ]
 dev = [
   # Floor for MANIFEST.in exclusion bypass (CVE-2026-59890); also in [build-system].
