@@ -333,6 +333,13 @@ async def start_training(
     except SecurityError as exc:
         raise_forbidden(exc)
 
+    from forge.services.dataset_security import warn_instruction_like_dataset
+
+    warn_instruction_like_dataset(
+        training_config.get("dataset"),
+        user_id=user_id,
+    )
+
     # Forge HTTP is the frontend surface: full local training config, no mesh.
     try:
         assert_surface_distributed_config(FRONTEND_SURFACE, training_config)

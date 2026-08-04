@@ -16,6 +16,10 @@ from forge.tools.code_exec_policy import (
 )
 
 
+_MAX_NPROC = 32
+_MAX_FSIZE_BYTES = 10 * 1024 * 1024
+
+
 def subprocess_limits() -> None:
     """Apply resource limits in the code-exec child process (Unix only)."""
     import resource
@@ -25,6 +29,12 @@ def subprocess_limits() -> None:
         resource.setrlimit(resource.RLIMIT_AS, (_MAX_RSS_BYTES, _MAX_RSS_BYTES))
         if hasattr(resource, "RLIMIT_NOFILE"):
             resource.setrlimit(resource.RLIMIT_NOFILE, (_MAX_OPEN_FDS, _MAX_OPEN_FDS))
+        if hasattr(resource, "RLIMIT_NPROC"):
+            resource.setrlimit(resource.RLIMIT_NPROC, (_MAX_NPROC, _MAX_NPROC))
+        if hasattr(resource, "RLIMIT_FSIZE"):
+            resource.setrlimit(
+                resource.RLIMIT_FSIZE, (_MAX_FSIZE_BYTES, _MAX_FSIZE_BYTES)
+            )
     except (OSError, ValueError):
         pass
 

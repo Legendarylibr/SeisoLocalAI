@@ -141,6 +141,28 @@ def _validate_code(code: str) -> str | None:
     return None
 
 
+def _scrubbed_child_env(base: Path) -> dict[str, str]:
+    """Minimal child env — no inherited secrets, tokens, or proxy settings."""
+    env: dict[str, str] = {
+        "PYTHONPATH": "",
+        "PYTHONNOUSERSITE": "1",
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "HOME": str(base),
+        "TMPDIR": str(base),
+        "TEMP": str(base),
+        "TMP": str(base),
+        "LANG": os.environ.get("LANG") or "C.UTF-8",
+    }
+    if os.name == "nt":
+        env["PATH"] = os.environ.get("PATH", "")
+        env["SYSTEMROOT"] = os.environ.get("SYSTEMROOT", "")
+        env["PATHEXT"] = os.environ.get("PATHEXT", "")
+        env["COMSPEC"] = os.environ.get("COMSPEC", "")
+    else:
+        env["PATH"] = "/usr/bin:/bin"
+    return env
+
+
 def execute_code(
     code: str, sandbox_root: str | None = None, user_id: str | None = None
 ) -> str:
@@ -201,17 +223,11 @@ def execute_code(
         "stderr": subprocess.PIPE,
         "text": True,
         "cwd": str(base),
-        "env": {
-            "PYTHONPATH": "",
-            "PATH": os.environ.get("PATH", ""),
-            "HOME": str(base),
-            "SYSTEMROOT": os.environ.get("SYSTEMROOT", ""),
-        },
+        "env": _scrubbed_child_env(base),
         "start_new_session": True,
     }
     if os.name == "posix":
         run_kwargs["preexec_fn"] = subprocess_limits
-        run_kwargs["env"]["PATH"] = "/usr/bin:/bin"
 
     py_args = [sys.executable, "-I", "-S"]
     if sys.version_info >= (3, 11):

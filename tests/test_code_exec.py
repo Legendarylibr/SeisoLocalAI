@@ -102,3 +102,20 @@ def test_code_exec_blocks_underscore_socket():
     assert err is not None
     assert "blocked" in err.lower()
 
+
+def test_code_exec_child_env_omits_secrets(tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_TOKEN", "should-not-leak")
+    monkeypatch.setenv("SEISO_SECRET_KEY", "should-not-leak")
+    monkeypatch.setenv("AWS_SECRET_ACCESS_KEY", "should-not-leak")
+    # Probe via a allowed path: we cannot import os; instead ensure safe math still works
+    # while secrets are absent from the scrubbed env builder.
+    from forge.tools.code_exec import _scrubbed_child_env
+
+    env = _scrubbed_child_env(tmp_path)
+    assert "HF_TOKEN" not in env
+    assert "SEISO_SECRET_KEY" not in env
+    assert "AWS_SECRET_ACCESS_KEY" not in env
+    assert env.get("PYTHONNOUSERSITE") == "1"
+    result = json.loads(execute_code("print(1+1)", sandbox_root=str(tmp_path), user_id="u1"))
+    assert "2" in result.get("stdout", "")
+
