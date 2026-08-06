@@ -16,7 +16,9 @@ PYTHON_LOCK = REPO_ROOT / "locks" / "python.lock"
 def _pip_install(args: list[str]) -> int:
     """Prefer uv when available (honors UV_TORCH_BACKEND for torch CPU wheels)."""
     if shutil.which("uv"):
-        return subprocess.run(["uv", "pip", "install", *args], cwd=REPO_ROOT, check=False).returncode
+        return subprocess.run(
+            ["uv", "pip", "install", *args], cwd=REPO_ROOT, check=False
+        ).returncode
     return subprocess.run(
         [sys.executable, "-m", "pip", "install", *args],
         cwd=REPO_ROOT,

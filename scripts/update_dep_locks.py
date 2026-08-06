@@ -22,6 +22,7 @@ from seiso.security.deps import (  # noqa: E402
 
 PYTHON_LOCK = Path("locks/python.lock")
 NPM_LOCK = Path("forge-ui/package-lock.json")
+BUN_LOCK = Path("forge-ui/bun.lock")
 PIP_COMPILE_DISPLAY_CMD = (
     "pip-compile --allow-unsafe --extra=dev --extra=forge --extra=train "
     "--generate-hashes --output-file=locks/python.lock --strip-extras pyproject.toml"
@@ -85,6 +86,7 @@ def main() -> int:
     repo_root = args.repo_root.resolve()
     python_lock = repo_root / PYTHON_LOCK
     npm_lock = repo_root / NPM_LOCK
+    bun_lock = repo_root / BUN_LOCK
     digests_path = repo_root / DEFAULT_DIGESTS_REL
 
     if not args.skip_python:
@@ -99,12 +101,16 @@ def main() -> int:
     if not npm_lock.is_file():
         print(f"missing {npm_lock}", file=sys.stderr)
         return 1
+    if not bun_lock.is_file():
+        print(f"missing {bun_lock}", file=sys.stderr)
+        return 1
 
     manifest = build_digest_manifest(
         repo_root,
         {
             str(PYTHON_LOCK): python_lock,
             str(NPM_LOCK): npm_lock,
+            str(BUN_LOCK): bun_lock,
         },
     )
     write_digest_manifest(manifest, digests_path)

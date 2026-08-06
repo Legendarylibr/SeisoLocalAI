@@ -84,10 +84,7 @@ class DPODataCollator:
             and full_ids
             and (
                 prompt_len == 0
-                or (
-                    len(prompt_ids) > 2
-                    and prompt_len < max(2, int(0.5 * len(prompt_ids)))
-                )
+                or (len(prompt_ids) > 2 and prompt_len < max(2, int(0.5 * len(prompt_ids))))
             )
         )
         if trivial_lcp:
@@ -155,25 +152,17 @@ class DPODataCollator:
             rejected_input_ids.append(rejected_pair["input_ids"])
             rejected_labels.append(rejected_pair["labels"])
 
-        chosen_ids, chosen_mask = self._pad_sequences(
-            chosen_input_ids, pad_value=pad_token_id
-        )
-        chosen_lbls, _ = self._pad_sequences(
-            chosen_labels, pad_value=self.label_pad_token_id
-        )
+        chosen_ids, chosen_mask = self._pad_sequences(chosen_input_ids, pad_value=pad_token_id)
+        chosen_lbls, _ = self._pad_sequences(chosen_labels, pad_value=self.label_pad_token_id)
         rejected_ids, rejected_mask = self._pad_sequences(
             rejected_input_ids,
             pad_value=pad_token_id,
         )
-        rejected_lbls, _ = self._pad_sequences(
-            rejected_labels, pad_value=self.label_pad_token_id
-        )
+        rejected_lbls, _ = self._pad_sequences(rejected_labels, pad_value=self.label_pad_token_id)
 
         # Padding positions must also be ignored in the loss.
         chosen_lbls = chosen_lbls.masked_fill(chosen_mask == 0, self.label_pad_token_id)
-        rejected_lbls = rejected_lbls.masked_fill(
-            rejected_mask == 0, self.label_pad_token_id
-        )
+        rejected_lbls = rejected_lbls.masked_fill(rejected_mask == 0, self.label_pad_token_id)
 
         return {
             "chosen_input_ids": chosen_ids,

@@ -75,9 +75,7 @@ def _hchacha20(key: bytes, nonce16: bytes) -> bytes:
     return struct.pack("<8I", *out)
 
 
-def _xchacha20poly1305_encrypt(
-    key: bytes, nonce24: bytes, plaintext: bytes, aad: bytes
-) -> bytes:
+def _xchacha20poly1305_encrypt(key: bytes, nonce24: bytes, plaintext: bytes, aad: bytes) -> bytes:
     if len(nonce24) != 24:
         raise ValueError("XChaCha20-Poly1305 nonce must be 24 bytes")
     subkey = _hchacha20(key, nonce24[:16])
@@ -86,9 +84,7 @@ def _xchacha20poly1305_encrypt(
     return ChaCha20Poly1305(subkey).encrypt(chacha_nonce, plaintext, aad)
 
 
-def _xchacha20poly1305_decrypt(
-    key: bytes, nonce24: bytes, ciphertext: bytes, aad: bytes
-) -> bytes:
+def _xchacha20poly1305_decrypt(key: bytes, nonce24: bytes, ciphertext: bytes, aad: bytes) -> bytes:
     if len(nonce24) != 24:
         raise ValueError("XChaCha20-Poly1305 nonce must be 24 bytes")
     subkey = _hchacha20(key, nonce24[:16])
@@ -111,9 +107,7 @@ def encrypt_ncryptsec(
     if key_security not in (0x00, 0x01, 0x02):
         raise ValueError("key_security must be 0x00, 0x01, or 0x02")
     if not (_MIN_LOG_N_ENCRYPT <= log_n <= _MAX_LOG_N):
-        raise ValueError(
-            f"log_n for encrypt must be between {_MIN_LOG_N_ENCRYPT} and {_MAX_LOG_N}"
-        )
+        raise ValueError(f"log_n for encrypt must be between {_MIN_LOG_N_ENCRYPT} and {_MAX_LOG_N}")
     salt = os.urandom(16)
     key = _scrypt_key(password, salt, log_n)
     nonce = os.urandom(24)

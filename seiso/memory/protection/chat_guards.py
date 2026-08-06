@@ -277,5 +277,3 @@ def sanitize_inference_payload(
                 model_format=out.get("model_format"),
             )
     return out
-
-

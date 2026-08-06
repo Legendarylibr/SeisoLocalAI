@@ -39,9 +39,7 @@ class FormattedJobRoutes:
     get_orchestrator: Callable[[], Orchestrator]
 
 
-def register_formatted_job_routes(
-    router: APIRouter, routes: FormattedJobRoutes
-) -> None:
+def register_formatted_job_routes(router: APIRouter, routes: FormattedJobRoutes) -> None:
     """Register GET /jobs, GET /jobs/{id}, and GET /jobs/{id}/stream on a router."""
     get_orch = routes.get_orchestrator
 
@@ -171,9 +169,7 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
                 stage_results=stage_results,
                 error_text=job.error if job.status.value == "failed" else None,
             )
-            if job.status.value == "completed" and (
-                model_dir := result.get("model_dir")
-            ):
+            if job.status.value == "completed" and (model_dir := result.get("model_dir")):
                 try:
                     await register_export_outputs(
                         db,
@@ -186,8 +182,7 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
                     import logging
 
                     logging.getLogger(__name__).exception(
-                        "Pipeline inventory registration failed for job %s "
-                        "(job remains %s)",
+                        "Pipeline inventory registration failed for job %s (job remains %s)",
                         job_id,
                         job.status.value,
                     )
@@ -201,8 +196,7 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
                         user_id=user_id,
                         result=result if isinstance(result, dict) else None,
                         output_dir=result.get("output_root") or result.get("run_dir"),
-                        expected_pubkey=str((user or {}).get("nostr_pubkey") or "")
-                        or None,
+                        expected_pubkey=str((user or {}).get("nostr_pubkey") or "") or None,
                     )
                 except Exception:
                     import logging
@@ -212,9 +206,7 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
                     )
 
         async def _failed(message: str) -> None:
-            await config.update_status(
-                db, job_id, "failed", user_id=user_id, error_text=message
-            )
+            await config.update_status(db, job_id, "failed", user_id=user_id, error_text=message)
 
         async def _run() -> None:
             await run_orchestrated_job(
@@ -227,9 +219,7 @@ def build_stage_pipeline_router(config: StagePipelineRouterConfig) -> APIRouter:
 
         spawn_background(_run())
         preset = config_payload.get("preset", "")
-        audit_event(
-            config.audit_event_name, user_id=user_id, job_id=job_id, preset=preset
-        )
+        audit_event(config.audit_event_name, user_id=user_id, job_id=job_id, preset=preset)
         return PipelineJobResponse(job_id=job_id, status="pending")
 
     @router.get("/presets")

@@ -13,7 +13,6 @@ from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
-
 W, H = 1600, 900
 TEXT = "SEISO"
 SEED = 42
@@ -228,9 +227,7 @@ def _word_stack(font: ImageFont.ImageFont) -> Image.Image:
     stack = Image.alpha_composite(
         stack, _text_layer(TEXT, font, (*MAGENTA_GLITCH, 70), dx=-5, dy=1)
     )
-    stack = Image.alpha_composite(
-        stack, _text_layer(TEXT, font, (*CYAN_GLITCH, 70), dx=5, dy=-1)
-    )
+    stack = Image.alpha_composite(stack, _text_layer(TEXT, font, (*CYAN_GLITCH, 70), dx=5, dy=-1))
 
     # dark aliased outline like mascot linework
     stack = Image.alpha_composite(
@@ -258,9 +255,7 @@ def _word_stack(font: ImageFont.ImageFont) -> Image.Image:
     stack = Image.alpha_composite(stack, face)
 
     # crisp readable top fill (keeps letters clear over dither)
-    stack = Image.alpha_composite(
-        stack, _text_layer(TEXT, font, (*CREAM, 210))
-    )
+    stack = Image.alpha_composite(stack, _text_layer(TEXT, font, (*CREAM, 210)))
     hi = _text_layer(TEXT, font, (255, 255, 255, 50), dy=-5, dx=-2)
     hi = hi.filter(ImageFilter.GaussianBlur(1.2))
     stack = Image.alpha_composite(stack, hi)
@@ -310,9 +305,7 @@ def _block_glitches(img: Image.Image, rng: random.Random) -> Image.Image:
         draw.rectangle((x, y, x + s, y + s), fill=color)
     # a few horizontal micro-tears outside the word band
     for _ in range(8):
-        y = rng.choice(
-            [rng.randint(40, H // 2 - 150), rng.randint(H // 2 + 150, H - 40)]
-        )
+        y = rng.choice([rng.randint(40, H // 2 - 150), rng.randint(H // 2 + 150, H - 40)])
         x0 = rng.randint(40, W - 200)
         draw.rectangle(
             (x0, y, x0 + rng.randint(40, 160), y + rng.randint(1, 3)),
@@ -324,9 +317,7 @@ def _block_glitches(img: Image.Image, rng: random.Random) -> Image.Image:
 def _subtle_slice(img: Image.Image, rng: random.Random) -> Image.Image:
     out = img.copy()
     for _ in range(5):
-        y = rng.choice(
-            [rng.randint(60, H // 2 - 150), rng.randint(H // 2 + 150, H - 60)]
-        )
+        y = rng.choice([rng.randint(60, H // 2 - 150), rng.randint(H // 2 + 150, H - 60)])
         h = rng.randint(2, 6)
         shift = rng.randint(-14, 14)
         if shift == 0:
@@ -392,9 +383,7 @@ def generate(out: Path, seed: int = SEED) -> Path:
     # final clarity pass on SEISO
     crisp = _text_layer(TEXT, font, (*CREAM, 230))
     rgb = Image.alpha_composite(rgb.convert("RGBA"), crisp)
-    rim = _text_layer(
-        TEXT, font, (255, 255, 255, 0), outline=(*BROWN, 140), outline_width=2
-    )
+    rim = _text_layer(TEXT, font, (255, 255, 255, 0), outline=(*BROWN, 140), outline_width=2)
     rgb = Image.alpha_composite(rgb, rim).convert("RGB")
 
     out.parent.mkdir(parents=True, exist_ok=True)

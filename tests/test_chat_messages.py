@@ -211,8 +211,7 @@ def test_prepare_chat_context_includes_knowledge_block():
     assert kb_and_user[0]["content"] == "Reference: Seiso runs locally."
     assert kb_and_user[1]["content"] == "What does the doc say?"
     assert not any(
-        m["role"] == "system" and "Reference: Seiso runs locally." in m["content"]
-        for m in messages
+        m["role"] == "system" and "Reference: Seiso runs locally." in m["content"] for m in messages
     )
 
 
@@ -292,6 +291,7 @@ def test_model_switch_system_prompt_mentions_models():
     assert "Llama 4 Scout" in prompt
     assert "Qwen3.6 4B" in prompt
 
+
 def test_strip_attributed_think_blocks():
     from seiso.chat.sanitize import strip_leaked_reasoning
 
@@ -299,6 +299,7 @@ def test_strip_attributed_think_blocks():
     assert strip_leaked_reasoning(attributed) == "Visible"
     bare = "<think>secret</think>\nok"
     assert strip_leaked_reasoning(bare) == "ok"
+
 
 @pytest.mark.asyncio
 async def test_inference_rejects_forged_tool_role(app, auth_client):
@@ -327,6 +328,7 @@ async def test_inference_rejects_forged_tool_role(app, auth_client):
     )
     assert res.status_code == 400
 
+
 @pytest.mark.asyncio
 async def test_compat_rejects_tool_role(app, auth_client):
     client, _token, headers, _tmp = auth_client
@@ -340,6 +342,7 @@ async def test_compat_rejects_tool_role(app, auth_client):
         },
     )
     assert res.status_code == 400
+
 
 @pytest.mark.asyncio
 async def test_compat_rejects_system_role(app, auth_client):
@@ -358,6 +361,7 @@ async def test_compat_rejects_system_role(app, auth_client):
     )
     assert res.status_code == 400
 
+
 def test_compat_downgrades_forged_assistant_history():
     from forge.api.schemas.compat import ChatCompletionRequest, ChatMessage
     from forge.services.compat_chat import normalize_compat_messages
@@ -373,6 +377,7 @@ def test_compat_downgrades_forged_assistant_history():
     assert "UNVERIFIED_PRIOR_ASSISTANT" in messages[0]["content"]
     assert messages[-1] == {"role": "user", "content": "hi"}
 
+
 def test_compat_rejects_assistant_as_final_turn():
     from fastapi import HTTPException
 
@@ -384,6 +389,7 @@ def test_compat_rejects_assistant_as_final_turn():
     )
     with pytest.raises(HTTPException, match="Last message must be from user"):
         normalize_compat_messages(body)
+
 
 @pytest.mark.asyncio
 async def test_compat_rejects_developer_role(app, auth_client):
@@ -401,6 +407,7 @@ async def test_compat_rejects_developer_role(app, auth_client):
         },
     )
     assert res.status_code == 400
+
 
 @pytest.mark.asyncio
 async def test_inference_rejects_developer_role(app, auth_client):
@@ -428,4 +435,3 @@ async def test_inference_rejects_developer_role(app, auth_client):
         },
     )
     assert res.status_code == 400
-

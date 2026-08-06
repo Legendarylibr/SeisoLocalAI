@@ -13,9 +13,7 @@ def is_supported_gguf_repo_candidate(repo_id: str) -> bool:
 
 def base_model_from_tags(tags: list[str] | tuple[str, ...]) -> str | None:
     for tag in tags:
-        if tag.startswith("base_model:") and not tag.startswith(
-            "base_model:quantized:"
-        ):
+        if tag.startswith("base_model:") and not tag.startswith("base_model:quantized:"):
             return tag.split(":", 1)[1]
     return None
 
@@ -44,9 +42,7 @@ def rank_trusted_gguf_repos(
     def sort_key(repo_id: str) -> tuple[int, str]:
         return (-int(popularity.get(repo_id, 0)), repo_id.lower())
 
-    supported = [
-        repo_id for repo_id in repo_ids if is_supported_gguf_repo_candidate(repo_id)
-    ]
+    supported = [repo_id for repo_id in repo_ids if is_supported_gguf_repo_candidate(repo_id)]
     return sorted(supported, key=sort_key)
 
 
@@ -59,9 +55,7 @@ def gguf_mirror_candidates(base_repo_id: str) -> list[str]:
         return [repo]
 
     owner, model_name = repo.split("/", 1)
-    title = re.sub(
-        r"(^|[-_/])([a-z])", lambda m: m.group(1) + m.group(2).upper(), model_name
-    )
+    title = re.sub(r"(^|[-_/])([a-z])", lambda m: m.group(1) + m.group(2).upper(), model_name)
     mirrors = [
         f"{owner}/{model_name}-GGUF",
         f"{owner}/{title}-GGUF",

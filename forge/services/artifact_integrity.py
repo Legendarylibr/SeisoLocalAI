@@ -11,9 +11,7 @@ from seiso.io.files import iter_matching_files, matching_file_stats
 from seiso.models.catalog import CatalogEntry
 
 
-def _existing_files_total_size(
-    paths: list[Path], *, require_positive: bool
-) -> int | None:
+def _existing_files_total_size(paths: list[Path], *, require_positive: bool) -> int | None:
     total_size = 0
     for path in paths:
         if not path.is_file():
@@ -39,17 +37,14 @@ def path_has_complete_artifact(path: Path, fmt: str, expected_size: int) -> bool
                 and (expected_size <= 0 or size >= expected_size)
             )
         if expected_size <= 0:
-            return any(
-                file.stat().st_size > 0 for file in iter_matching_files(path, "*.gguf")
-            )
+            return any(file.stat().st_size > 0 for file in iter_matching_files(path, "*.gguf"))
         count, size = matching_file_stats(path, "*.gguf")
         return count > 0 and size > 0 and (expected_size <= 0 or size >= expected_size)
     if path.is_dir():
         suffixes = frozenset({".safetensors", ".bin"})
         if expected_size <= 0:
             return any(
-                file.stat().st_size > 0
-                for file in iter_matching_files(path, suffixes=suffixes)
+                file.stat().st_size > 0 for file in iter_matching_files(path, suffixes=suffixes)
             )
         count, size = matching_file_stats(path, suffixes=suffixes)
         return count > 0 and size > 0 and (expected_size <= 0 or size >= expected_size)
@@ -59,9 +54,7 @@ def path_has_complete_artifact(path: Path, fmt: str, expected_size: int) -> bool
     return size > 0 and (expected_size <= 0 or size >= expected_size)
 
 
-def gguf_files_complete_at_path(
-    path: Path, filenames: list[str], expected_size: int
-) -> bool:
+def gguf_files_complete_at_path(path: Path, filenames: list[str], expected_size: int) -> bool:
     if not filenames:
         return False
     files = (
@@ -121,9 +114,7 @@ def inventory_gguf_is_complete(
             return False
         return not str(row.get("source") or "").startswith("hf:")
 
-    local_files = (
-        [path] if path.is_file() else [path / str(filename) for filename in gguf_files]
-    )
+    local_files = [path] if path.is_file() else [path / str(filename) for filename in gguf_files]
     actual_size = _existing_files_total_size(local_files, require_positive=False)
     if actual_size is None:
         return False
@@ -134,9 +125,7 @@ def inventory_gguf_is_complete(
 
         size_lookup = get_gguf_file_size_bytes
     try:
-        expected_size = sum(
-            size_lookup(gguf_repo, str(filename)) for filename in gguf_files
-        )
+        expected_size = sum(size_lookup(gguf_repo, str(filename)) for filename in gguf_files)
     except Exception:
         expected_size = int(row.get("size_bytes") or 0)
         if expected_size <= 0 and str(row.get("source") or "").startswith("hf:"):

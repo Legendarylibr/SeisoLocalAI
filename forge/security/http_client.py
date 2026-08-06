@@ -14,9 +14,7 @@ def _normalize_host(host: str) -> str:
     return (host or "").lower().rstrip(".")
 
 
-def pin_request_to_ip(
-    request: httpx.Request, *, host: str, pinned_ip: str
-) -> httpx.Request:
+def pin_request_to_ip(request: httpx.Request, *, host: str, pinned_ip: str) -> httpx.Request:
     """Rewrite a request to connect via ``pinned_ip`` without global DNS patches.
 
     Preserves the original hostname in the ``Host`` header and TLS SNI so
@@ -50,9 +48,7 @@ class _PinnedIPTransport(httpx.AsyncHTTPTransport):
         self._pinned_ip = pinned_ip
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
-        pinned = pin_request_to_ip(
-            request, host=self._host, pinned_ip=self._pinned_ip
-        )
+        pinned = pin_request_to_ip(request, host=self._host, pinned_ip=self._pinned_ip)
         return await super().handle_async_request(pinned)
 
 

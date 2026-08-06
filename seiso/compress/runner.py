@@ -111,9 +111,7 @@ def run_compress_job(
         verify_manifest,
     )
 
-    cfg = build_pipeline_config(
-        job_id=job_id, user_id=user_id, data_dir=data_dir, payload=payload
-    )
+    cfg = build_pipeline_config(job_id=job_id, user_id=user_id, data_dir=data_dir, payload=payload)
 
     def _log(msg: str) -> None:
         if on_log:
@@ -146,9 +144,7 @@ def run_compress_job(
         stage=cfg["stages"][0],
     )
 
-    _log(
-        f"Compression run: {run_dir.name} preset={cfg['preset']} stages={','.join(cfg['stages'])}"
-    )
+    _log(f"Compression run: {run_dir.name} preset={cfg['preset']} stages={','.join(cfg['stages'])}")
 
     stage_results: dict[str, Any] = {}
     for stage in cfg["stages"]:
@@ -164,9 +160,7 @@ def run_compress_job(
                 cfg=cfg["distill"],
                 seed=det.seed,
             )
-            append_artifact_record(
-                run_dir, stage="distill", artifact_path=out_dir, role="output"
-            )
+            append_artifact_record(run_dir, stage="distill", artifact_path=out_dir, role="output")
             stage_results["distilled"] = str(out_dir)
 
         elif stage == "prune":
@@ -182,9 +176,7 @@ def run_compress_job(
                 seed=det.seed,
                 trust_remote_code=_trust_remote_code(cfg),
             )
-            append_artifact_record(
-                run_dir, stage="prune", artifact_path=out_dir, role="output"
-            )
+            append_artifact_record(run_dir, stage="prune", artifact_path=out_dir, role="output")
             stage_results["pruned"] = str(out_dir)
 
         elif stage == "finetune":
@@ -200,9 +192,7 @@ def run_compress_job(
                 cfg=cfg["finetune"],
                 seed=det.seed,
             )
-            append_artifact_record(
-                run_dir, stage="finetune", artifact_path=out_dir, role="output"
-            )
+            append_artifact_record(run_dir, stage="finetune", artifact_path=out_dir, role="output")
             stage_results["finetuned"] = str(out_dir)
 
         elif stage == "evaluate":
@@ -214,9 +204,7 @@ def run_compress_job(
                 model_dir=model_dir,
                 trust_remote_code=_trust_remote_code(cfg),
             )
-            stage_results["evaluate"] = (
-                result.to_dict() if hasattr(result, "to_dict") else result
-            )
+            stage_results["evaluate"] = result.to_dict() if hasattr(result, "to_dict") else result
             _log(str(result))
 
         elif stage == "export":
@@ -230,9 +218,7 @@ def run_compress_job(
                 model_name=cfg["export"]["model_name"],
                 port=cfg["export"]["port"],
             )
-            append_artifact_record(
-                run_dir, stage="export", artifact_path=export_dir, role="output"
-            )
+            append_artifact_record(run_dir, stage="export", artifact_path=export_dir, role="output")
             stage_results["export_bundle"] = str(export_dir)
             _log(f"Export bundle: {export_dir}")
 
@@ -285,9 +271,7 @@ def run_compress_job(
     manifest_report = verify_manifest(run_dir)
     _log(f"Manifest verify: ok={manifest_report.get('ok')}")
     if not manifest_report.get("ok"):
-        raise RuntimeError(
-            f"Compression manifest verification failed: {manifest_report}"
-        )
+        raise RuntimeError(f"Compression manifest verification failed: {manifest_report}")
     try:
         from seiso.research.nostr import maybe_auto_attest
 

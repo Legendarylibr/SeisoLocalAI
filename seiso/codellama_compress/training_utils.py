@@ -34,9 +34,7 @@ def tokenize_text(tokenizer: Any, text: str, seq_len: int) -> dict[str, torch.Te
     return {k: v for k, v in enc.items()}
 
 
-def tokenize_texts(
-    tokenizer: Any, texts: list[str], seq_len: int
-) -> dict[str, torch.Tensor]:
+def tokenize_texts(tokenizer: Any, texts: list[str], seq_len: int) -> dict[str, torch.Tensor]:
     """Batch-tokenize texts with dynamic padding up to ``seq_len``."""
     enc = tokenizer(
         texts,
@@ -48,9 +46,7 @@ def tokenize_texts(
     return {k: v for k, v in enc.items()}
 
 
-def print_trust_remote_code_notice(
-    accelerator: Any, *, requested: bool, effective: bool
-) -> None:
+def print_trust_remote_code_notice(accelerator: Any, *, requested: bool, effective: bool) -> None:
     if requested and not effective and accelerator.is_local_main_process:
         accelerator.print(
             f"NOTE: config requests trust_remote_code but it is disabled. "

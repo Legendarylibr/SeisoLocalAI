@@ -124,14 +124,10 @@ def build_dataset_merkle(
     leaves = [_leaf_hash(rid, fp) for fp in fps]
     levels = _build_levels(leaves)
     root = levels[-1][0].hex()
-    return DatasetMerkleCommit(
-        root=root, leaf_count=len(fps), run_id=rid, fingerprints=fps
-    )
+    return DatasetMerkleCommit(root=root, leaf_count=len(fps), run_id=rid, fingerprints=fps)
 
 
-def open_membership_path(
-    commit: DatasetMerkleCommit, fingerprint: str
-) -> list[MerklePathStep]:
+def open_membership_path(commit: DatasetMerkleCommit, fingerprint: str) -> list[MerklePathStep]:
     fp = str(fingerprint).strip().lower()
     try:
         index = commit.fingerprints.index(fp)
@@ -148,9 +144,7 @@ def open_membership_path(
         else:
             sibling_idx = idx - 1
             side = "L"
-        path.append(
-            MerklePathStep(side=side, sibling=level[sibling_idx].hex())
-        )
+        path.append(MerklePathStep(side=side, sibling=level[sibling_idx].hex()))
         idx //= 2
     return path
 
@@ -185,9 +179,7 @@ def verify_membership_path(
     return current.hex() == str(root).strip().lower()
 
 
-def build_membership_proof(
-    commit: DatasetMerkleCommit, fingerprint: str
-) -> dict[str, Any]:
+def build_membership_proof(commit: DatasetMerkleCommit, fingerprint: str) -> dict[str, Any]:
     path = open_membership_path(commit, fingerprint)
     return {
         "schema": MEMBERSHIP_PROOF_SCHEMA,
@@ -257,10 +249,6 @@ def collect_fingerprints_from_hf_dataset(dataset: Any, *, max_rows: int) -> list
         if not isinstance(row, dict):
             row = dict(row)
         # Drop internal preprocess columns if still present.
-        cleaned = {
-            k: v
-            for k, v in row.items()
-            if not str(k).startswith("_seiso")
-        }
+        cleaned = {k: v for k, v in row.items() if not str(k).startswith("_seiso")}
         fps.add(row_content_fingerprint(cleaned))
     return sorted(fps)

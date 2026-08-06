@@ -64,9 +64,7 @@ def test_quickstart_documents_real_train_config_fields():
     model_fields = set(TrainConfig.model_fields.keys())
     undocumented = table_fields - model_fields
     assert table_fields, "expected config field table in quickstart"
-    assert (
-        not undocumented
-    ), f"quickstart table lists unknown TrainConfig fields: {undocumented}"
+    assert not undocumented, f"quickstart table lists unknown TrainConfig fields: {undocumented}"
 
 
 def test_sample_jsonl_is_valid_chat_dataset():
@@ -125,9 +123,7 @@ def test_docs_internal_markdown_links_resolve():
             try:
                 resolved.relative_to(REPO_ROOT)
             except ValueError:
-                broken.append(
-                    f"{md_path.relative_to(REPO_ROOT)} -> {target} (outside repo)"
-                )
+                broken.append(f"{md_path.relative_to(REPO_ROOT)} -> {target} (outside repo)")
                 continue
             if not resolved.exists():
                 broken.append(f"{md_path.relative_to(REPO_ROOT)} -> {target}")
@@ -194,7 +190,10 @@ def test_cli_docs_cover_slime_training():
     assert "method: slime" in cli_doc or "method: slime" in quickstart
     assert "rollout_backend" in quickstart
     # Dedicated CLI exists; docs may say `seiso slime` and/or `seiso train -c …`.
-    assert "seiso slime" in cli_doc or "seiso train --config configs/example_training_slime.yaml" in cli_doc
+    assert (
+        "seiso slime" in cli_doc
+        or "seiso train --config configs/example_training_slime.yaml" in cli_doc
+    )
     from seiso_cli.main import app
 
     registered = {cmd.name for cmd in app.registered_commands}
@@ -234,9 +233,9 @@ def test_smoke_configs_exist_and_are_referenced():
         path = REPO_ROOT / rel
         assert path.is_file(), f"missing smoke config {rel}"
         name = path.name
-        assert (
-            name in agents or name in docs_ci or rel in agents or rel in docs_ci
-        ), f"{rel} is unreferenced in AGENTS.md / docs/CI_LOCAL.md"
+        assert name in agents or name in docs_ci or rel in agents or rel in docs_ci, (
+            f"{rel} is unreferenced in AGENTS.md / docs/CI_LOCAL.md"
+        )
 
 
 def test_forge_doc_covers_settings_api():

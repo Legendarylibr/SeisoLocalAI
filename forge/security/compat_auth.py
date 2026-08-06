@@ -51,9 +51,7 @@ async def get_compat_identity(
             ):
                 user = await db.get_sole_user()
                 if not user:
-                    raise HTTPException(
-                        status.HTTP_401_UNAUTHORIZED, "No local user configured"
-                    )
+                    raise HTTPException(status.HTTP_401_UNAUTHORIZED, "No local user configured")
                 owner = settings.get_inference_api_key_owner()
                 user_pubkey = str(user.get("nostr_pubkey") or "").strip().lower()
                 if owner:
@@ -65,9 +63,7 @@ async def get_compat_identity(
                 elif user_pubkey:
                     # Legacy installs: bind existing key to the sole owner npub.
                     settings.bind_inference_api_key_owner(user_pubkey)
-                identity = CompatIdentity(
-                    user_id=str(user["id"]), auth_method="inference_key"
-                )
+                identity = CompatIdentity(user_id=str(user["id"]), auth_method="inference_key")
                 request.state.compat_auth_method = identity.auth_method
                 return identity
             if token.startswith(_INFERENCE_KEY_PREFIX):
@@ -80,9 +76,7 @@ async def get_compat_identity(
         else:
             cookie = request.cookies.get("seiso_token")
             if not cookie:
-                raise HTTPException(
-                    status.HTTP_401_UNAUTHORIZED, "Authentication required"
-                )
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentication required")
             user_id = decode_token(cookie, settings)
             auth_method = "session"
     except InvalidTokenError as exc:

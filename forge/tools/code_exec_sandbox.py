@@ -31,9 +31,7 @@ def subprocess_limits() -> None:
         if hasattr(resource, "RLIMIT_NPROC"):
             resource.setrlimit(resource.RLIMIT_NPROC, (_MAX_NPROC, _MAX_NPROC))
         if hasattr(resource, "RLIMIT_FSIZE"):
-            resource.setrlimit(
-                resource.RLIMIT_FSIZE, (_MAX_FSIZE_BYTES, _MAX_FSIZE_BYTES)
-            )
+            resource.setrlimit(resource.RLIMIT_FSIZE, (_MAX_FSIZE_BYTES, _MAX_FSIZE_BYTES))
     except (OSError, ValueError):
         pass
 

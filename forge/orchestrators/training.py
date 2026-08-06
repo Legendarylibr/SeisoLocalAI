@@ -55,9 +55,7 @@ class TrainingOrchestrator(Orchestrator):
         request(job_id)
         return await super().cancel(job_id)
 
-    async def _execute_training(
-        self, job_id: str, payload: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def _execute_training(self, job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         configure_hf_hub_cache(self.sandbox_root)
         from forge.services.memory_release import (
             prepare_for_gpu_task,
@@ -74,21 +72,16 @@ class TrainingOrchestrator(Orchestrator):
             out = Path(payload["output_dir"])
             if user_id:
                 # Re-check even when the HTTP route set the path (defense in depth).
-                config.output_dir = assert_user_scoped_path(
-                    self.sandbox_root, user_id, out
-                )
+                config.output_dir = assert_user_scoped_path(self.sandbox_root, user_id, out)
             else:
                 config.output_dir = assert_within(self.sandbox_root, out)
         elif user_id:
             from seiso.security import safe_join
 
-            config.output_dir = safe_join(
-                self.sandbox_root, "checkpoints", user_id, job_id
-            )
+            config.output_dir = safe_join(self.sandbox_root, "checkpoints", user_id, job_id)
         else:
             raise ValueError(
-                "output_dir is required when user_id is missing "
-                "(refusing unscoped checkpoints/)"
+                "output_dir is required when user_id is missing (refusing unscoped checkpoints/)"
             )
 
         multi_gpu = bool(payload.get("multi_gpu", config.multi_gpu))
@@ -97,9 +90,7 @@ class TrainingOrchestrator(Orchestrator):
             payload.get("use_triton", config.extra.get("use_triton", config.use_triton))
         )
         config.use_fused_ce = bool(
-            payload.get(
-                "use_fused_ce", config.extra.get("use_fused_ce", config.use_fused_ce)
-            )
+            payload.get("use_fused_ce", config.extra.get("use_fused_ce", config.use_fused_ce))
         )
         config.use_fused_lora = bool(
             payload.get(
@@ -126,9 +117,7 @@ class TrainingOrchestrator(Orchestrator):
         self._emit_log(job_id, f"Starting training: {config.model_id}")
         if resolved := config.extra.get("resolved_model_path"):
             self._emit_log(job_id, f"Using cached weights: {resolved}")
-        self._emit_log(
-            job_id, f"Method: {config.method.value}, quant: {config.quant.value}"
-        )
+        self._emit_log(job_id, f"Method: {config.method.value}, quant: {config.quant.value}")
         self._emit_log(
             job_id,
             f"GPUs: {layout.device_count} visible, world_size={layout.world_size}, "
@@ -202,14 +191,11 @@ class TrainingOrchestrator(Orchestrator):
                 except Exception as exc:
                     # Cooperative slime/NeMo cancel raises InterruptedError in-thread.
                     if isinstance(exc, InterruptedError) or (
-                        isinstance(exc, RuntimeError)
-                        and "cancelled" in str(exc).lower()
+                        isinstance(exc, RuntimeError) and "cancelled" in str(exc).lower()
                     ):
                         raise asyncio.CancelledError() from exc
                     # Executor wraps some exceptions; unwrap common cancel signals.
-                    cause = getattr(exc, "__cause__", None) or getattr(
-                        exc, "__context__", None
-                    )
+                    cause = getattr(exc, "__cause__", None) or getattr(exc, "__context__", None)
                     if isinstance(cause, InterruptedError):
                         raise asyncio.CancelledError() from exc
                     raise
@@ -250,9 +236,7 @@ class TrainingOrchestrator(Orchestrator):
             "metrics_summary": metrics_summary,
         }
 
-    def _schedule_metrics_persist(
-        self, job_id: str, loop: asyncio.AbstractEventLoop
-    ) -> None:
+    def _schedule_metrics_persist(self, job_id: str, loop: asyncio.AbstractEventLoop) -> None:
         task = self._metrics_persist_tasks.get(job_id)
         if task and not task.done():
             return
@@ -481,9 +465,7 @@ class TrainingOrchestrator(Orchestrator):
             if m.get("type") in ("training", "eval") and m.get("type") != "system"
         ]
         losses = [float(m["loss"]) for m in training if m.get("loss") is not None]
-        eval_losses = [
-            float(m["eval_loss"]) for m in training if m.get("eval_loss") is not None
-        ]
+        eval_losses = [float(m["eval_loss"]) for m in training if m.get("eval_loss") is not None]
         rewards: list[float] = []
         for m in training:
             if m.get("reward") is not None:

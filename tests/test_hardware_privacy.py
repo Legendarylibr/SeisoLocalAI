@@ -22,9 +22,7 @@ def test_sanitize_gpu_record_strips_name():
 
 
 def test_sanitize_gpu_stats_list():
-    stats = sanitize_gpu_stats(
-        [{"index": 0, "name": "Secret GPU", "total_bytes": 1000}]
-    )
+    stats = sanitize_gpu_stats([{"index": 0, "name": "Secret GPU", "total_bytes": 1000}])
     assert stats[0]["index"] == 0
     assert "name" not in stats[0]
 

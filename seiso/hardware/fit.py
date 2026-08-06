@@ -89,9 +89,7 @@ def assess_hardware_fit(
     if blocked:
         label = "Blocked — would exceed available memory"
         memory_label = (
-            "RAM"
-            if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY)
-            else "VRAM"
+            "RAM" if tier in (HardwareTier.APPLE_UNIFIED, HardwareTier.CPU_ONLY) else "VRAM"
         )
         block_reason = (
             f"Needs ~{est_vram_gb:.1f} GB at runtime but only ~{load_budget_gb} GB "
@@ -111,9 +109,7 @@ def assess_hardware_fit(
     }
 
 
-def assess_catalog_fit(
-    model: dict[str, Any], profile: dict[str, Any]
-) -> dict[str, Any]:
+def assess_catalog_fit(model: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
     tags = tuple(model.get("tags") or ())
     download_bytes = int(model.get("download_bytes") or 0)
     repo_id = str(model.get("repo_id") or "")
@@ -160,9 +156,7 @@ def assess_catalog_fit(
     return result
 
 
-def assess_inference_option_fit(
-    option: dict[str, Any], profile: dict[str, Any]
-) -> dict[str, Any]:
+def assess_inference_option_fit(option: dict[str, Any], profile: dict[str, Any]) -> dict[str, Any]:
     size_bytes = int(option.get("size_bytes") or 0)
     name = option.get("name") or ""
     is_moe = bool(option.get("is_moe")) or is_moe_model(name)
@@ -189,9 +183,7 @@ def assess_inference_option_fit(
             }
         )
         if sizing.compute_note:
-            result["hardware_note"] = (
-                f"{result['hardware_note']} · MoE: {sizing.compute_note}"
-            )
+            result["hardware_note"] = f"{result['hardware_note']} · MoE: {sizing.compute_note}"
     return result
 
 
@@ -203,12 +195,10 @@ def format_catalog_note(
     fit: str,
     tier: HardwareTier,
 ) -> str:
-    dl = (
-        f"Download ~{download_bytes / (1024**3):.1f} GB · "
-        if download_bytes > 0
-        else ""
-    )
+    dl = f"Download ~{download_bytes / (1024**3):.1f} GB · " if download_bytes > 0 else ""
     runtime = f"Runtime ~{est_vram_gb:.1f} GB est. · "
     if fit == "unlikely" and tier != HardwareTier.CPU_ONLY:
-        return f"{dl}{runtime}Needs ~{est_vram_gb:.1f} GB at runtime — you have ~{headroom_gb} GB free"
+        return (
+            f"{dl}{runtime}Needs ~{est_vram_gb:.1f} GB at runtime — you have ~{headroom_gb} GB free"
+        )
     return f"{dl}{runtime}{headroom_gb} GB free on this machine"

@@ -111,9 +111,7 @@ async def test_provider_config_encrypted_at_rest(db: Database):
     assert str(row["config_json"]).startswith("enc:v1:")
 
     providers = await db.list_providers(user["id"])
-    assert json.loads(providers[0]["config_json"]) == {
-        "base_url": "http://127.0.0.1:8000"
-    }
+    assert json.loads(providers[0]["config_json"]) == {"base_url": "http://127.0.0.1:8000"}
 
 
 @pytest.mark.asyncio
@@ -199,9 +197,7 @@ async def test_job_events_append_tail_and_prune(db: Database):
     assert rows[0]["payload"] == {"line": "starting"}
     assert rows[1]["payload"] == {"loss": 1.0}
 
-    metric_rows = await db.list_job_events(
-        "job-1", user["id"], event_types=("metric",)
-    )
+    metric_rows = await db.list_job_events("job-1", user["id"], event_types=("metric",))
     assert len(metric_rows) == 1
 
     deleted = await db.prune_job_events("job-1", user["id"], keep_last=1)
@@ -319,16 +315,12 @@ async def test_get_thread_with_messages_batches_load(db: Database):
     thread = await db.create_thread(user["id"], "Chat", model_id="model-a")
     await db.add_message(thread["id"], "user", "hello")
 
-    loaded_thread, messages = await db.get_thread_with_messages(
-        thread["id"], user["id"]
-    )
+    loaded_thread, messages = await db.get_thread_with_messages(thread["id"], user["id"])
     assert loaded_thread is not None
     assert loaded_thread["model_id"] == "model-a"
     assert messages[0]["content"] == "hello"
 
-    missing_thread, missing_messages = await db.get_thread_with_messages(
-        "missing", user["id"]
-    )
+    missing_thread, missing_messages = await db.get_thread_with_messages("missing", user["id"])
     assert missing_thread is None
     assert missing_messages == []
 
@@ -342,6 +334,7 @@ async def test_add_message_can_update_thread_model(db: Database):
     updated = await db.get_thread_for_user(thread["id"], user["id"])
     assert updated is not None
     assert updated["model_id"] == "model-b"
+
 
 def test_hf_token_no_host_fallback_for_user(monkeypatch, tmp_path: Path):
     from forge.db.crypto import generate_encryption_key
@@ -367,6 +360,7 @@ def test_hf_token_no_host_fallback_for_user(monkeypatch, tmp_path: Path):
     )
     assert token == "hf_host_secret"
     assert source == "env_hf"
+
 
 @pytest.mark.asyncio
 async def test_training_job_config_encrypted_at_rest(tmp_path: Path):
@@ -394,4 +388,3 @@ async def test_training_job_config_encrypted_at_rest(tmp_path: Path):
     loaded = await db.get_training_job(job["id"], user["id"])
     assert json.loads(loaded["config_json"])["model_id"] == "org/model"
     await db.close()
-

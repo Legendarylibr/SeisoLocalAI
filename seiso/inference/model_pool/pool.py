@@ -285,9 +285,7 @@ class ModelPool:
 
                     restore_kernel_patches()
                 except Exception:
-                    logger.exception(
-                        "Global kernel restore also failed after torch unload error"
-                    )
+                    logger.exception("Global kernel restore also failed after torch unload error")
             del handle
 
         elif backend == BackendKind.MLX:
@@ -581,9 +579,7 @@ class ModelPool:
                     try:
                         self._release_handle(stale)
                     except Exception:
-                        logger.debug(
-                            "Failed to release stale pool handle", exc_info=True
-                        )
+                        logger.debug("Failed to release stale pool handle", exc_info=True)
                 with self._lock:
                     self._unload_pending = False
                 clear_dflash_draft_cache()

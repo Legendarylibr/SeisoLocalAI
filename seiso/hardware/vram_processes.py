@@ -41,9 +41,7 @@ def query_gpu_compute_processes() -> list[GpuMemoryProcess]:
     return query_nvidia_compute_processes()
 
 
-def external_gpu_compute_processes(
-    *, exclude_pid: int | None = None
-) -> list[GpuMemoryProcess]:
+def external_gpu_compute_processes(*, exclude_pid: int | None = None) -> list[GpuMemoryProcess]:
     """GPU compute processes other than the current PID."""
     current = exclude_pid if exclude_pid is not None else os.getpid()
     return [proc for proc in query_gpu_compute_processes() if proc.pid != current]
@@ -165,9 +163,7 @@ def log_vram_contention_at_startup() -> dict[str, Any] | None:
     return None
 
 
-def warn_before_model_load(
-    *, model_path: str, est_mb: int | None = None
-) -> dict[str, Any] | None:
+def warn_before_model_load(*, model_path: str, est_mb: int | None = None) -> dict[str, Any] | None:
     """Non-blocking pre-load advisory based on the model being opened."""
     try:
         return warn_vram_contention(

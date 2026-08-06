@@ -22,6 +22,7 @@ class MaintenanceMixin:
                 "export_jobs",
                 "training_jobs",
                 "local_models",
+                "job_events",
                 "users",
             ):
                 count_query = f"SELECT COUNT(*) AS c FROM {table}"  # nosec B608

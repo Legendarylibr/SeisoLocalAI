@@ -64,10 +64,7 @@ def resolve_torch_load_policy(
     )
     required_mb = int(weight_mb * 1.10) + reserve if weight_mb > 0 else 0
     native_half_fits = (
-        platform.system() == "Linux"
-        and free_mb > 0
-        and weight_mb > 0
-        and required_mb <= free_mb
+        platform.system() == "Linux" and free_mb > 0 and weight_mb > 0 and required_mb <= free_mb
     )
     if requested == "4bit" or (requested == "auto" and not native_half_fits):
         reason = (

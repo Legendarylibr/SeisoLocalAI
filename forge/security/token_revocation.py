@@ -89,7 +89,8 @@ def revoke_jti(jti: str, exp: float) -> None:
 
 def is_jti_revoked(jti: str) -> bool:
     with _LOCK:
-        _prune()
+        # Read path (auth hot path) checks only the looked-up entry's expiry;
+        # full-table pruning happens on the write path in revoke_jti.
         exp = _revoked.get(str(jti))
         if exp is None:
             return False

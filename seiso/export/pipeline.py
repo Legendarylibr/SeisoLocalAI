@@ -66,12 +66,9 @@ def prepare_export(
     """Resolve formats and run Hub precheck before any heavy export work."""
     kind = detect_checkpoint_kind(checkpoint)
     prof = resolve_profile(profile) if profile else None
-    resolved_formats = resolve_formats(
-        formats=formats, profile=profile, checkpoint=checkpoint
-    )
+    resolved_formats = resolve_formats(formats=formats, profile=profile, checkpoint=checkpoint)
     quants = normalize_gguf_quants(
-        gguf_quantizations
-        or (default_gguf_quants(prof) if prof else ["q4_k_m", "q8_0"])
+        gguf_quantizations or (default_gguf_quants(prof) if prof else ["q4_k_m", "q8_0"])
     )
 
     meta = hub_metadata

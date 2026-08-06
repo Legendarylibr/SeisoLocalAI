@@ -312,8 +312,7 @@ def import_signed_plan(
         raise RuntimeError("Refusing import: mesh plan Nostr event signature is invalid")
     if int(event.get("kind") or 0) != SEISO_MESH_PLAN_KIND:
         raise RuntimeError(
-            f"Refusing import: expected kind {SEISO_MESH_PLAN_KIND}, "
-            f"got {event.get('kind')}"
+            f"Refusing import: expected kind {SEISO_MESH_PLAN_KIND}, got {event.get('kind')}"
         )
     try:
         body = json.loads(str(event.get("content") or ""))
@@ -340,15 +339,12 @@ def import_signed_plan(
     jt = str(body.get("job_type") or "").strip().lower()
     if jt not in {"finetune", "slime"}:
         raise ValueError(
-            "Imported mesh plan job_type must be finetune|slime "
-            f"(got {body.get('job_type')!r})"
+            f"Imported mesh plan job_type must be finetune|slime (got {body.get('job_type')!r})"
         )
     body = {**body, "job_type": jt}
     plan: dict[str, Any] = {
         **body,
-        "token_fingerprint": _token_fingerprint(
-            token, job_id=job_id, pubkey_hex=pubkey
-        ),
+        "token_fingerprint": _token_fingerprint(token, job_id=job_id, pubkey_hex=pubkey),
         "created_at": float(event.get("created_at") or time.time()),
         "ranks": [
             {
@@ -408,8 +404,7 @@ def claim_rank(
     ranks = plan.get("ranks")
     if not isinstance(ranks, list) or len(ranks) != nnodes:
         plan["ranks"] = [
-            {"rank": i, "distributed_node_rank": i, "status": "pending"}
-            for i in range(nnodes)
+            {"rank": i, "distributed_node_rank": i, "status": "pending"} for i in range(nnodes)
         ]
         ranks = plan["ranks"]
     slot = ranks[node_rank]
@@ -418,8 +413,7 @@ def claim_rank(
     claimed_by = str(slot.get("claimed_by") or "").strip()
     if claimed_by and claimed_by != pair.npub:
         raise RuntimeError(
-            f"Rank {node_rank} already claimed by {claimed_by} "
-            f"(this worker is {pair.npub})"
+            f"Rank {node_rank} already claimed by {claimed_by} (this worker is {pair.npub})"
         )
     slot["rank"] = node_rank
     slot["distributed_node_rank"] = node_rank
@@ -575,9 +569,7 @@ def launch_worker_train(
     result["returncode"] = code
     result["status"] = "ok" if code == 0 else "failed"
     if code != 0:
-        raise RuntimeError(
-            f"Mesh worker train failed (exit {code}): {' '.join(cmd)}"
-        )
+        raise RuntimeError(f"Mesh worker train failed (exit {code}): {' '.join(cmd)}")
     return result
 
 

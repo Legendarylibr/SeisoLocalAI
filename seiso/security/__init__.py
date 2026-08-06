@@ -148,4 +148,3 @@ def assert_relative_artifact_name(name: str, *, field: str = "path") -> str:
     if any(not part or part == "." for part in path.parts):
         raise ValueError(f"{field} has empty or '.' path segments")
     return raw
-

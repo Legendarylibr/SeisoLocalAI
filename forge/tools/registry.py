@@ -198,9 +198,7 @@ def build_default_registry(
             description="Search the web for current information. Returns top snippets.",
             parameters={
                 "type": "object",
-                "properties": {
-                    "query": {"type": "string", "description": "Search query"}
-                },
+                "properties": {"query": {"type": "string", "description": "Search query"}},
                 "required": ["query"],
             },
             handler=lambda query: wrap_tool_result("web_search", web_search(query)),
@@ -364,9 +362,7 @@ def parse_json_tool_calls(text: str) -> list[dict[str, Any]]:
     return calls
 
 
-def _parse_tool_calls_with_order(
-    text: str, order: tuple[str, ...]
-) -> list[dict[str, Any]]:
+def _parse_tool_calls_with_order(text: str, order: tuple[str, ...]) -> list[dict[str, Any]]:
     parsers = {
         "json": parse_json_tool_calls,
         "xml": parse_xml_function_tool_calls,

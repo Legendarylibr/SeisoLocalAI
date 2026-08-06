@@ -398,11 +398,7 @@ async def resolve_preload_context(
                 meta = metadata_for_model_path(str(path), target.get("model_metadata"))
                 ensure_model_registered(
                     str(path),
-                    repo_id=(
-                        meta.get("repo_id")
-                        if isinstance(meta.get("repo_id"), str)
-                        else None
-                    ),
+                    repo_id=(meta.get("repo_id") if isinstance(meta.get("repo_id"), str) else None),
                     metadata=meta,
                     model_format=target.get("model_format"),
                 )

@@ -17,9 +17,7 @@ class ProvidersMixin:
                 (user_id,),
             ) as cur,
         ):
-            return [
-                self._decrypt_row("providers", dict(r)) for r in await cur.fetchall()
-            ]
+            return [self._decrypt_row("providers", dict(r)) for r in await cur.fetchall()]
 
     async def create_provider(
         self, user_id: str, name: str, provider_type: str, config: dict

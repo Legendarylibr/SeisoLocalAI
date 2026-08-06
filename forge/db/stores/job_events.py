@@ -92,9 +92,7 @@ class JobEventsMixin:
                 row["payload"] = {}
         return rows
 
-    async def prune_job_events(
-        self, job_id: str, user_id: str, *, keep_last: int = 5000
-    ) -> int:
+    async def prune_job_events(self, job_id: str, user_id: str, *, keep_last: int = 5000) -> int:
         """Keep the newest N events for a job and delete older rows."""
         keep_last = max(1, int(keep_last))
         async with self._conn() as conn:

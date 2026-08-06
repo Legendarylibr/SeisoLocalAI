@@ -353,9 +353,7 @@ def test_l402_fund_id_idempotent_no_double_credit(pay_env: Path) -> None:
     from seiso.pay.store import create_session, load_session
 
     created = create_session(scopes=["inference"])
-    challenge = mint_fund_challenge(
-        session_id=created["session_id"], amount_sats=5_000
-    )
+    challenge = mint_fund_challenge(session_id=created["session_id"], amount_sats=5_000)
     complete_fund(
         macaroon=str(challenge["macaroon"]),
         preimage_hex=str(challenge["sim_preimage"]),
@@ -389,12 +387,8 @@ def test_escrow_refund_idempotent_by_job_id(pay_env: Path) -> None:
     activate_session(created["session_id"], amount_sats=10_000, funding_mode="faucet")
     escrow_hold(created["session_id"], total_sats=1_000, job_id="job-a")
     before = load_session(created["session_id"])["balance_sats"]
-    escrow_release_refund(
-        created["session_id"], amount_sats=1_000, job_id="job-a", reason="test"
-    )
-    escrow_release_refund(
-        created["session_id"], amount_sats=1_000, job_id="job-a", reason="test"
-    )
+    escrow_release_refund(created["session_id"], amount_sats=1_000, job_id="job-a", reason="test")
+    escrow_release_refund(created["session_id"], amount_sats=1_000, job_id="job-a", reason="test")
     assert load_session(created["session_id"])["balance_sats"] == before + 1_000
 
 
@@ -436,9 +430,7 @@ def test_complete_after_cancel_does_not_settle(pay_env: Path) -> None:
     assert load_session(created["session_id"])["balance_sats"] == bal_after_cancel
 
 
-def test_settle_failure_refunds_escrow(
-    pay_env: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_settle_failure_refunds_escrow(pay_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from seiso.pay.jobs import _complete_job
     from seiso.pay.pricing import quote_job
     from seiso.pay.store import (

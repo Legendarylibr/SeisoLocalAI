@@ -31,9 +31,7 @@ def test_nvidia_boundary_report_keys():
 
 
 def test_enforce_boundary_skips_non_linux():
-    with patch(
-        "seiso.security.nvidia_boundary.is_linux_nvidia_host", return_value=False
-    ):
+    with patch("seiso.security.nvidia_boundary.is_linux_nvidia_host", return_value=False):
         report = enforce_nvidia_secure_boundary(context="test")
     assert report["linux_nvidia_host"] is False
 
@@ -47,9 +45,7 @@ def test_enforce_boundary_requires_ack_on_linux_nvidia():
         "ADAPTIVE_RL_NVIDIA_SECURE_VM": "",
         "ADAPTIVE_RL_NVIDIA_WSL_ACK": "",
     }
-    with patch(
-        "seiso.security.nvidia_boundary.is_linux_nvidia_host", return_value=True
-    ):
+    with patch("seiso.security.nvidia_boundary.is_linux_nvidia_host", return_value=True):
         with patch("seiso.security.nvidia_boundary.in_ci", return_value=False):
             with patch.dict(os.environ, env_clear, clear=False):
                 with pytest.raises(SystemExit):
@@ -61,9 +57,7 @@ def test_enforce_boundary_wsl2_ack():
         "SEISO_NVIDIA_WSL_ACK": "1",
         "WSL_DISTRO_NAME": "Ubuntu",
     }
-    with patch(
-        "seiso.security.nvidia_boundary.is_linux_nvidia_host", return_value=True
-    ):
+    with patch("seiso.security.nvidia_boundary.is_linux_nvidia_host", return_value=True):
         with patch("seiso.security.nvidia_boundary.in_ci", return_value=False):
             with patch.dict(os.environ, env, clear=False):
                 report = enforce_nvidia_secure_boundary(context="test")
@@ -81,12 +75,8 @@ def test_forge_startup_sets_native_linux_boundary_for_local_training(monkeypatch
     monkeypatch.delenv(_LEGACY_NVIDIA_HOST_VENV_ACK_ENV, raising=False)
     monkeypatch.setattr("seiso.security.nvidia_boundary.detect_wsl2", lambda: False)
     monkeypatch.setattr("seiso.security.nvidia_boundary.in_ci", lambda: False)
-    monkeypatch.setattr(
-        "seiso.security.nvidia_boundary.is_linux_nvidia_host", lambda: True
-    )
-    monkeypatch.setattr(
-        "seiso.security.nvidia_boundary.approved_nvidia_boundary", lambda: None
-    )
+    monkeypatch.setattr("seiso.security.nvidia_boundary.is_linux_nvidia_host", lambda: True)
+    monkeypatch.setattr("seiso.security.nvidia_boundary.approved_nvidia_boundary", lambda: None)
 
     settings = SimpleNamespace(allow_remote=False)
 
@@ -104,12 +94,8 @@ def test_forge_startup_does_not_auto_ack_remote_nvidia(monkeypatch):
     monkeypatch.delenv(_NVIDIA_HOST_VENV_ACK_ENV, raising=False)
     monkeypatch.setattr("seiso.security.nvidia_boundary.detect_wsl2", lambda: False)
     monkeypatch.setattr("seiso.security.nvidia_boundary.in_ci", lambda: False)
-    monkeypatch.setattr(
-        "seiso.security.nvidia_boundary.is_linux_nvidia_host", lambda: True
-    )
-    monkeypatch.setattr(
-        "seiso.security.nvidia_boundary.approved_nvidia_boundary", lambda: None
-    )
+    monkeypatch.setattr("seiso.security.nvidia_boundary.is_linux_nvidia_host", lambda: True)
+    monkeypatch.setattr("seiso.security.nvidia_boundary.approved_nvidia_boundary", lambda: None)
 
     settings = SimpleNamespace(allow_remote=True)
 

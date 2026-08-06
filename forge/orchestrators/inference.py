@@ -124,9 +124,7 @@ class InferenceOrchestrator(Orchestrator):
         self._active_generation_user_id = owner
         return self._active_generation_epoch
 
-    def end_generation_for_user(
-        self, user_id: str | None, *, epoch: int | None = None
-    ) -> None:
+    def end_generation_for_user(self, user_id: str | None, *, epoch: int | None = None) -> None:
         if epoch is not None and epoch != self._active_generation_epoch:
             return
         owner = self._normalize_generation_user(user_id)
@@ -161,9 +159,7 @@ class InferenceOrchestrator(Orchestrator):
         from forge.services.inference_models import invalidate_inference_options_cache
         from forge.services.memory_release import release_external_inference_memory
 
-        external = release_external_inference_memory(
-            reason="free_memory", sync_caches=True
-        )
+        external = release_external_inference_memory(reason="free_memory", sync_caches=True)
         invalidate_inference_options_cache()
         status = build_vram_status(self)
         status["unload_complete"] = bool(unload_status.get("unload_complete", True))
@@ -250,8 +246,7 @@ class InferenceOrchestrator(Orchestrator):
                     raise PermissionError("user_id required for tool execution")
                 # Compat can enable tools via allow_compat_tools alone (payload flag).
                 tools_enabled = bool(settings.allow_tools) or (
-                    bool(settings.allow_compat_tools)
-                    and bool(payload.get("compat_tools"))
+                    bool(settings.allow_compat_tools) and bool(payload.get("compat_tools"))
                 )
                 if not tools_enabled:
                     raise PermissionError("Tools are disabled on this server")

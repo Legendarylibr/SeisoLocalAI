@@ -161,9 +161,7 @@ async def bench_inference(
             cold_t0 = time.perf_counter()
             await asyncio.to_thread(runner.warm_model, cold_payload)
             preload_elapsed_ms = (time.perf_counter() - cold_t0) * 1000.0
-            preload_metadata = dict(
-                getattr(runner, "last_inference_stats", {})
-            )
+            preload_metadata = dict(getattr(runner, "last_inference_stats", {}))
             warmup_ms = (
                 float(preload_metadata["warmup_ms"])
                 if preload_metadata.get("warmup_ms") is not None
@@ -274,13 +272,9 @@ async def benchmark_kv_scenarios(
     long_prompt = long_prompt or "\n".join([DEFAULT_PROMPT] * 32)
 
     async def run_scenario(payload: dict[str, Any]) -> tuple[str, dict[str, Any]]:
-        output, _, ttft_ms, generate_ms, output_tokens = await _timed_stream(
-            payload, runner=runner
-        )
+        output, _, ttft_ms, generate_ms, output_tokens = await _timed_stream(payload, runner=runner)
         tokens_per_sec = (
-            output_tokens / (generate_ms / 1000.0)
-            if generate_ms > 0 and output_tokens > 0
-            else 0.0
+            output_tokens / (generate_ms / 1000.0) if generate_ms > 0 and output_tokens > 0 else 0.0
         )
         return output, {
             "ttft_ms": round(ttft_ms, 2),

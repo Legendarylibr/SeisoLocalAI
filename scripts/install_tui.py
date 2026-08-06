@@ -247,8 +247,7 @@ def cmd_outro(args: argparse.Namespace) -> int:
             glitch=0.0,
         )
         sys.stdout.write(
-            f"\n{C_SUN}{BOLD}Install complete.{RESET}\n"
-            f"Open Forge: {BOLD}{args.url}{RESET}\n\n"
+            f"\n{C_SUN}{BOLD}Install complete.{RESET}\nOpen Forge: {BOLD}{args.url}{RESET}\n\n"
         )
         sys.stdout.flush()
     finally:

@@ -21,9 +21,7 @@ def validate_kb_id(kb_id: str) -> str:
     return kb_id
 
 
-def assert_ingest_source(
-    sandbox_root: Path, user_id: str, source_path: str | Path
-) -> Path:
+def assert_ingest_source(sandbox_root: Path, user_id: str, source_path: str | Path) -> Path:
     """Allow ingest only from caller uploads or own knowledge dir — not other users' KB."""
     source = assert_within(sandbox_root, Path(source_path))
     rel = source.relative_to(sandbox_root.resolve())

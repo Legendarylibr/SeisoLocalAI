@@ -28,8 +28,9 @@ Do **not** expect `pip install -e ".[cuda]"` to pull Triton on non-Linux — ins
 
 ```python
 import torch
-print(torch.cuda.is_available())   # True on ROCm builds
-print(torch.version.hip)           # ROCm version string
+
+print(torch.cuda.is_available())  # True on ROCm builds
+print(torch.version.hip)  # ROCm version string
 ```
 
 Seiso detects AMD via `torch.version.hip` in `seiso.kernels.platform.detect_gpu()`.

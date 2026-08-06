@@ -447,8 +447,10 @@ def llama_prefill_needs_reload(
     batch_unsafe = loaded_batch > safe_batch
     ubatch_far_over = loaded_ubatch > max(safe_ubatch * 2, safe_ubatch + 128)
     needs_reload = batch_unsafe and not trust_loaded_handle
-    if not trust_loaded_handle and (headroom_dropped or headroom_shrank) and (
-        tight_prefill or prefill_exceeds_safe or loaded_batch > safe_batch
+    if (
+        not trust_loaded_handle
+        and (headroom_dropped or headroom_shrank)
+        and (tight_prefill or prefill_exceeds_safe or loaded_batch > safe_batch)
     ):
         needs_reload = True
     if (
@@ -556,8 +558,14 @@ def llama_load_profile_ladder(
             compact_batch, compact_ubatch = gpu_batch_tier_caps(gpu_total, "compact")
             minimal_batch, minimal_ubatch = gpu_batch_tier_caps(gpu_total, "minimal")
             fallback_steps = (
-                (*cap_llama_batch_for_context(compact_batch, compact_ubatch, 8192), min(n_ctx, 4096)),
-                (*cap_llama_batch_for_context(minimal_batch, minimal_ubatch, 16384), min(n_ctx, 2048)),
+                (
+                    *cap_llama_batch_for_context(compact_batch, compact_ubatch, 8192),
+                    min(n_ctx, 4096),
+                ),
+                (
+                    *cap_llama_batch_for_context(minimal_batch, minimal_ubatch, 16384),
+                    min(n_ctx, 2048),
+                ),
             )
         else:
             fallback_steps = (

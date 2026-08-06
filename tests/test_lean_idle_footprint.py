@@ -96,7 +96,9 @@ def test_release_external_stops_managed_vllm(monkeypatch, tmp_path: Path):
         "seiso.memory.protection.release_cached_memory",
         lambda sync=False: calls.append(f"cache:{sync}"),
     )
-    monkeypatch.setattr(memory_release, "_refresh_hardware_profile", lambda: calls.append("refresh"))
+    monkeypatch.setattr(
+        memory_release, "_refresh_hardware_profile", lambda: calls.append("refresh")
+    )
 
     result = memory_release.release_external_inference_memory(reason="free_memory")
 

@@ -1353,9 +1353,7 @@ class LocalInferenceRunner:
         if use_manual_torch_kv_stream(payload) and policy.manual_stream_compatible:
             from seiso.chat.thinking import ThinkingStreamGuard
 
-            guard = ThinkingStreamGuard(
-                think_max_tokens=int(payload.get("think_max_tokens") or 0)
-            )
+            guard = ThinkingStreamGuard(think_max_tokens=int(payload.get("think_max_tokens") or 0))
             emitted = False
             try:
                 for token in iter_torch_kv_tokens(
@@ -1987,9 +1985,7 @@ class LocalInferenceRunner:
                             # same recovery path as Ollama empty length burns.
                             self._last_inference_stats.update(guard.stats())
                             if not should_stop():
-                                yield StreamToken(
-                                    "", new_tokens=0, finish_reason="length"
-                                )
+                                yield StreamToken("", new_tokens=0, finish_reason="length")
                             return
                     tool_text = tool_buffer.add(delta.get("tool_calls"))
                     if tool_text:

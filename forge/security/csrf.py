@@ -22,6 +22,11 @@ CSRF_EXEMPT_PATHS: Final = frozenset(
     }
 )
 
+# Mutating routes outside /api and /v1 that skip CSRF validation. Default-deny:
+# every current mutating route lives under /api or /v1, so this set is empty —
+# add a path here only with a documented reason.
+CSRF_NON_API_EXEMPT_PATHS: Final[frozenset[str]] = frozenset()
+
 
 def generate_csrf_token() -> str:
     return secrets.token_urlsafe(32)
@@ -40,9 +45,7 @@ def set_csrf_cookie(response: Response, token: str, *, secure: bool) -> None:
 
 def clear_csrf_cookie(response: Response, *, secure: bool = False) -> None:
     # Must match set_csrf_cookie attributes or browsers keep Secure cookies.
-    response.delete_cookie(
-        CSRF_COOKIE, path="/", samesite="strict", secure=secure
-    )
+    response.delete_cookie(CSRF_COOKIE, path="/", samesite="strict", secure=secure)
 
 
 def validate_csrf(request: Request) -> bool:
@@ -76,11 +79,9 @@ def validate_csrf(request: Request) -> bool:
         ):
             return True
     if not (path.startswith("/api") or path.startswith("/v1")):
-        return True
+        return path in CSRF_NON_API_EXEMPT_PATHS
     cookie_token = request.cookies.get(CSRF_COOKIE)
     header_token = request.headers.get(CSRF_HEADER)
     return bool(
-        cookie_token
-        and header_token
-        and secrets.compare_digest(cookie_token, header_token)
+        cookie_token and header_token and secrets.compare_digest(cookie_token, header_token)
     )

@@ -50,11 +50,7 @@ def pay_quote(
     from seiso.pay.pricing import quote_inference_tokens, quote_job
 
     if type_.strip().lower() == "inference":
-        _print_json(
-            quote_inference_tokens(
-                prompt_tokens, completion_tokens, flat_call=flat_call
-            )
-        )
+        _print_json(quote_inference_tokens(prompt_tokens, completion_tokens, flat_call=flat_call))
         return
     try:
         _print_json(quote_job(type_, preset=preset))
@@ -65,19 +61,13 @@ def pay_quote(
 
 @pay_app.command("session")
 def pay_session(
-    action: Annotated[
-        str, typer.Argument(help="create|status|fund")
-    ],
+    action: Annotated[str, typer.Argument(help="create|status|fund")],
     scopes: Annotated[
         str, typer.Option(help="Comma scopes: inference,finetune,rl")
     ] = "inference,finetune,rl",
     sats: Annotated[int, typer.Option(help="Fund amount (create/fund)")] = 0,
-    session: Annotated[
-        str | None, typer.Option("--session", help="Session id")
-    ] = None,
-    token: Annotated[
-        str | None, typer.Option(help="Pay token (status via token)")
-    ] = None,
+    session: Annotated[str | None, typer.Option("--session", help="Session id")] = None,
+    token: Annotated[str | None, typer.Option(help="Pay token (status via token)")] = None,
     faucet: Annotated[
         bool, typer.Option(help="Use dev faucet (requires SEISO_PAY_FAUCET=1)")
     ] = False,
@@ -196,9 +186,7 @@ def pay_session(
 @pay_app.command("job")
 def pay_job(
     action: Annotated[str, typer.Argument(help="start|status|list|cancel|receipt")],
-    type_: Annotated[
-        str | None, typer.Option("--type", help="Job type for start")
-    ] = None,
+    type_: Annotated[str | None, typer.Option("--type", help="Job type for start")] = None,
     preset: Annotated[str | None, typer.Option()] = None,
     config: Annotated[str | None, typer.Option()] = None,
     session: Annotated[str | None, typer.Option("--session")] = None,

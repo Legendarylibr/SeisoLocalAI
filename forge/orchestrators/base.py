@@ -59,9 +59,7 @@ class JobRecord:
     kind: str
     user_id: str | None = None
     status: JobStatus = JobStatus.PENDING
-    created_at: str = field(
-        default_factory=lambda: datetime.now(timezone.utc).isoformat()
-    )
+    created_at: str = field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
     result: dict[str, Any] = field(default_factory=dict)
     error: str | None = None
     cancel_requested: bool = False
@@ -76,16 +74,14 @@ class Orchestrator(ABC):
     def __init__(self, sandbox_root: Path) -> None:
         self.sandbox_root = sandbox_root
         self._jobs: dict[str, JobRecord] = {}
-        self._log_buffers: dict[str, deque[str]] = defaultdict(
-            lambda: deque(maxlen=MAX_LOG_LINES)
-        )
+        self._log_buffers: dict[str, deque[str]] = defaultdict(lambda: deque(maxlen=MAX_LOG_LINES))
         self._metric_buffers: dict[str, deque[dict[str, Any]]] = defaultdict(
             lambda: deque(maxlen=MAX_METRIC_POINTS)
         )
         self._subscribers: dict[str, set[asyncio.Queue[str | None]]] = defaultdict(set)
-        self._metric_subscribers: dict[
-            str, set[asyncio.Queue[dict[str, Any] | None]]
-        ] = defaultdict(set)
+        self._metric_subscribers: dict[str, set[asyncio.Queue[dict[str, Any] | None]]] = (
+            defaultdict(set)
+        )
         self._tasks: dict[str, asyncio.Task[None]] = {}
         self._subprocesses: dict[str, asyncio.subprocess.Process] = {}
         self._subprocess_groups: set[str] = set()
@@ -148,9 +144,7 @@ class Orchestrator(ABC):
         for q in tuple(self._metric_subscribers.get(job_id, ())):
             q.put_nowait(metric)
 
-    def _emit_event(
-        self, job_id: str, event_type: str, payload: dict[str, Any]
-    ) -> None:
+    def _emit_event(self, job_id: str, event_type: str, payload: dict[str, Any]) -> None:
         sink = self._event_sink
         rec = self._jobs.get(job_id)
         if sink is None or rec is None or not rec.user_id:
@@ -200,9 +194,7 @@ class Orchestrator(ABC):
             q.put_nowait(None)
         self._finish_metrics(job_id)
 
-    async def stream_logs(
-        self, job_id: str, *, replay_buffer: bool = True
-    ) -> AsyncIterator[str]:
+    async def stream_logs(self, job_id: str, *, replay_buffer: bool = True) -> AsyncIterator[str]:
         """SSE-compatible log stream for a job.
 
         Live lines are yielded from the subscriber queue (not deque indices) so a
@@ -230,29 +222,31 @@ class Orchestrator(ABC):
                 if msg is None:
                     return
                 yield msg
-            if terminal:
+            if terminal or job is None:
+                # Unknown/evicted jobs have no live producer: stop after replay.
                 return
             while True:
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=0.05)
                 except asyncio.TimeoutError:
                     job = self.get_job(job_id)
-                    if job and job.status in (
+                    if job is not None and job.status not in (
                         JobStatus.COMPLETED,
                         JobStatus.FAILED,
                         JobStatus.CANCELLED,
                     ):
-                        # Drain remaining subscriber lines (e.g. final ERROR).
-                        while True:
-                            try:
-                                msg = queue.get_nowait()
-                            except asyncio.QueueEmpty:
-                                break
-                            if msg is None:
-                                return
-                            yield msg
-                        break
-                    continue
+                        continue
+                    # Terminal or evicted/unknown (job is None): drain remaining
+                    # subscriber lines (e.g. final ERROR), then stop polling.
+                    while True:
+                        try:
+                            msg = queue.get_nowait()
+                        except asyncio.QueueEmpty:
+                            break
+                        if msg is None:
+                            return
+                        yield msg
+                    break
                 if msg is None:
                     break
                 yield msg
@@ -273,9 +267,7 @@ class Orchestrator(ABC):
                 if rec.status != JobStatus.CANCELLED:
                     rec.status = JobStatus.CANCELLED
                     self._emit_log(job_id, "Job cancelled before start")
-                    self._emit_event(
-                        job_id, "status", {"status": JobStatus.CANCELLED.value}
-                    )
+                    self._emit_event(job_id, "status", {"status": JobStatus.CANCELLED.value})
                     self._finish_logs(job_id)
                 return
             raise RuntimeError(f"Job {job_id} is already {rec.status}")
@@ -303,8 +295,7 @@ class Orchestrator(ABC):
                 active_kind, active_job_id = active
                 rec.status = JobStatus.FAILED
                 rec.error = (
-                    f"Cannot start {self.kind} while {active_kind} job "
-                    f"{active_job_id} is running"
+                    f"Cannot start {self.kind} while {active_kind} job {active_job_id} is running"
                 )
                 self._emit_log(rec.id, f"ERROR: {rec.error}")
                 self._emit_event(
@@ -331,6 +322,18 @@ class Orchestrator(ABC):
             await task
         return self.get_job(job_id)
 
+    def fail_unstarted_job(self, job_id: str, error: str) -> bool:
+        """Fail a job that never reached start() so streams close and it is evictable."""
+        rec = self._jobs.get(job_id)
+        if rec is None or rec.status != JobStatus.PENDING or job_id in self._tasks:
+            return False
+        rec.status = JobStatus.FAILED
+        rec.error = error
+        self._emit_log(job_id, f"ERROR: {error}")
+        self._emit_event(job_id, "status", {"status": JobStatus.FAILED.value, "error": error})
+        self._finish_logs(job_id)
+        return True
+
     async def _run(self, job_id: str, payload: dict[str, Any]) -> None:
         rec = self._jobs[job_id]
         try:
@@ -343,23 +346,17 @@ class Orchestrator(ABC):
                 rec.result = result
                 rec.status = JobStatus.CANCELLED
                 self._emit_log(job_id, "Job cancelled")
-                self._emit_event(
-                    job_id, "status", {"status": JobStatus.CANCELLED.value}
-                )
+                self._emit_event(job_id, "status", {"status": JobStatus.CANCELLED.value})
                 return
             rec.result = result
             rec.status = JobStatus.COMPLETED
-            self._emit_event(
-                job_id, "status", {"status": JobStatus.COMPLETED.value}
-            )
+            self._emit_event(job_id, "status", {"status": JobStatus.COMPLETED.value})
             self._emit_event(job_id, "result", result)
         except asyncio.CancelledError:
             rec.cancel_requested = True
             rec.status = JobStatus.CANCELLED
             self._emit_log(job_id, "Job cancelled")
-            self._emit_event(
-                job_id, "status", {"status": JobStatus.CANCELLED.value}
-            )
+            self._emit_event(job_id, "status", {"status": JobStatus.CANCELLED.value})
             # Do not re-raise: wait_for must observe CANCELLED and persist it to DB.
         except SystemExit as exc:
             rec.status = JobStatus.FAILED
@@ -420,9 +417,7 @@ class Orchestrator(ABC):
         ):
             rec.status = JobStatus.CANCELLED
             self._emit_log(job_id, "Job cancelled before start")
-            self._emit_event(
-                job_id, "status", {"status": JobStatus.CANCELLED.value}
-            )
+            self._emit_event(job_id, "status", {"status": JobStatus.CANCELLED.value})
             self._finish_logs(job_id)
             return True
         if rec.status in (JobStatus.COMPLETED, JobStatus.FAILED, JobStatus.CANCELLED):
@@ -448,9 +443,7 @@ class Orchestrator(ABC):
         if rec.status in (JobStatus.PENDING, JobStatus.RUNNING):
             rec.status = JobStatus.CANCELLED
             self._emit_log(job_id, "Job cancelled")
-            self._emit_event(
-                job_id, "status", {"status": JobStatus.CANCELLED.value}
-            )
+            self._emit_event(job_id, "status", {"status": JobStatus.CANCELLED.value})
             self._finish_logs(job_id)
             return True
         return proc is not None

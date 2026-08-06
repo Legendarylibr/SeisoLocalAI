@@ -162,8 +162,12 @@ _BLOCKED_NAMES = frozenset(
 )
 _BLOCKED_ATTRS = frozenset(
     {
+        "ag_frame",
+        "ag_code",
+        "ag_await",
         "gi_frame",
         "gi_code",
+        "gi_running",
         "gi_yieldfrom",
         "f_back",
         "f_builtins",
@@ -171,6 +175,8 @@ _BLOCKED_ATTRS = frozenset(
         "f_locals",
         "f_code",
         "cr_frame",
+        "cr_code",
+        "cr_await",
         "tb_frame",
         "tb_next",
         "__class__",

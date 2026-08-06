@@ -4,11 +4,32 @@ from __future__ import annotations
 
 import logging
 from functools import lru_cache
+from typing import Any
 
 from seiso.kernels.fallback_ops import pytorch_rms_norm as _pytorch_rms_norm
 from seiso.kernels.platform import GpuPlatform, detect_gpu
 
 logger = logging.getLogger(__name__)
+
+
+def _weight_cache_key(tensors: tuple) -> tuple | None:
+    """``(data_ptr, _version)`` key for stacked-weight caches; None when unsafe.
+
+    In-place weight mutation bumps ``_version`` and invalidates the entry.
+    Autograd-tracked weights must re-join each forward's graph, and inference-
+    mode tensors lack a version counter — neither is ever cached.
+    """
+    import torch
+
+    if torch.is_grad_enabled() and any(getattr(t, "requires_grad", False) for t in tensors):
+        return None
+    key: list[Any] = [torch.is_inference_mode_enabled()]
+    for tensor in tensors:
+        try:
+            key.append((tensor.data_ptr(), tensor._version))
+        except RuntimeError:
+            return None
+    return tuple(key)
 
 
 def _needs_pytorch_autograd(*tensors) -> bool:
@@ -106,14 +127,34 @@ def fused_cross_entropy_loss(logits, labels, *, ignore_index: int = -100):
     return _fused_ce(logits, labels, ignore_index=ignore_index)
 
 
+# Bounded cache of stacked gate/up weights — avoids re-copying full weight
+# matrices every forward. FIFO-evicted so multi-model processes stay bounded.
+_MLP_STACK_CACHE: dict[tuple, Any] = {}
+_MLP_STACK_CACHE_MAX = 64
+
+
+def _stacked_gate_up_weights(W_gate, W_up):
+    """``cat(W_gate, W_up)`` cached on ``(data_ptr, _version)`` of both sources."""
+    import torch
+
+    key = _weight_cache_key((W_gate, W_up))
+    if key is None:
+        return torch.cat((W_gate, W_up), dim=0)
+    stacked = _MLP_STACK_CACHE.get(key)
+    if stacked is None:
+        stacked = torch.cat((W_gate, W_up), dim=0)
+        if len(_MLP_STACK_CACHE) >= _MLP_STACK_CACHE_MAX:
+            _MLP_STACK_CACHE.pop(next(iter(_MLP_STACK_CACHE)))
+        _MLP_STACK_CACHE[key] = stacked
+    return stacked
+
+
 def _mlp_gemm_swiglu(x, W_gate, W_up):
     """cuBLAS/torch GEMMs for gate/up + fused SwiGLU epilogue (production path).
 
     When gate/up weights share shape/dtype/device, use a single stacked GEMM
     (``W = cat(W_gate, W_up)``) then split — same FLOPs, fewer launches.
     """
-    import torch
-
     if (
         W_gate.shape == W_up.shape
         and W_gate.dtype == W_up.dtype
@@ -121,7 +162,7 @@ def _mlp_gemm_swiglu(x, W_gate, W_up):
         and W_gate.is_floating_point()
     ):
         mid = int(W_gate.shape[0])
-        stacked = torch.cat((W_gate, W_up), dim=0)
+        stacked = _stacked_gate_up_weights(W_gate, W_up)
         hidden = x @ stacked.t()
         gate, up = hidden.split(mid, dim=-1)
         # split() views are non-contiguous; CUDA SwiGLU requires contiguous rows.

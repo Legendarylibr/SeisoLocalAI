@@ -34,9 +34,7 @@ async def assert_pushable_model(db: Database, *, model_id: str, user_id: str) ->
     if not model:
         raise ValueError("Model not found")
     if not is_pushable_model(model):
-        raise ValueError(
-            "Only Seiso training or export outputs can be published to Hugging Face"
-        )
+        raise ValueError("Only Seiso training or export outputs can be published to Hugging Face")
     return model
 
 
@@ -103,9 +101,7 @@ async def assert_pushable_checkpoint(
         if str(Path(m["path"]).resolve()) == norm and is_pushable_model(m):
             return resolved
 
-    raise ValueError(
-        "Checkpoint must be a Seiso training checkpoint or a prior export output"
-    )
+    raise ValueError("Checkpoint must be a Seiso training checkpoint or a prior export output")
 
 
 async def list_publishable_models(db: Database, user_id: str) -> list[dict]:

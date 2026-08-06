@@ -59,8 +59,7 @@ def funding_instructions(session_id: str, amount_sats: int) -> dict[str, Any]:
             "Live Ark and live Lightning L402 are not functional yet — do not "
             "use for real funds. "
             + (
-                "Simulated L402 fund/exchange is available "
-                "(POST /pay/v1/sessions/fund/l402)."
+                "Simulated L402 fund/exchange is available (POST /pay/v1/sessions/fund/l402)."
                 if sim
                 else "Faucet/sim only for local smoke tests."
             )
@@ -69,9 +68,7 @@ def funding_instructions(session_id: str, amount_sats: int) -> dict[str, Any]:
     if faucet_enabled():
         out["faucet_hint"] = "Dev faucet: seiso pay session fund --session ID --sats N --faucet"
     if sim:
-        out["l402_hint"] = (
-            "Sim L402: seiso pay session fund --session ID --sats N --l402"
-        )
+        out["l402_hint"] = "Sim L402: seiso pay session fund --session ID --sats N --l402"
     return out
 
 

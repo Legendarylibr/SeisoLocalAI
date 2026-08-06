@@ -115,7 +115,8 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
     suffix = p.suffix.lower()
     file_has_gguf_magic = is_file and _file_has_gguf_magic(p)
     if is_file and (
-        suffix in {
+        suffix
+        in {
             ".gguf",
             ".bin",
             ".safetensors",
@@ -167,5 +168,3 @@ def _estimate_path_vram_mb_uncached(p: Path, *, mode: str = "chat") -> int:
     if mode == "train" and not from_hub and p.exists():
         est = int(est * _TRAINING_OVERHEAD_RATIO)
     return max(est, 256)
-
-

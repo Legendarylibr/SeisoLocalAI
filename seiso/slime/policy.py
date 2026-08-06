@@ -544,8 +544,8 @@ def _group_verifier_stats(rollouts: list[Rollout], group_size: int) -> dict[str,
         outcome_spread = max(outcomes) - min(outcomes)
         spreads.append(spread)
         outcome_spreads.append(outcome_spread)
+        nonzero_spread.append(1.0 if spread > 1e-8 else 0.0)
         # Primary health metric: outcome diversity (matches dynamic sampling).
-        nonzero_spread.append(1.0 if outcome_spread > 1e-8 else 0.0)
         nonzero_outcome_spread.append(1.0 if outcome_spread > 1e-8 else 0.0)
         group_passes.append(1.0 if any(r.outcome_passed for r in group) else 0.0)
     return {

@@ -58,9 +58,7 @@ def _installed_backends() -> dict[str, bool]:
     }
 
 
-def _filter_installed_backends(
-    backends: list[str], installed: dict[str, bool]
-) -> list[str]:
+def _filter_installed_backends(backends: list[str], installed: dict[str, bool]) -> list[str]:
     return [b for b in backends if installed.get(b, False)]
 
 
@@ -75,9 +73,7 @@ def _no_backend_status_note(model_format: str | None, install_hints: list[str]) 
     return "No installed inference engine can load this model. Install MLX or PyTorch support."
 
 
-def _inventory_artifact_is_complete(
-    row: dict[str, Any], metadata: dict[str, Any]
-) -> bool:
+def _inventory_artifact_is_complete(row: dict[str, Any], metadata: dict[str, Any]) -> bool:
     return inventory_gguf_is_complete(
         row,
         metadata,
@@ -117,13 +113,9 @@ def _enrich_model_runtime_meta(
                 gguf_uses_sliding_window_attention,
             )
 
-            opt["architecture"] = metadata.get("architecture") or gguf_architecture(
-                model_path
-            )
+            opt["architecture"] = metadata.get("architecture") or gguf_architecture(model_path)
             opt["is_moe"] = (
-                bool(metadata["is_moe"])
-                if "is_moe" in metadata
-                else gguf_is_moe(model_path)
+                bool(metadata["is_moe"]) if "is_moe" in metadata else gguf_is_moe(model_path)
             )
             opt["uses_swa"] = (
                 bool(metadata["uses_swa"])
@@ -238,9 +230,7 @@ def _backend_labels_for(backends: list[str]) -> dict[str, str]:
         from seiso.inference.sidecar_runtime import sidecar_status
 
         sidecar_engine = sidecar_status().engine
-    return {
-        b: resolve_backend_label(b, sidecar_engine=sidecar_engine) for b in backends
-    }
+    return {b: resolve_backend_label(b, sidecar_engine=sidecar_engine) for b in backends}
 
 
 def _build_local_option(
@@ -358,11 +348,7 @@ async def get_inference_option(
     profile: dict[str, Any] | None = None,
 ) -> dict[str, Any] | None:
     """Resolve a single dropdown option without rebuilding the full inventory list."""
-    profile = (
-        profile
-        if profile is not None
-        else hardware_profile() if hardware_aware else None
-    )
+    profile = profile if profile is not None else hardware_profile() if hardware_aware else None
     installed = _installed_backends()
 
     row = await db.get_model(model_id, user_id)
@@ -388,11 +374,7 @@ async def list_inference_options(
         if cached and now - cached[0] < _OPTIONS_CACHE_TTL_S:
             return cached[1]
 
-    profile = (
-        profile
-        if profile is not None
-        else hardware_profile() if hardware_aware else None
-    )
+    profile = profile if profile is not None else hardware_profile() if hardware_aware else None
     installed = _installed_backends()
     options: list[dict[str, Any]] = []
 

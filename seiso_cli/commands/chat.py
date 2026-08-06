@@ -35,9 +35,7 @@ async def _run_chat(
     return sanitize_llm_output(raw, strip_tool_calls=True)
 
 
-def _one_shot_reply(
-    model: str, prompt: str, *, inference_backend: str | None = None
-) -> str:
+def _one_shot_reply(model: str, prompt: str, *, inference_backend: str | None = None) -> str:
     return asyncio.run(
         _run_chat(
             model,
@@ -63,9 +61,7 @@ def chat(
         )
     except Exception:
         inference_backend = recommend_backend(model_path=model, model_format=None)
-    console.print(
-        f"Device: {device_class.value} · Inference backend: {inference_backend}"
-    )
+    console.print(f"Device: {device_class.value} · Inference backend: {inference_backend}")
     try:
         ensure_load_fits(model, mode="chat")
     except MemoryLoadBlockedError as exc:
@@ -87,9 +83,7 @@ def chat(
             except (EOFError, KeyboardInterrupt):
                 break
             messages.append({"role": "user", "content": user_input})
-            reply = await _run_chat(
-                model, messages, inference_backend=inference_backend
-            )
+            reply = await _run_chat(model, messages, inference_backend=inference_backend)
             console.print(f"[bold]Assistant:[/] {reply}")
             messages.append({"role": "assistant", "content": reply})
 

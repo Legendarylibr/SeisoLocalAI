@@ -8,6 +8,7 @@ from collections.abc import Callable
 from typing import Any
 
 from seiso.kernels.dispatch import (
+    _weight_cache_key,
     active_backend,
     estimate_vram_savings_pct,
     fused_lora_delta,
@@ -369,18 +370,38 @@ def apply_fused_lora_kernels(
     return meta
 
 
+def _cached_stack(tensors: tuple[Any, ...], cache: dict[str, Any] | None, slot: str) -> Any:
+    """``torch.stack`` cached per module on ``(data_ptr, _version)`` of the sources.
+
+    Weight mutation bumps ``_version`` and invalidates the single-slot entry, so
+    the hot path stays allocation-free without ever serving stale weights.
+    """
+    import torch
+
+    if cache is None:
+        return torch.stack(tensors, dim=0)
+    key = _weight_cache_key(tensors)
+    if key is None:
+        return torch.stack(tensors, dim=0)
+    if cache.get(f"{slot}_key") != key:
+        cache[f"{slot}_stacked"] = torch.stack(tensors, dim=0)
+        cache[f"{slot}_key"] = key
+    return cache[f"{slot}_stacked"]
+
+
 def _einsum_linear_batch(
     flat_x: Any,
     weights: tuple[Any, ...],
     biases: tuple[Any | None, ...],
+    stack_cache: dict[str, Any] | None = None,
 ) -> tuple[Any, ...]:
     """Batched linear via one einsum when shapes match."""
     import torch
 
-    W = torch.stack(weights, dim=0)
+    W = _cached_stack(weights, stack_cache, "w")
     outs = torch.einsum("soi,bi->bso", W, flat_x)
     if all(b is not None for b in biases):
-        outs = outs + torch.stack(biases, dim=0).unsqueeze(0)
+        outs = outs + _cached_stack(biases, stack_cache, "b").unsqueeze(0)
     return outs.unbind(dim=1)
 
 
@@ -405,7 +426,11 @@ def _bias_set_complete(biases: tuple[Any | None, ...]) -> bool:
 
 
 def _batched_base_qkv_forward(
-    flat_x: Any, q_proj: Any, k_proj: Any, v_proj: Any
+    flat_x: Any,
+    q_proj: Any,
+    k_proj: Any,
+    v_proj: Any,
+    stack_cache: dict[str, Any] | None = None,
 ) -> tuple[Any, Any, Any]:
     """Batched base Q/K/V linear — full MHA or GQA (shared K/V shapes)."""
     layers = (q_proj.base_layer, k_proj.base_layer, v_proj.base_layer)
@@ -420,7 +445,7 @@ def _batched_base_qkv_forward(
         )
 
     if weights[0].shape == weights[1].shape == weights[2].shape:
-        return _einsum_linear_batch(flat_x, weights, biases)
+        return _einsum_linear_batch(flat_x, weights, biases, stack_cache)
 
     if weights[1].shape == weights[2].shape:
         out_q = q_proj.base_layer(flat_x)
@@ -428,6 +453,7 @@ def _batched_base_qkv_forward(
             flat_x,
             (weights[1], weights[2]),
             (biases[1], biases[2]),
+            stack_cache,
         )
         return out_q, out_k, out_v
 
@@ -455,7 +481,8 @@ def _patch_fused_qkv_projections(
     max_rank: int,
 ) -> bool:
     """Coordinator patches q/k/v PEFT layers to share one fused CUDA LoRA pass."""
-    cache: dict[str, Any] = {"key": None, "outs": None}
+    cache: dict[str, Any] = {"key": None, "outs": None, "failed_adapters": set()}
+    stack_cache: dict[str, Any] = {}
 
     def _proj_slot(proj: Any) -> int:
         if proj is attn_module.q_proj:
@@ -502,9 +529,7 @@ def _patch_fused_qkv_projections(
                 if x_mod is None:
                     x_mod = x
                     if hasattr(self, "_cast_input_dtype"):
-                        x_mod = self._cast_input_dtype(
-                            x_mod, self.lora_A[adapter].weight.dtype
-                        )
+                        x_mod = self._cast_input_dtype(x_mod, self.lora_A[adapter].weight.dtype)
                     dropout_p = _lora_dropout_p(self.lora_dropout[adapter])
                     if dropout_p > 0 and self.training:
                         x_mod = F.dropout(x_mod, p=dropout_p)
@@ -540,15 +565,19 @@ def _patch_fused_qkv_projections(
                 return _fallback_projection(self, x, *args, **kwargs)
 
             adapter = adapters[0]
+            if adapter in cache["failed_adapters"]:
+                # Fused QKV delta already failed for this adapter (e.g. rank >
+                # max_rank) — go straight to the per-projection fallback instead
+                # of recomputing the batched base GEMM for every slot.
+                return _fallback_projection(self, x, *args, **kwargs)
+
             # Apply dropout once on q_proj (slot 0) and reuse for k/v so the
             # shared QKV cache key is stable. Per-proj dropout allocates distinct
             # tensors and breaks the data_ptr cache under default lora_dropout.
             if _proj_slot(self) == 0:
                 x_mod = x
                 if hasattr(self, "_cast_input_dtype"):
-                    x_mod = self._cast_input_dtype(
-                        x_mod, self.lora_A[adapter].weight.dtype
-                    )
+                    x_mod = self._cast_input_dtype(x_mod, self.lora_A[adapter].weight.dtype)
                 dropout_p = _lora_dropout_p(self.lora_dropout[adapter])
                 if dropout_p > 0 and self.training:
                     x_mod = F.dropout(x_mod, p=dropout_p)
@@ -571,13 +600,16 @@ def _patch_fused_qkv_projections(
                     attn_module.q_proj,
                     attn_module.k_proj,
                     attn_module.v_proj,
+                    stack_cache,
                 )
                 try:
                     if not _apply_adapter_qkv_delta(flat_x, out_q, out_k, out_v, adapter):
+                        cache["failed_adapters"].add(adapter)
                         return _fallback_projection(self, x, *args, **kwargs)
                     cache["outs"] = (out_q, out_k, out_v)
                     cache["key"] = cache_key
                 except (RuntimeError, ImportError):
+                    cache["failed_adapters"].add(adapter)
                     return _fallback_projection(self, x, *args, **kwargs)
 
             outs = cache["outs"]
@@ -687,7 +719,9 @@ def _patch_post_attention_residual_norm(model: Any, decoder: Any) -> bool:
                 delattr(norm, "_seiso_orig_forward")
             norm.forward = fallback
         else:
-            norm.forward = norm._seiso_orig_forward
+            # A previous patch was active at entry — restore it, not the
+            # original forward it wrapped.
+            norm.forward = fallback
         raise
     return True
 
@@ -726,8 +760,6 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
             position_embeddings=position_embeddings,
             **kwargs,
         )
-        hidden_states = attn_out[0] if isinstance(attn_out, tuple) else attn_out
-
         attn_hidden = attn_out[0] if isinstance(attn_out, tuple) else attn_out
         attn_for_norm = attn_dropout(attn_hidden) if attn_dropout is not None else attn_hidden
         post_attn_skip = residual + attn_for_norm
@@ -745,6 +777,10 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
         else:
             hidden_states = post_attn_skip + hidden_states
 
+        if isinstance(attn_out, tuple):
+            # Mirror the HF decoder contract: callers requesting use_cache or
+            # output_attentions must receive the attention module's extras.
+            return (hidden_states, *attn_out[1:])
         return hidden_states
 
     decoder._seiso_residual_decoder_forward = _decoder_forward
@@ -761,7 +797,9 @@ def _patch_fused_residual_decoder_forward(model: Any, decoder: Any) -> bool:
                 delattr(decoder, "_seiso_orig_forward")
             decoder.forward = orig
         else:
-            decoder.forward = decoder._seiso_orig_forward
+            # A previous patch was active at entry — restore it, not the
+            # original forward it wrapped.
+            decoder.forward = orig
         raise
     return True
 

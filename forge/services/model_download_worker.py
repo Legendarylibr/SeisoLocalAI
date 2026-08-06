@@ -11,9 +11,7 @@ from forge.services.user_paths import user_dir
 from seiso.security import sanitize_filename
 
 
-def _emit_progress(
-    on_progress: ProgressCallback | None, payload: dict[str, Any]
-) -> None:
+def _emit_progress(on_progress: ProgressCallback | None, payload: dict[str, Any]) -> None:
     if on_progress:
         on_progress(payload)
 
@@ -190,11 +188,7 @@ def sync_download_artifacts(
         "cache_dir": str(cache_dir),
         "gguf_file": info["filename"],
         "gguf_files": info.get("filenames") or [info["filename"]],
-        **(
-            {"mmproj_file": info["mmproj_filename"]}
-            if info.get("mmproj_filename")
-            else {}
-        ),
+        **({"mmproj_file": info["mmproj_filename"]} if info.get("mmproj_filename") else {}),
     }
     with contextlib.suppress(Exception):
         _maybe_register_with_ollama(

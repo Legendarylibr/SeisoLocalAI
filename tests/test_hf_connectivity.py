@@ -2,12 +2,14 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 from pathlib import Path
 
 import pytest
 
 from forge.config import ForgeSettings
+from forge.db.crypto import persist_encryption_key_file
 from forge.services import hf_connectivity, hf_hub
 from forge.services.hf_auth import (
     load_user_hf_token,
@@ -148,6 +150,37 @@ def test_user_hf_token_uses_stable_settings_key(tmp_path):
     assert token == "hf_test_token"
 
 
+def _legacy_hf_key(secret_key: str) -> bytes:
+    return hashlib.sha256(f"seiso:hf-token:{secret_key}".encode()).digest()
+
+
+def test_hf_token_key_fresh_install_is_random(tmp_path):
+    settings = ForgeSettings(data_dir=tmp_path)
+    key = settings.hf_token_encryption_key
+
+    assert key != _legacy_hf_key(settings.secret_key)
+    assert (tmp_path / ".hf_token_encryption_key").is_file()
+
+
+def test_hf_token_key_legacy_derivation_migrates(tmp_path):
+    settings = ForgeSettings(data_dir=tmp_path)
+    legacy = _legacy_hf_key(settings.secret_key)
+    persist_encryption_key_file(tmp_path / ".hf_token_encryption_key", legacy)
+    save_user_hf_token(settings.data_dir, "u1", "hf_legacy_token", encryption_key=legacy)
+
+    rotated = settings.hf_token_encryption_key
+    assert rotated != legacy
+    assert load_user_hf_token(settings.data_dir, "u1", encryption_key=rotated) == "hf_legacy_token"
+
+    # A fresh settings instance loads the rotated key and still decrypts.
+    second = ForgeSettings(data_dir=tmp_path)
+    assert second.hf_token_encryption_key == rotated
+    assert (
+        load_user_hf_token(second.data_dir, "u1", encryption_key=second.hf_token_encryption_key)
+        == "hf_legacy_token"
+    )
+
+
 def test_probe_hf_hub_anonymous_ok(monkeypatch):
     class FakeApi:
         def model_info(self, repo_id, timeout=None):
@@ -256,9 +289,7 @@ def test_assert_hub_ready_raises_when_unreachable(monkeypatch):
     monkeypatch.setattr(
         hf_connectivity,
         "probe_hf_hub",
-        lambda **_: hf_connectivity.HfConnectivityResult(
-            reachable=False, error="offline"
-        ),
+        lambda **_: hf_connectivity.HfConnectivityResult(reachable=False, error="offline"),
     )
     with pytest.raises(ValueError, match="offline"):
         hf_connectivity.assert_hub_ready_for_download()

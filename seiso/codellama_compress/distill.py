@@ -102,9 +102,7 @@ def run_distillation(
             "stage": "distill",
             "seed": seed,
             **dataset_provenance(dataset_cfg),
-            **trust_remote_code_audit_record(
-                config_flag=cfg.trust_remote_code, effective=trust_rc
-            ),
+            **trust_remote_code_audit_record(config_flag=cfg.trust_remote_code, effective=trust_rc),
         },
     )
     steps_log_path = run_dir / "logs" / "distill_train_steps.jsonl"
@@ -112,9 +110,7 @@ def run_distillation(
     accelerator = Accelerator(**precision_kwargs(cfg.precision))
     device = accelerator.device
 
-    print_trust_remote_code_notice(
-        accelerator, requested=cfg.trust_remote_code, effective=trust_rc
-    )
+    print_trust_remote_code_notice(accelerator, requested=cfg.trust_remote_code, effective=trust_rc)
 
     tokenizer = AutoTokenizer.from_pretrained(
         cfg.student_model, use_fast=True, trust_remote_code=trust_rc
@@ -226,9 +222,7 @@ def run_distillation(
 
             if accelerator.is_local_main_process:
                 lr = (
-                    float(scheduler.get_last_lr()[0])
-                    if hasattr(scheduler, "get_last_lr")
-                    else None
+                    float(scheduler.get_last_lr()[0]) if hasattr(scheduler, "get_last_lr") else None
                 )
                 dt = None
                 if step_t0 is not None:

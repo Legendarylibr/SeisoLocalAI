@@ -30,6 +30,7 @@ def test_parse_metric_line_from_stdout():
 def test_parse_metric_line_ignores_regular_logs():
     assert parse_metric_line("Training step 10") is None
 
+
 def test_emit_metrics_stdout_respects_falsey_env(monkeypatch):
     from seiso.env import env_bool
 
@@ -39,4 +40,3 @@ def test_emit_metrics_stdout_respects_falsey_env(monkeypatch):
     assert env_bool("SEISO_EMIT_METRICS_STDOUT", False) is False
     monkeypatch.setenv("SEISO_EMIT_METRICS_STDOUT", "1")
     assert env_bool("SEISO_EMIT_METRICS_STDOUT", False) is True
-

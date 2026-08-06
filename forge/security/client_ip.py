@@ -46,10 +46,16 @@ def client_ip(request: Request) -> str:
     settings = get_settings()
     peer = _peer_ip(request)
     if settings.trust_proxy and _is_trusted_proxy(peer, settings.trusted_proxy_ip_list):
+        trusted = settings.trusted_proxy_ip_list
         forwarded = request.headers.get("x-forwarded-for", "")
         if forwarded:
-            candidate = _normalize_ip(forwarded.split(",")[0].strip())
-            return candidate
+            # Walk right-to-left: the nearest entries are appended by trusted
+            # proxies, while leftmost entries are client-controlled spoof bait.
+            for hop in reversed(forwarded.split(",")):
+                candidate = _normalize_ip(hop)
+                if not _is_trusted_proxy(candidate, trusted):
+                    return candidate
+            return peer
         real_ip = request.headers.get("x-real-ip", "").strip()
         if real_ip:
             return _normalize_ip(real_ip)

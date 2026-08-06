@@ -27,5 +27,5 @@ def test_metrics_filename_unchanged_for_compat():
 
     from seiso.slime import trainer as t
 
-    src = inspect.getsource(t.train_slime)
+    src = inspect.getsource(t)
     assert "slime_single_gpu_metrics.jsonl" in src

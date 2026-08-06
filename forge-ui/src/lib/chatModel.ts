@@ -200,12 +200,14 @@ export function preloadWithProgress(
 ): Promise<PreloadResult> {
   throwIfAborted(signal);
   return new Promise((resolve, reject) => {
+    let settled = false;
     const { promise, abort } = api.streamPreloadModel(
       modelId,
       backend,
       {
         onProgress: (data) => onProgress?.(progressFromPreloadEvent(data)),
         onComplete: (data) => {
+          settled = true;
           const resolvedBackend =
             typeof data.backend === "string" && data.backend ? data.backend : backend;
           resolve({
@@ -214,6 +216,7 @@ export function preloadWithProgress(
           });
         },
         onError: (msg) => {
+          settled = true;
           onProgress?.(null);
           reject(new Error(msg));
         },
@@ -223,7 +226,20 @@ export function preloadWithProgress(
         n_ctx: inference?.nCtx,
       },
     );
+    promise.then(
+      () => {
+        if (!settled) {
+          settled = true;
+          onProgress?.(null);
+          reject(new Error("Preload stream ended before completion"));
+        }
+      },
+      () => {
+        /* stream errors are rejected via bindAbort below */
+      },
+    );
     bindAbort(signal, abort, promise).catch((err) => {
+      settled = true;
       onProgress?.(null);
       reject(err);
     });

@@ -13,9 +13,7 @@ def main() -> None:
     # Must run before layout / is_main_process / slime DDP resolve env.
     mark_distributed_worker()
     parser = argparse.ArgumentParser(description="Seiso distributed training worker")
-    parser.add_argument(
-        "--config", required=True, help="Path to training YAML/JSON config"
-    )
+    parser.add_argument("--config", required=True, help="Path to training YAML/JSON config")
     args = parser.parse_args()
     cfg = TrainConfig.from_yaml(Path(args.config))
     run_training(cfg)

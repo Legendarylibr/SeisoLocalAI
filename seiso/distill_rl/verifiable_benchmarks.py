@@ -28,10 +28,7 @@ _BUILTIN_BENCHMARKS: dict[str, list[RolloutPrompt]] = {
     "gpqa": [
         RolloutPrompt(
             prompt_id="gpqa_builtin_1",
-            text=(
-                "Which option is the noble gas? "
-                "A. Sodium B. Oxygen C. Neon D. Chlorine"
-            ),
+            text=("Which option is the noble gas? A. Sodium B. Oxygen C. Neon D. Chlorine"),
             answer="C",
             benchmark="gpqa",
         ),
@@ -265,9 +262,7 @@ def _load_benchmark_tasks(
 def _accuracy_jumps(checkpoints: dict[str, Any]) -> dict[str, Any]:
     if not checkpoints:
         return {}
-    baseline_name = (
-        "student_base" if "student_base" in checkpoints else next(iter(checkpoints))
-    )
+    baseline_name = "student_base" if "student_base" in checkpoints else next(iter(checkpoints))
     baseline = checkpoints[baseline_name]
     jumps: dict[str, Any] = {"baseline": baseline_name, "by_checkpoint": {}}
     for name, task_metrics in checkpoints.items():

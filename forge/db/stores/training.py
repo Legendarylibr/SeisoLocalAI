@@ -11,6 +11,7 @@ from forge.db.stores.constants import _TRAINING_LIST_COLUMNS, column_list, now_i
 
 class TrainingMixin:
     if TYPE_CHECKING:
+
         def _enc(self, value: str) -> str: ...
 
         def _decrypt_row(self, table: str, row: dict[str, Any]) -> dict[str, Any]: ...
@@ -112,6 +113,4 @@ class TrainingMixin:
                 (user_id,),
             ) as cur,
         ):
-            return [
-                self._decrypt_row("training_jobs", dict(r)) for r in await cur.fetchall()
-            ]
+            return [self._decrypt_row("training_jobs", dict(r)) for r in await cur.fetchall()]

@@ -19,6 +19,7 @@ def test_resolve_gguf_repo_uses_explicit_gguf_repo(monkeypatch):
 
     def has_gguf(repo_id, **_):
         return repo_id == "mirror-org/Example-7B-GGUF"
+
     monkeypatch.setattr(hf_hub, "repo_has_gguf", has_gguf)
     monkeypatch.setattr(hf_hub_search, "repo_has_gguf", has_gguf)
     resolved = hf_hub.resolve_gguf_repo("acme/Example-7B", entry=Entry())
@@ -28,6 +29,7 @@ def test_resolve_gguf_repo_uses_explicit_gguf_repo(monkeypatch):
 def test_resolve_gguf_repo_falls_back_to_mirror(monkeypatch):
     def has_gguf(repo_id, **_):
         return repo_id.endswith("-GGUF")
+
     monkeypatch.setattr(hf_hub, "repo_has_gguf", has_gguf)
     monkeypatch.setattr(hf_hub_search, "repo_has_gguf", has_gguf)
     resolved = hf_hub.resolve_gguf_repo("meta-llama/Llama-3.1-8B-Instruct")
@@ -37,6 +39,7 @@ def test_resolve_gguf_repo_falls_back_to_mirror(monkeypatch):
 def test_resolve_gguf_repo_ignores_dflash_draft_candidates(monkeypatch):
     def has_gguf(repo_id, **_):
         return repo_id == "bartowski/Kimi-GGUF"
+
     monkeypatch.setattr(hf_hub, "repo_has_gguf", has_gguf)
     monkeypatch.setattr(hf_hub_search, "repo_has_gguf", has_gguf)
     monkeypatch.setattr(
@@ -75,9 +78,7 @@ def test_search_huggingface_datasets_parses_api_response(monkeypatch):
 
             return json.dumps(payload).encode("utf-8")
 
-    monkeypatch.setattr(
-        hf_hub_search.urllib.request, "urlopen", lambda *_a, **_k: FakeResponse()
-    )
+    monkeypatch.setattr(hf_hub_search.urllib.request, "urlopen", lambda *_a, **_k: FakeResponse())
     rows = hf_hub.search_huggingface_datasets(query="no_robots", limit=5)
     assert rows == [
         {
@@ -99,21 +100,15 @@ def test_resolve_gguf_artifact_composes_mirror_file_and_size(monkeypatch):
         quant = "Q4_K_M"
         tags = ("vision",)
 
-    monkeypatch.setattr(
-        hf_hub, "resolve_gguf_repo", lambda *_a, **_k: "mirror/Model-GGUF"
-    )
+    monkeypatch.setattr(hf_hub, "resolve_gguf_repo", lambda *_a, **_k: "mirror/Model-GGUF")
     monkeypatch.setattr(
         hf_hub,
         "_list_repo_files",
         lambda *_a, **_k: ["Model-Q4_K_M.gguf", "Model-Q8_0.gguf", "mmproj-Q6_K.gguf"],
     )
-    monkeypatch.setattr(
-        hf_hub, "get_gguf_file_size_bytes", lambda *_a, **_k: 5_000_000_000
-    )
+    monkeypatch.setattr(hf_hub, "get_gguf_file_size_bytes", lambda *_a, **_k: 5_000_000_000)
 
-    artifact = hf_hub.resolve_gguf_artifact(
-        "org/Gemma-3-4B-Vision", entry=Entry(), use_cache=False
-    )
+    artifact = hf_hub.resolve_gguf_artifact("org/Gemma-3-4B-Vision", entry=Entry(), use_cache=False)
     assert artifact["gguf_repo"] == "mirror/Model-GGUF"
     assert artifact["filename"] == "Model-Q4_K_M.gguf"
     assert artifact["mmproj_filename"] == "mmproj-Q6_K.gguf"
@@ -126,17 +121,13 @@ def test_resolve_gguf_artifact_skips_mmproj_for_text_only_repo(monkeypatch):
         quant = "Q4_K_M"
         tags = ("gguf",)
 
-    monkeypatch.setattr(
-        hf_hub, "resolve_gguf_repo", lambda *_a, **_k: "mirror/Llama-GGUF"
-    )
+    monkeypatch.setattr(hf_hub, "resolve_gguf_repo", lambda *_a, **_k: "mirror/Llama-GGUF")
     monkeypatch.setattr(
         hf_hub,
         "_list_repo_files",
         lambda *_a, **_k: ["Llama-Q4_K_M.gguf", "mmproj-Q6_K.gguf"],
     )
-    monkeypatch.setattr(
-        hf_hub, "get_gguf_file_size_bytes", lambda *_a, **_k: 5_000_000_000
-    )
+    monkeypatch.setattr(hf_hub, "get_gguf_file_size_bytes", lambda *_a, **_k: 5_000_000_000)
 
     artifact = hf_hub.resolve_gguf_artifact(
         "org/Llama-3.1-8B-Instruct", entry=Entry(), use_cache=False
@@ -158,15 +149,14 @@ def test_pick_gguf_file_prefers_active_moe_quant():
         "Qwen3.6-35B-A3B-Q4_K_M.gguf",
         "mmproj-Q6_K.gguf",
     ]
-    picked = hf_hub._pick_gguf_file(
-        files, preferred_quant="Q4_K_M", repo_id="Qwen/Qwen3.6-35B-A3B"
-    )
+    picked = hf_hub._pick_gguf_file(files, preferred_quant="Q4_K_M", repo_id="Qwen/Qwen3.6-35B-A3B")
     assert picked == "Qwen3.6-35B-A3B-Q4_K_M.gguf"
 
 
 def test_resolve_gguf_repo_uses_top_hub_search_match(monkeypatch):
     def has_gguf(repo_id, **_):
         return repo_id == "random-user/Kimi-GGUF"
+
     monkeypatch.setattr(hf_hub, "repo_has_gguf", has_gguf)
     monkeypatch.setattr(hf_hub_search, "repo_has_gguf", has_gguf)
     monkeypatch.setattr(
@@ -193,6 +183,7 @@ def test_resolve_gguf_repo_uses_catalog_entry_gguf_repo(monkeypatch):
 
     def has_gguf(repo_id, **_):
         return repo_id == "random-user/Custom-GGUF"
+
     monkeypatch.setattr(hf_hub, "repo_has_gguf", has_gguf)
     monkeypatch.setattr(hf_hub_search, "repo_has_gguf", has_gguf)
     hf_hub_search._gguf_repo_cache.clear()
@@ -233,6 +224,7 @@ def test_resolve_gguf_repo_uses_cache(monkeypatch):
 def test_first_repo_with_gguf_preserves_candidate_order(monkeypatch):
     def has_gguf(repo_id, **_):
         return repo_id in {"second/repo", "third/repo"}
+
     monkeypatch.setattr(hf_hub_search, "repo_has_gguf", has_gguf)
 
     resolved = hf_hub_search._first_repo_with_gguf(["first/repo", "second/repo", "third/repo"])
@@ -251,9 +243,7 @@ def test_download_gguf_skips_size_lookup_when_total_known(monkeypatch, tmp_path)
 
     cached = tmp_path / "model.gguf"
     cached.write_bytes(b"gguf")
-    monkeypatch.setattr(
-        hf_hub, "_with_download_retries", lambda _fn, **_k: str(cached.resolve())
-    )
+    monkeypatch.setattr(hf_hub, "_with_download_retries", lambda _fn, **_k: str(cached.resolve()))
 
     progress_events: list[dict] = []
     hf_hub.download_gguf(

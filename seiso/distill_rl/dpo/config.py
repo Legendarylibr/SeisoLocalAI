@@ -19,9 +19,7 @@ class DPOSettings:
 
     def validate(self) -> None:
         if self.beta <= 0:
-            raise ValueError(
-                "beta must be > 0 (β≤0 zeros or flips the DPO preference direction)"
-            )
+            raise ValueError("beta must be > 0 (β≤0 zeros or flips the DPO preference direction)")
         if self.beta > 1.0:
             raise ValueError(
                 "beta must be <= 1.0 (very large β approaches hard preferences "

@@ -21,11 +21,7 @@ def probe_nvidia_gpus() -> list[dict[str, Any]]:
         if not isinstance(name, str) or not name.strip():
             continue
         total_raw = item.get("memory_total_mb")
-        total_mb = (
-            int(total_raw)
-            if isinstance(total_raw, (int, float)) and total_raw > 0
-            else None
-        )
+        total_mb = int(total_raw) if isinstance(total_raw, (int, float)) and total_raw > 0 else None
         gpus.append(
             {
                 "index": int(item.get("index", len(gpus))),
@@ -67,14 +63,10 @@ def nvidia_gpu_metrics() -> dict[int, dict[str, float]]:
                 continue
             idx = int(parts[0])
             out[idx] = {
-                "utilization_pct": (
-                    float(parts[1]) if parts[1] not in ("[N/A]", "N/A") else 0.0
-                ),
+                "utilization_pct": (float(parts[1]) if parts[1] not in ("[N/A]", "N/A") else 0.0),
                 "vram_used_mb": float(parts[2]),
                 "vram_total_mb": float(parts[3]),
-                "temperature_c": (
-                    float(parts[4]) if parts[4] not in ("[N/A]", "N/A") else 0.0
-                ),
+                "temperature_c": (float(parts[4]) if parts[4] not in ("[N/A]", "N/A") else 0.0),
             }
     except (FileNotFoundError, subprocess.TimeoutExpired, ValueError, OSError):
         pass

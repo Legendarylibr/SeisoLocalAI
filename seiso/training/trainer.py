@@ -447,9 +447,7 @@ class SeisoTrainer:
             return env
         return bool(getattr(self.config, "dataset_merkle", True))
 
-    def _collect_train_fingerprints(
-        self, train_ds: Any
-    ) -> tuple[list[str] | None, str | None]:
+    def _collect_train_fingerprints(self, train_ds: Any) -> tuple[list[str] | None, str | None]:
         """Fingerprint final train rows before tokenization (for merkle commit)."""
         if not self._dataset_merkle_wanted():
             return None, "disabled"
@@ -626,14 +624,13 @@ class SeisoTrainer:
             # Opt-in packing upgrades only (never force-disable user packing=true).
             # Never auto-enable packing when response-only chat masking is required —
             # packing + Seiso assistant masks are incompatible (TEXT CPT is OK).
-            packing_ok = (
-                not cfg.train_on_responses_only
-                or cfg.dataset_format == DatasetFormat.TEXT
-            )
+            packing_ok = not cfg.train_on_responses_only or cfg.dataset_format == DatasetFormat.TEXT
             if profile.get("packing") and not cfg.packing and packing_ok:
                 updates["packing"] = True
-            if profile.get("padding_free") and packing_ok and (
-                updates.get("packing", cfg.packing) and not cfg.padding_free
+            if (
+                profile.get("padding_free")
+                and packing_ok
+                and (updates.get("packing", cfg.packing) and not cfg.padding_free)
             ):
                 updates["padding_free"] = True
             # use_cuda_graphs lives in extra (not a top-level TrainConfig field).
@@ -736,9 +733,7 @@ class SeisoTrainer:
                 latest = self._latest_checkpoint_dir(cfg.output_dir)
                 if latest is not None:
                     resume_from_checkpoint = str(latest)
-                    self._log(
-                        f"OOM recovery: resuming from latest checkpoint {latest}"
-                    )
+                    self._log(f"OOM recovery: resuming from latest checkpoint {latest}")
                 else:
                     self._log(
                         "OOM recovery: no checkpoint found under output_dir; "
@@ -1205,9 +1200,7 @@ class SeisoTrainer:
                 }
             except Exception as exc:
                 logger.warning("dataset merkle commit failed: %s", exc)
-                merkle_fields = {
-                    "dataset_merkle_skipped": f"commit_error:{type(exc).__name__}"
-                }
+                merkle_fields = {"dataset_merkle_skipped": f"commit_error:{type(exc).__name__}"}
         elif dataset_merkle_skipped:
             merkle_fields = {"dataset_merkle_skipped": dataset_merkle_skipped}
 

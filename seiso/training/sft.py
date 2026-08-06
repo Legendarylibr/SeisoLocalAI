@@ -80,9 +80,7 @@ if _SFTTrainer is not None:
                     self, model, inputs, num_items_in_batch=num_items_in_batch
                 )
 
-        def compute_loss(
-            self, model, inputs, return_outputs=False, num_items_in_batch=None
-        ):
+        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
             if not self._seiso_use_fused_ce:
                 return self._seiso_super_compute_loss(
                     model,
@@ -235,9 +233,7 @@ def _fallback_trainer(
         "loss_type",
         "model_init_kwargs",
     }
-    filtered_args = {
-        k: v for k, v in training_args_dict.items() if k not in sft_only_keys
-    }
+    filtered_args = {k: v for k, v in training_args_dict.items() if k not in sft_only_keys}
     args = TrainingArguments(**filtered_args)
 
     if not use_fused_ce:
@@ -257,9 +253,7 @@ def _fallback_trainer(
             use_cuda_graphs = kwargs.pop("use_cuda_graphs", False)
             super().__init__(*args, use_cuda_graphs=use_cuda_graphs, **kwargs)
 
-        def compute_loss(
-            self, model, inputs, return_outputs=False, num_items_in_batch=None
-        ):
+        def compute_loss(self, model, inputs, return_outputs=False, num_items_in_batch=None):
             return _compute_fused_or_delegate_loss(
                 super().compute_loss,
                 model,

@@ -72,9 +72,7 @@ def _patch_relays(attest_mod, store: dict[str, Any]):
     return (
         patch.object(attest_mod, "publish_event", side_effect=fake_publish),
         patch.object(attest_mod, "fetch_event_by_id", side_effect=fake_fetch),
-        patch.object(
-            attest_mod, "fetch_addressable_event", side_effect=fake_fetch_addressable
-        ),
+        patch.object(attest_mod, "fetch_addressable_event", side_effect=fake_fetch_addressable),
         patch.object(
             attest_mod,
             "normalize_relay_list",
@@ -299,9 +297,7 @@ def test_maybe_auto_attest_success_and_nonfatal_failure(tmp_path: Path, monkeypa
         assert ok is not None and ok["ok"] is True
 
         # Non-fatal: publish raises → warning dict, no exception.
-        with patch.object(
-            attest_mod, "attest_manifest", side_effect=RuntimeError("relay down")
-        ):
+        with patch.object(attest_mod, "attest_manifest", side_effect=RuntimeError("relay down")):
             failed = attest_mod.maybe_auto_attest(
                 path,
                 identity="cli",

@@ -95,10 +95,7 @@ def test_memory_profile_label_low_on_tight_headroom():
 
 
 def test_memory_profile_label_balanced_on_roomy_machine():
-    assert (
-        memory_profile_label({"ram_gb": 64, "gpus": [{"vram_total_mb": 49152}]})
-        == "balanced"
-    )
+    assert memory_profile_label({"ram_gb": 64, "gpus": [{"vram_total_mb": 49152}]}) == "balanced"
 
 
 def test_platform_profile_darwin_16gb_apple(monkeypatch):
@@ -107,12 +104,8 @@ def test_platform_profile_darwin_16gb_apple(monkeypatch):
         "seiso.memory.platform_profile.classify_tier",
         lambda _p: HardwareTier.APPLE_UNIFIED,
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 3072
-    )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.performance_headroom_mb", lambda _p: 3072
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 3072)
+    monkeypatch.setattr("seiso.memory.platform_profile.performance_headroom_mb", lambda _p: 3072)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {
@@ -140,9 +133,7 @@ def test_platform_profile_disable_memory_caps_keeps_full_defaults(monkeypatch):
         "seiso.memory.platform_profile.classify_tier",
         lambda _p: HardwareTier.APPLE_UNIFIED,
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 3072
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 3072)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {
@@ -165,9 +156,7 @@ def test_platform_profile_darwin_intel_cpu_only(monkeypatch):
     monkeypatch.setattr(
         "seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.CPU_ONLY
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 8192
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 8192)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {
@@ -190,9 +179,7 @@ def test_platform_profile_windows_no_cuda(monkeypatch):
     monkeypatch.setattr(
         "seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.CPU_ONLY
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 8192
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 8192)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {"gpu_count": 0, "train_platform": "cpu"},
@@ -216,12 +203,8 @@ def test_platform_profile_native_linux_16gb_host_keeps_vram_cache_caps(monkeypat
         "seiso.memory.platform_profile.classify_tier",
         lambda _p: HardwareTier.WORKSTATION,
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 20480
-    )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.performance_headroom_mb", lambda _p: 20480
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 20480)
+    monkeypatch.setattr("seiso.memory.platform_profile.performance_headroom_mb", lambda _p: 20480)
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
 
@@ -247,9 +230,7 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
         "seiso.memory.platform_profile.classify_tier",
         lambda _p: HardwareTier.WORKSTATION,
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 20480
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 20480)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {
@@ -261,9 +242,7 @@ def test_platform_profile_linux_nvidia_uses_gpu_layers(monkeypatch):
     )
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
-    )
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
 
     apply_platform_memory_profile(profile=profile)
 
@@ -289,9 +268,7 @@ def test_platform_profile_linux_nvidia_wsl_uses_non_native_batches(monkeypatch):
         "seiso.memory.platform_profile.classify_tier",
         lambda _p: HardwareTier.WORKSTATION,
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 24576
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 24576)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {
@@ -303,9 +280,7 @@ def test_platform_profile_linux_nvidia_wsl_uses_non_native_batches(monkeypatch):
     )
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
-    )
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
 
     apply_platform_memory_profile(profile=profile)
 
@@ -325,9 +300,7 @@ def test_platform_profile_linux_nvidia_workstation_uses_conservative_batches(mon
         "seiso.memory.platform_profile.classify_tier",
         lambda _p: HardwareTier.WORKSTATION,
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 49152
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 49152)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {
@@ -339,9 +312,7 @@ def test_platform_profile_linux_nvidia_workstation_uses_conservative_batches(mon
     )
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
-    )
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
 
     apply_platform_memory_profile(profile=profile)
 
@@ -361,9 +332,7 @@ def test_platform_profile_linux_nvidia_workstation_uses_conservative_batches(mon
         ("NVIDIA RTX 6000 Ada", 49152, HardwareTier.WORKSTATION),
     ],
 )
-def test_native_linux_nvidia_batch_caps_all_gpu_tiers(
-    monkeypatch, name, vram_mb, tier
-):
+def test_native_linux_nvidia_batch_caps_all_gpu_tiers(monkeypatch, name, vram_mb, tier):
     from seiso.memory.platform_profile import native_linux_nvidia_llama_batch_caps
     from seiso.memory.protection import gpu_batch_tier_caps
 
@@ -394,9 +363,7 @@ def test_platform_profile_remote_forge_keeps_native_linux_tuning(monkeypatch):
         "seiso.memory.platform_profile.classify_tier",
         lambda _p: HardwareTier.WORKSTATION,
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 1024
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 1024)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {
@@ -408,9 +375,7 @@ def test_platform_profile_remote_forge_keeps_native_linux_tuning(monkeypatch):
     )
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
-    )
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
 
     result = apply_platform_memory_profile(profile=profile)
 
@@ -434,9 +399,7 @@ def test_platform_profile_linux_nvidia_modest_sets_safe_batch(monkeypatch):
         "seiso.memory.platform_profile.classify_tier",
         lambda _p: HardwareTier.MODEST,
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 8192
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 8192)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {
@@ -448,9 +411,7 @@ def test_platform_profile_linux_nvidia_modest_sets_safe_batch(monkeypatch):
     )
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
-    )
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
 
     apply_platform_memory_profile(profile=profile)
 
@@ -482,9 +443,7 @@ def test_platform_profile_native_linux_nvidia_all_tiers_are_crash_resistant(
         "seiso.memory.platform_profile.classify_tier",
         lambda _p: tier,
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: vram_mb
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: vram_mb)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {
@@ -496,9 +455,7 @@ def test_platform_profile_native_linux_nvidia_all_tiers_are_crash_resistant(
     )
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
-    )
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
 
     apply_platform_memory_profile(profile=profile)
 
@@ -529,9 +486,7 @@ def test_platform_profile_workstation_keeps_speed_when_vram_in_use(monkeypatch):
         "seiso.memory.platform_profile.classify_tier",
         lambda _p: HardwareTier.WORKSTATION,
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 1364
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 1364)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {
@@ -543,9 +498,7 @@ def test_platform_profile_workstation_keeps_speed_when_vram_in_use(monkeypatch):
     )
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
-    )
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
 
     result = apply_platform_memory_profile(profile=profile)
 
@@ -572,9 +525,7 @@ def test_platform_profile_native_linux_overwrites_stale_batch_env(monkeypatch):
         "seiso.memory.platform_profile.classify_tier",
         lambda _p: HardwareTier.WORKSTATION,
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 24576
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 24576)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {
@@ -586,9 +537,7 @@ def test_platform_profile_native_linux_overwrites_stale_batch_env(monkeypatch):
     )
     monkeypatch.setattr("platform.system", lambda: "Linux")
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
-    monkeypatch.setattr(
-        "seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True
-    )
+    monkeypatch.setattr("seiso.inference.model_pool._llama_gpu_offload_ok", lambda: True)
 
     apply_platform_memory_profile(profile=profile)
 
@@ -599,9 +548,7 @@ def test_platform_profile_native_linux_overwrites_stale_batch_env(monkeypatch):
     monkeypatch.setattr(
         "seiso.memory.platform_profile.classify_tier", lambda _p: HardwareTier.CPU_ONLY
     )
-    monkeypatch.setattr(
-        "seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 8192
-    )
+    monkeypatch.setattr("seiso.memory.platform_profile.vram_headroom_mb", lambda _p: 8192)
     monkeypatch.setattr(
         "seiso.memory.platform_profile.training_capabilities",
         lambda: {"gpu_count": 0, "train_platform": "cpu"},

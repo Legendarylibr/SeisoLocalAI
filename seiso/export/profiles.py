@@ -48,9 +48,7 @@ def resolve_profile(name: str | ExportProfile) -> ExportProfile:
         return ExportProfile(name)
     except ValueError as exc:
         valid = ", ".join(p.value for p in ExportProfile)
-        raise ValueError(
-            f"Unknown export profile {name!r}; choose from: {valid}"
-        ) from exc
+        raise ValueError(f"Unknown export profile {name!r}; choose from: {valid}") from exc
 
 
 def formats_for_profile(profile: ExportProfile) -> list[ExportFormat]:

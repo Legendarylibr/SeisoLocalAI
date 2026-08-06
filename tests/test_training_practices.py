@@ -75,20 +75,14 @@ def test_default_dataset_num_proc_disabled_when_zero():
 
 def test_default_dataloader_workers_overlap_cuda_input_pipeline():
     assert default_dataloader_num_workers(0, cuda_available=True, cpu_count=12) == 6
-    assert (
-        default_dataloader_prefetch_factor(None, num_workers=4, cuda_available=True)
-        == 2
-    )
+    assert default_dataloader_prefetch_factor(None, num_workers=4, cuda_available=True) == 2
     assert default_dataloader_num_workers(0, cuda_available=True, cpu_count=32) == 8
     assert default_dataset_num_proc() is None or default_dataset_num_proc() <= 8
 
 
 def test_default_dataloader_workers_stay_single_process_on_cpu():
     assert default_dataloader_num_workers(0, cuda_available=False, cpu_count=12) == 0
-    assert (
-        default_dataloader_prefetch_factor(None, num_workers=0, cuda_available=False)
-        is None
-    )
+    assert default_dataloader_prefetch_factor(None, num_workers=0, cuda_available=False) is None
 
 
 def test_resolve_dataloader_settings_honors_explicit_prefetch():

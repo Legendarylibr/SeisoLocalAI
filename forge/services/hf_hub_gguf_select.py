@@ -29,8 +29,7 @@ def _pick_mmproj_files(files: list[str]) -> list[str]:
     return sorted(
         f
         for f in files
-        if f.lower().endswith(".gguf")
-        and ("mmproj" in f.lower() or f.lower().startswith("mmproj"))
+        if f.lower().endswith(".gguf") and ("mmproj" in f.lower() or f.lower().startswith("mmproj"))
     )
 
 
@@ -101,8 +100,7 @@ def _complete_shard_group_for(files: list[str], filename: str) -> list[str]:
         raise ValueError(f"Invalid GGUF shard total in {filename}") from exc
     if len(group) != expected or indices != set(range(1, expected + 1)):
         raise ValueError(
-            f"Incomplete GGUF shard group for {filename} "
-            f"(found {len(group)}/{expected} shards)"
+            f"Incomplete GGUF shard group for {filename} (found {len(group)}/{expected} shards)"
         )
     return sorted(group)
 
@@ -185,11 +183,7 @@ def _pick_gguf_files(
 
     def quant_matches(candidates: list[str]) -> list[str]:
         normalized_preferred = preferred_quant.replace("-", "_")
-        exact = [
-            f
-            for f in candidates
-            if normalized_preferred in f.upper().replace("-", "_")
-        ]
+        exact = [f for f in candidates if normalized_preferred in f.upper().replace("-", "_")]
         if exact:
             return exact
         return rank_gguf_filenames(candidates, preferred=preferred_quant)
@@ -207,13 +201,9 @@ def _pick_gguf_files(
     if incomplete_shards and not complete_groups:
         return []
     if complete_groups:
-        return sorted(
-            complete_groups, key=lambda group: (len(group), len(group[0]), group[0])
-        )[0]
+        return sorted(complete_groups, key=lambda group: (len(group), len(group[0]), group[0]))[0]
 
-    non_sharded = [
-        filename for filename in pool if not _GGUF_SHARD_RE.match(Path(filename).name)
-    ]
+    non_sharded = [filename for filename in pool if not _GGUF_SHARD_RE.match(Path(filename).name)]
     if non_sharded:
         return [sorted(non_sharded, key=len)[0]]
     return []

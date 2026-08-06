@@ -46,9 +46,7 @@ async def resolve_publish_folder(
                 target=model["path"],
             )
         except (SecurityError, ValueError) as exc:
-            raise HTTPException(
-                403 if isinstance(exc, SecurityError) else 400, str(exc)
-            ) from exc
+            raise HTTPException(403 if isinstance(exc, SecurityError) else 400, str(exc)) from exc
         meta_raw = loads_json_field(model.get("metadata_json") or "{}", {})
         job_id = meta_raw.get("job_id")
         source = model.get("source") or "export"
@@ -70,9 +68,7 @@ async def resolve_publish_folder(
                 target=preferred,
             )
         except (SecurityError, ValueError) as exc:
-            raise HTTPException(
-                403 if isinstance(exc, SecurityError) else 400, str(exc)
-            ) from exc
+            raise HTTPException(403 if isinstance(exc, SecurityError) else 400, str(exc)) from exc
         job_id = body.export_job_id
         source = "export"
     elif body.output_path:
@@ -81,9 +77,7 @@ async def resolve_publish_folder(
                 db, data_dir=data_dir, user_id=user_id, target=body.output_path
             )
         except (SecurityError, ValueError) as exc:
-            raise HTTPException(
-                403 if isinstance(exc, SecurityError) else 400, str(exc)
-            ) from exc
+            raise HTTPException(403 if isinstance(exc, SecurityError) else 400, str(exc)) from exc
         job_id = None
         source = "export"
     else:

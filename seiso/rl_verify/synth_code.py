@@ -228,7 +228,12 @@ def _mut_not_return_bool(src: str) -> str | None:
 
 
 def _mut_off_by_one(src: str) -> str | None:
-    for token, repl in ((" + 1", " + 0"), (" - 1", " - 0"), ("range(1,", "range(0,"), ("range(n)", "range(n-1)")):
+    for token, repl in (
+        (" + 1", " + 0"),
+        (" - 1", " - 0"),
+        ("range(1,", "range(0,"),
+        ("range(n)", "range(n-1)"),
+    ):
         if token in src:
             return src.replace(token, repl, 1)
     return None
@@ -271,9 +276,7 @@ _DEFAULT_MUTATORS: tuple[Mutator, ...] = (
 
 
 def _stable_rng(*parts: str) -> random.Random:
-    digest = hashlib.sha256(
-        (_MUTATOR_SEED_SALT + "|" + "|".join(parts)).encode()
-    ).hexdigest()
+    digest = hashlib.sha256((_MUTATOR_SEED_SALT + "|" + "|".join(parts)).encode()).hexdigest()
     return random.Random(int(digest[:16], 16))  # nosec B311 — deterministic catalog
 
 
@@ -430,7 +433,7 @@ def _base_catalog() -> list[CodeTask]:
             task_id="reverse_string",
             prompt="Complete the function so it reverses a string.",
             prompt_code="def reverse_string(s: str) -> str:\n",
-            solution='    return s[::-1]\n',
+            solution="    return s[::-1]\n",
             cases=(
                 ("reverse_string('ab')", "'ba'"),
                 ("reverse_string('')", "''"),
@@ -529,12 +532,7 @@ def _base_catalog() -> list[CodeTask]:
         CodeTask(
             task_id="gcd",
             prompt="Write a Python function `gcd(a, b)` that returns the greatest common divisor of two non-negative integers.",
-            solution=(
-                "def gcd(a, b):\n"
-                "    while b:\n"
-                "        a, b = b, a % b\n"
-                "    return a\n"
-            ),
+            solution=("def gcd(a, b):\n    while b:\n        a, b = b, a % b\n    return a\n"),
             cases=(("gcd(12, 8)", "4"), ("gcd(7, 3)", "1"), ("gcd(0, 5)", "5")),
             tags=("math",),
         ),
@@ -560,11 +558,7 @@ def _base_catalog() -> list[CodeTask]:
         CodeTask(
             task_id="word_count",
             prompt="Write a Python function `word_count(text)` that counts whitespace-separated words.",
-            solution=(
-                "def word_count(text):\n"
-                "    parts = text.split()\n"
-                "    return len(parts)\n"
-            ),
+            solution=("def word_count(text):\n    parts = text.split()\n    return len(parts)\n"),
             cases=(
                 ("word_count('a b c')", "3"),
                 ("word_count('')", "0"),
@@ -622,10 +616,7 @@ def _base_catalog() -> list[CodeTask]:
         CodeTask(
             task_id="mean_ints",
             prompt="Write a Python function `mean_ints(nums)` that returns the integer floor mean of a non-empty list.",
-            solution=(
-                "def mean_ints(nums):\n"
-                "    return sum(nums) // len(nums)\n"
-            ),
+            solution=("def mean_ints(nums):\n    return sum(nums) // len(nums)\n"),
             cases=(
                 ("mean_ints([2, 4, 6])", "4"),
                 ("mean_ints([1, 2])", "1"),
@@ -636,10 +627,7 @@ def _base_catalog() -> list[CodeTask]:
         CodeTask(
             task_id="starts_with_a",
             prompt="Write a Python function `starts_with_a(s)` that returns True if s starts with 'a' or 'A'.",
-            solution=(
-                "def starts_with_a(s):\n"
-                "    return bool(s) and s[0] in ('a', 'A')\n"
-            ),
+            solution=("def starts_with_a(s):\n    return bool(s) and s[0] in ('a', 'A')\n"),
             cases=(
                 ("starts_with_a('apple')", "True"),
                 ("starts_with_a('Banana')", "False"),
@@ -1019,9 +1007,7 @@ def emit_held_out_eval_jsonl(
             verify=verify,
             include_hand_catalog=False,
         )
-        seen = {str(r["prompt_id"]) for r in rows} | {
-            f"eval_{tid}" for tid in train_ids
-        }
+        seen = {str(r["prompt_id"]) for r in rows} | {f"eval_{tid}" for tid in train_ids}
         for task in extra:
             pid = f"eval_{task.task_id}"
             if pid in seen or str(task.task_id) in train_ids:

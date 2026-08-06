@@ -11,15 +11,9 @@ from seiso.training.torch_dynamo import (
 
 
 def test_needs_compile_checkpoint_workaround():
-    assert needs_compile_checkpoint_workaround(
-        torch_compile=True, gradient_checkpointing=True
-    )
-    assert not needs_compile_checkpoint_workaround(
-        torch_compile=True, gradient_checkpointing=False
-    )
-    assert not needs_compile_checkpoint_workaround(
-        torch_compile=False, gradient_checkpointing=True
-    )
+    assert needs_compile_checkpoint_workaround(torch_compile=True, gradient_checkpointing=True)
+    assert not needs_compile_checkpoint_workaround(torch_compile=True, gradient_checkpointing=False)
+    assert not needs_compile_checkpoint_workaround(torch_compile=False, gradient_checkpointing=True)
 
 
 def test_configure_compile_checkpoint_compat_disables_lru_cache(monkeypatch):

@@ -46,8 +46,7 @@ def evaluate_pipeline(
             if len(eval_texts) >= max(1, eval_max_prompts):
                 break
         eval_prompts = [
-            RolloutPrompt(prompt_id=f"pref_{idx}", text=text)
-            for idx, text in enumerate(eval_texts)
+            RolloutPrompt(prompt_id=f"pref_{idx}", text=text) for idx, text in enumerate(eval_texts)
         ]
 
     results: dict[str, Any] = {
@@ -83,9 +82,7 @@ def evaluate_pipeline(
 
     if checkpoints and not results["checkpoints"]:
         detail = ", ".join(skipped) if skipped else "none resolved"
-        raise FileNotFoundError(
-            f"Evaluate found no usable checkpoints (skipped: {detail})"
-        )
+        raise FileNotFoundError(f"Evaluate found no usable checkpoints (skipped: {detail})")
     if skipped and on_log:
         on_log(f"Evaluate skipped missing checkpoints: {', '.join(skipped)}")
 
@@ -258,15 +255,13 @@ def _sequence_logprob(
     """
     import torch
 
-    prompt_text = _format_eval_prompt(
-        tokenizer, prompt, use_chat_template=use_chat_template
-    )
+    prompt_text = _format_eval_prompt(tokenizer, prompt, use_chat_template=use_chat_template)
     add_special = not use_chat_template
     text = f"{prompt_text}{completion}"
     joint = tokenizer(text, return_tensors="pt", add_special_tokens=add_special)
-    prompt_ids = tokenizer(
-        prompt_text, return_tensors="pt", add_special_tokens=add_special
-    )["input_ids"][0]
+    prompt_ids = tokenizer(prompt_text, return_tensors="pt", add_special_tokens=add_special)[
+        "input_ids"
+    ][0]
     prompt_len = min(int(prompt_ids.numel()), int(joint["input_ids"].shape[1]) - 1)
     if prompt_len < 1:
         prompt_len = 1

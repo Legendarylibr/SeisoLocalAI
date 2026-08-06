@@ -49,11 +49,7 @@ def hf_config_context_length(model_path: str) -> int | None:
     if isinstance(rope, dict):
         original = rope.get("original_max_position_embeddings")
         factor = rope.get("factor", 1)
-        if (
-            isinstance(original, int)
-            and isinstance(factor, (int, float))
-            and factor > 0
-        ):
+        if isinstance(original, int) and isinstance(factor, (int, float)) and factor > 0:
             return int(original * factor)
     return None
 

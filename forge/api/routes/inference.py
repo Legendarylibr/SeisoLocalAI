@@ -506,9 +506,7 @@ async def chat(
 
         ptype = prov["provider_type"].lower()
         if not is_chat_provider_type(ptype):
-            raise HTTPException(
-                400, f"Unsupported chat provider type: {prov['provider_type']}"
-            )
+            raise HTTPException(400, f"Unsupported chat provider type: {prov['provider_type']}")
         payload["provider"] = {
             "provider_type": prov["provider_type"],
             "config": json.loads(prov["config_json"]),
@@ -595,9 +593,7 @@ async def chat(
                         yield {"event": "token", "data": token}
                     content = "".join(parts)
                     if body.thread_id:
-                        await db.add_message(
-                            body.thread_id, "assistant", content, user_id=user_id
-                        )
+                        await db.add_message(body.thread_id, "assistant", content, user_id=user_id)
                     yield {"event": "message", "data": content}
                     yield {"event": "done", "data": job_id}
                 except asyncio.CancelledError:
@@ -639,9 +635,7 @@ async def chat(
                 # Keep n_ctx fixed across auto-continues — never grow KV for long replies.
                 fixed_n_ctx = payload.get("n_ctx")
                 base_messages = list(payload.get("messages") or [])
-                isolated = (
-                    str(payload.get("inference_backend") or "").lower() == "llamaswap"
-                )
+                isolated = str(payload.get("inference_backend") or "").lower() == "llamaswap"
                 # Client max_tokens is the desired overall reply length; per-pass
                 # generation is clamped separately for OOM safety and chunked via
                 # auto-continue until this total (or a dynamic long-form budget) is met.
@@ -650,9 +644,7 @@ async def chat(
                 if fixed_n_ctx is not None:
                     pass_payload["n_ctx"] = fixed_n_ctx
                     pass_payload["pin_n_ctx"] = True
-                effective = sanitize_inference_payload(
-                    pass_payload, isolated=isolated
-                )
+                effective = sanitize_inference_payload(pass_payload, isolated=isolated)
                 # Lock KV size for auto-continues when client omitted n_ctx.
                 if fixed_n_ctx is None:
                     fixed_n_ctx = effective.get("n_ctx")
@@ -722,9 +714,7 @@ async def chat(
                         pass_tokens = 0
                         pass_finish: str | None = None
                         last_meta: dict[str, Any] = {}
-                        async for update in orchestrator.stream_local_updates(
-                            pass_payload
-                        ):
+                        async for update in orchestrator.stream_local_updates(pass_payload):
                             meta = dict(update.metadata or {})
                             last_meta = meta
                             reason = meta.get("finish_reason")
@@ -812,10 +802,7 @@ async def chat(
                             )
                             and (
                                 empty_burn
-                                or (
-                                    continues_used > 0
-                                    and looks_incomplete_reply(draft_so_far)
-                                )
+                                or (continues_used > 0 and looks_incomplete_reply(draft_so_far))
                             )
                         ):
                             force_retry_empty = True
@@ -832,13 +819,17 @@ async def chat(
                             total_output_tokens=total_output_tokens,
                             total_budget=total_budget,
                             metadata=last_meta,
-                            force_incomplete=force_retry_empty or (
-                                incomplete and not pass_text.strip()
-                            ),
+                            force_incomplete=force_retry_empty
+                            or (incomplete and not pass_text.strip()),
                         )
                         # Safety rails for incomplete-only continues (no length hit):
                         # stop after many incomplete passes or tiny progress repeats.
-                        if want_continue and incomplete and not hit_length and not force_retry_empty:
+                        if (
+                            want_continue
+                            and incomplete
+                            and not hit_length
+                            and not force_retry_empty
+                        ):
                             incomplete_only_streak += 1
                             if pass_tokens < 16 and continues_used > 0:
                                 low_progress_streak += 1
@@ -888,8 +879,7 @@ async def chat(
                         yield {
                             "event": "log",
                             "data": (
-                                f"Reply incomplete — continuing "
-                                f"({continues_used}/{max_continues})…"
+                                f"Reply incomplete — continuing ({continues_used}/{max_continues})…"
                             ),
                         }
                         # Reuse fixed n_ctx. Trim the growing transcript into that
@@ -916,9 +906,7 @@ async def chat(
                             pass_payload["think"] = False
                             pass_payload["think_max_tokens"] = 0
                             pass_payload.pop("_thinking_policy_applied", None)
-                        continued = sanitize_inference_payload(
-                            pass_payload, isolated=isolated
-                        )
+                        continued = sanitize_inference_payload(pass_payload, isolated=isolated)
                         # Never raise the per-pass budget above the first-pass OOM-safe
                         # cap or the remaining multi-pass allowance.
                         pass_max_tokens = max(
@@ -1016,9 +1004,7 @@ async def chat(
                         strip_tool_calls=not body.tools,
                     )
                     if body.thread_id:
-                        await db.add_message(
-                            body.thread_id, "assistant", content, user_id=user_id
-                        )
+                        await db.add_message(body.thread_id, "assistant", content, user_id=user_id)
                     yield {"event": "message", "data": content}
                 yield {"event": "done", "data": job_id}
             except asyncio.CancelledError:
@@ -1053,9 +1039,7 @@ async def chat(
         raise HTTPException(409, "Inference cancelled")
     if body.thread_id and job.result.get("content"):
         content = sanitize_llm_output(job.result["content"], strip_tool_calls=not body.tools)
-        await db.add_message(
-            body.thread_id, "assistant", content, user_id=user_id
-        )
+        await db.add_message(body.thread_id, "assistant", content, user_id=user_id)
     result = dict(job.result)
     if result.get("content") and not body.tools:
         result["content"] = sanitize_llm_output(result["content"], strip_tool_calls=True)

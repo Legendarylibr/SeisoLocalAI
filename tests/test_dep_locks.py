@@ -73,22 +73,15 @@ def test_python_lock_without_hashes_is_rejected(tmp_path: Path):
 def test_sha256_file_matches_known_value(tmp_path: Path):
     sample = tmp_path / "sample.txt"
     sample.write_bytes(b"seiso-lock-check\n")
-    assert (
-        sha256_file(sample)
-        == "e9140ca2669aba95a6ff302815ebb84ef0137acab886757e64e0eb9266e8cfc7"
-    )
+    assert sha256_file(sample) == "e9140ca2669aba95a6ff302815ebb84ef0137acab886757e64e0eb9266e8cfc7"
 
 
 def test_security_floors_pass_for_repo():
     verified = verify_security_floors(repo_root=REPO_ROOT)
     assert any(item.startswith("aiohttp>=") and "forge" in item for item in verified)
-    assert any(
-        item.startswith("cryptography>=") and "forge" in item for item in verified
-    )
+    assert any(item.startswith("cryptography>=") and "forge" in item for item in verified)
     assert any(item.startswith("pyjwt>=") and "forge" in item for item in verified)
-    assert any(
-        item.startswith("setuptools>=") and "build-system" in item for item in verified
-    )
+    assert any(item.startswith("setuptools>=") and "build-system" in item for item in verified)
 
 
 def test_lock_covers_pyproject_for_repo():
@@ -131,9 +124,7 @@ forge = ["aiohttp>=3.14.0", "cryptography>=50", "PyJWT>=2.13"]
         encoding="utf-8",
     )
     with pytest.raises(LockDigestError, match="aiohttp floor"):
-        verify_security_floors(
-            repo_root=tmp_path, pyproject_path=pyproject, lock_path=lock
-        )
+        verify_security_floors(repo_root=tmp_path, pyproject_path=pyproject, lock_path=lock)
 
 
 def test_security_floors_reject_stale_lock(tmp_path: Path):
@@ -159,6 +150,4 @@ forge = ["aiohttp>=3.14.3", "cryptography>=50", "PyJWT>=2.13"]
         encoding="utf-8",
     )
     with pytest.raises(LockDigestError, match="below floor"):
-        verify_security_floors(
-            repo_root=tmp_path, pyproject_path=pyproject, lock_path=lock
-        )
+        verify_security_floors(repo_root=tmp_path, pyproject_path=pyproject, lock_path=lock)

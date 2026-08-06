@@ -8,9 +8,7 @@ from pathlib import Path
 from typing import Any
 
 
-def aggregate_multiseed_runs(
-    run_dirs: list[Path], *, output_dir: Path
-) -> dict[str, Any]:
+def aggregate_multiseed_runs(run_dirs: list[Path], *, output_dir: Path) -> dict[str, Any]:
     """Aggregate evaluation metrics across seed runs (mean/std)."""
     output_dir.mkdir(parents=True, exist_ok=True)
     per_seed: list[dict[str, Any]] = []

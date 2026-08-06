@@ -37,9 +37,7 @@ class ChatMixin:
                 (thread_id,),
             ) as cur:
                 messages = [
-                    self._message_with_metadata(
-                        self._decrypt_row("chat_messages", dict(r))
-                    )
+                    self._message_with_metadata(self._decrypt_row("chat_messages", dict(r)))
                     for r in await cur.fetchall()
                 ]
             return dict(thread_row), messages
@@ -60,9 +58,7 @@ class ChatMixin:
             )
             await conn.commit()
 
-    async def create_thread(
-        self, user_id: str, title: str, model_id: str | None = None
-    ) -> dict:
+    async def create_thread(self, user_id: str, title: str, model_id: str | None = None) -> dict:
         tid = str(uuid.uuid4())
         now = now_iso()
         async with self._conn() as conn:
@@ -101,9 +97,7 @@ class ChatMixin:
             )
             if not await cur.fetchone():
                 return False
-            await conn.execute(
-                "DELETE FROM chat_messages WHERE thread_id = ?", (thread_id,)
-            )
+            await conn.execute("DELETE FROM chat_messages WHERE thread_id = ?", (thread_id,))
             await conn.execute("DELETE FROM chat_threads WHERE id = ?", (thread_id,))
             await conn.commit()
             return True
@@ -115,9 +109,7 @@ class ChatMixin:
                 "DELETE FROM chat_messages WHERE thread_id IN (SELECT id FROM chat_threads WHERE user_id = ?)",
                 (user_id,),
             )
-            cur = await conn.execute(
-                "DELETE FROM chat_threads WHERE user_id = ?", (user_id,)
-            )
+            cur = await conn.execute("DELETE FROM chat_threads WHERE user_id = ?", (user_id,))
             await conn.commit()
             return cur.rowcount
 

@@ -112,9 +112,7 @@ def test_assert_user_path_rejects_cross_user_symlink(tmp_path: Path):
 def test_resolve_training_dataset_path_seeds_sample_jsonl(tmp_path: Path):
     install_root = tmp_path / "install"
     (install_root / "data").mkdir(parents=True)
-    (install_root / "data" / "sample.jsonl").write_text(
-        '{"messages":[]}\n', encoding="utf-8"
-    )
+    (install_root / "data" / "sample.jsonl").write_text('{"messages":[]}\n', encoding="utf-8")
     user_id = "user-1"
 
     resolved = resolve_training_dataset_path(

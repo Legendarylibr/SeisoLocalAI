@@ -122,9 +122,7 @@ def check_training_flow(
         f"/training/recommendations?model_id={model_id}&dataset=./data/sample.jsonl",
         headers,
     )
-    report.add(
-        "GET /training/recommendations", r.status_code == 200, f"status={r.status_code}"
-    )
+    report.add("GET /training/recommendations", r.status_code == 200, f"status={r.status_code}")
 
     r = api_post(
         client,
@@ -235,9 +233,7 @@ def check_training_flow(
     return job_id
 
 
-def check_other_pages(
-    client: httpx.Client, headers: dict[str, str], report: Report
-) -> None:
+def check_other_pages(client: httpx.Client, headers: dict[str, str], report: Report) -> None:
     endpoints: list[tuple[str, str]] = [
         ("GET /auth/status", "GET", "/auth/status"),
         ("GET /auth/me", "GET", "/auth/me"),

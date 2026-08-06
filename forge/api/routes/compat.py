@@ -112,9 +112,7 @@ async def chat_completions(
             [
                 {
                     "role": m.role,
-                    "content": m.content
-                    if isinstance(m.content, str)
-                    else str(m.content),
+                    "content": m.content if isinstance(m.content, str) else str(m.content),
                 }
                 for m in body.messages
             ]

@@ -67,11 +67,7 @@ def load_nostr_prefs(data_dir: Path, user_id: str) -> NostrPrefs:
 def save_nostr_prefs(data_dir: Path, user_id: str, prefs: NostrPrefs) -> NostrPrefs:
     validated: list[str] = []
     for relay in prefs.relays or []:
-        validated.append(
-            validate_nostr_relay_url(
-                str(relay), allow_loopback=prefs.allow_loopback
-            )
-        )
+        validated.append(validate_nostr_relay_url(str(relay), allow_loopback=prefs.allow_loopback))
     prefs = NostrPrefs(
         auto_attest=bool(prefs.auto_attest),
         relays=validated,
@@ -308,19 +304,13 @@ def forge_maybe_attest(
                 "nostr_attest",
                 user_id=user_id,
                 event_id=report.get("event_id"),
-                attestation_sha256=(report.get("receipt") or {}).get(
-                    "attestation_sha256"
-                ),
+                attestation_sha256=(report.get("receipt") or {}).get("attestation_sha256"),
                 manifest_path=str(scoped),
             )
             reports.append(report)
         except (SecurityError, Exception) as exc:
-            logger.warning(
-                "Nostr attest failed for %s (%s): %s", user_id, scoped, exc
-            )
-            reports.append(
-                {"ok": False, "error": str(exc), "manifest_path": str(scoped)}
-            )
+            logger.warning("Nostr attest failed for %s (%s): %s", user_id, scoped, exc)
+            reports.append({"ok": False, "error": str(exc), "manifest_path": str(scoped)})
     if not reports:
         return None
     return {"ok": all(r.get("ok") for r in reports), "reports": reports}

@@ -39,9 +39,7 @@ def main() -> int:
     args = parser.parse_args()
 
     try:
-        verified = verify_lock_digests(
-            repo_root=args.repo_root, digests_path=args.digests
-        )
+        verified = verify_lock_digests(repo_root=args.repo_root, digests_path=args.digests)
         python_lock = args.repo_root / "locks" / "python.lock"
         verify_python_lock_has_hashes(python_lock)
         floors = verify_security_floors(repo_root=args.repo_root)

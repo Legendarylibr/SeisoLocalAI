@@ -103,9 +103,7 @@ def _with_download_retries(fn: Callable[[], T], *, repo_id: str) -> T:
                 break
             time.sleep(_DOWNLOAD_RETRY_BACKOFF_S * (2**attempt))
     assert last_exc is not None
-    raise ValueError(
-        _format_hub_download_error(last_exc, repo_id=repo_id)
-    ) from last_exc
+    raise ValueError(_format_hub_download_error(last_exc, repo_id=repo_id)) from last_exc
 
 
 def resolve_gguf_artifact(
@@ -125,17 +123,13 @@ def resolve_gguf_artifact(
             return dict(data)
 
     entry = entry or get_by_repo(catalog_repo_id)
-    gguf_repo = resolve_gguf_repo(
-        catalog_repo_id, token=token, revision=revision, entry=entry
-    )
+    gguf_repo = resolve_gguf_repo(catalog_repo_id, token=token, revision=revision, entry=entry)
     quant = entry.quant if entry else "Q4_K_M"
 
     files = _list_repo_files(gguf_repo, token=token, revision=revision)
     filenames: list[str]
     if not filename:
-        filenames = _pick_gguf_files(
-            files, preferred_quant=quant, repo_id=catalog_repo_id
-        )
+        filenames = _pick_gguf_files(files, preferred_quant=quant, repo_id=catalog_repo_id)
         if not filenames:
             raise ValueError(f"No GGUF files found in {gguf_repo}")
         filename = filenames[0]
@@ -299,18 +293,14 @@ def download_gguf(
             download_kwargs["tqdm_class"] = make_tqdm_class(on_progress)
         cached = Path(
             _with_download_retries(
-                partial(
-                    hf_hub_download, **download_kwargs
-                ),  # nosec B615: revision pinned in download_kwargs
+                partial(hf_hub_download, **download_kwargs),  # nosec B615: revision pinned in download_kwargs
                 repo_id=repo_id,
             )
         )
         cached_paths.append(cached)
         cached_by_name[item] = cached
 
-    cached_target = (
-        cached_paths[0] if len(cached_paths) == 1 else cached_paths[0].parent
-    )
+    cached_target = cached_paths[0] if len(cached_paths) == 1 else cached_paths[0].parent
 
     result: dict[str, Any] = {
         "path": str(cached_target),
@@ -373,9 +363,7 @@ def download_training_snapshot(
     if on_progress:
         snapshot_kwargs["tqdm_class"] = make_tqdm_class(on_progress)
     path = _with_download_retries(
-        lambda: snapshot_download(
-            **snapshot_kwargs
-        ),  # nosec B615: revision pinned in snapshot_kwargs
+        lambda: snapshot_download(**snapshot_kwargs),  # nosec B615: revision pinned in snapshot_kwargs
         repo_id=repo_id,
     )
     root = Path(path)

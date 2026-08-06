@@ -92,9 +92,7 @@ def validate_repo_id(repo_id: str) -> None:
         raise ValueError(f"Invalid repo id segments in {normalized!r}")
 
 
-def validate_hub_metadata(
-    meta: HubModelMetadata, *, formats: list[str] | None = None
-) -> list[str]:
+def validate_hub_metadata(meta: HubModelMetadata, *, formats: list[str] | None = None) -> list[str]:
     """Return validation errors for Hub metadata and model card."""
     errors: list[str] = []
     try:
@@ -194,11 +192,7 @@ def precheck_hub_export(
         info = api.repo_info(result.repo_id, repo_type="model")
         result.repo_exists = True
         author = getattr(info, "author", None) or getattr(info, "id", "").split("/")[0]
-        if (
-            result.token_username
-            and author
-            and author.lower() == result.token_username.lower()
-        ):
+        if result.token_username and author and author.lower() == result.token_username.lower():
             result.repo_owned_by_user = True
             result.repo_available = True
             result.warnings.append(

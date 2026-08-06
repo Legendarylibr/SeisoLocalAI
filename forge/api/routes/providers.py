@@ -126,9 +126,7 @@ async def create_provider(
             raise HTTPException(400, "remote_chat requires config.model")
     if "base_url" in config and config["base_url"]:
         try:
-            config["base_url"] = validate_provider_base_url(
-                config["base_url"], provider_type=ptype
-            )
+            config["base_url"] = validate_provider_base_url(config["base_url"], provider_type=ptype)
         except SecurityError as exc:
             raise HTTPException(400, str(exc)) from exc
     if ptype == PROVIDER_LOCAL_CHAT and not config.get("base_url"):
@@ -136,9 +134,7 @@ async def create_provider(
         config.setdefault("deployment_kind", "multi_gpu_local")
     row = await db.create_provider(user_id, body.name, ptype, config)
     row["config"] = mask_config(config)
-    audit_event(
-        "provider_create", user_id=user_id, provider_id=row["id"], provider_type=ptype
-    )
+    audit_event("provider_create", user_id=user_id, provider_id=row["id"], provider_type=ptype)
     return row
 
 
@@ -226,9 +222,7 @@ async def managed_vllm_start(
             )
         except Exception as exc:
             raise HTTPException(400, str(exc)) from exc
-        provider = await managed_vllm_svc.ensure_managed_provider_row(
-            db, user_id, status
-        )
+        provider = await managed_vllm_svc.ensure_managed_provider_row(db, user_id, status)
     finally:
         # Drop short-lived task reservation; keep the managed server process.
         release_after_task(
@@ -257,12 +251,7 @@ async def managed_vllm_start(
         "compat": {
             "base_url": "http://127.0.0.1:8765/v1",
             "model_ids": (
-                [f"provider:{provider['id']}"]
-                + (
-                    [status["model"]]
-                    if status.get("model")
-                    else []
-                )
+                [f"provider:{provider['id']}"] + ([status["model"]] if status.get("model") else [])
                 if provider
                 else []
             ),

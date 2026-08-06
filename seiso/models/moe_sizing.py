@@ -136,12 +136,7 @@ def sizing_from_config(
         if active is not None:
             break
     active = active or active_params_from_name(model_id)
-    if (
-        active is None
-        and total is not None
-        and experts_total
-        and experts_per_tok
-    ):
+    if active is None and total is not None and experts_total and experts_per_tok:
         active = total / experts_total * experts_per_tok
     if active is None and is_moe and total is not None:
         active = max(total * 0.2, 1.0)

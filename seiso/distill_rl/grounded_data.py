@@ -214,8 +214,7 @@ def materialize_distill_grounded_prompts(
 
     if on_log:
         on_log(
-            f"Materializing grounded prompts source={source} "
-            f"count={config.data_gen_count} → {out}"
+            f"Materializing grounded prompts source={source} count={config.data_gen_count} → {out}"
         )
     materialize_grounded_corpus(out, req)
     _write_fingerprint(config)

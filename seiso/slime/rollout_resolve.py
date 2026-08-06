@@ -126,13 +126,13 @@ def validate_rollout_backend_config(config: SingleGpuSlimeConfig) -> None:
     if int(getattr(config, "vllm_weight_keep", 2) or 2) < 1:
         raise ValueError("vllm_weight_keep must be >= 1")
     # Prefer LoRA hot-reload; full disk reload is best-effort on stock vLLM.
-    uses_vllm = name == "vllm" or (
-        name == "auto" and bool(resolve_vllm_base_url(config))
-    )
+    uses_vllm = name == "vllm" or (name == "auto" and bool(resolve_vllm_base_url(config)))
     if uses_vllm and mode == "full" and bool(getattr(config, "use_lora", False)):
         import os
 
-        allow_full = os.environ.get("SEISO_SLIME_ALLOW_VLLM_FULL_WITH_LORA", "").strip().lower() in {
+        allow_full = os.environ.get(
+            "SEISO_SLIME_ALLOW_VLLM_FULL_WITH_LORA", ""
+        ).strip().lower() in {
             "1",
             "true",
             "yes",

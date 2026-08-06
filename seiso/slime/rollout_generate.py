@@ -172,9 +172,7 @@ def generate_sglang_chunk(
     from seiso.slime.rollout_http import sglang_engine_urls
 
     # Truncate before the engine sees the prompt so logprobs match.
-    prompts = truncate_prompt_texts(
-        tokenizer, prompts, max_prompt_tokens=config.max_prompt_tokens
-    )
+    prompts = truncate_prompt_texts(tokenizer, prompts, max_prompt_tokens=config.max_prompt_tokens)
     client = SGLangRolloutClient.from_config(config)
     return _generate_http_chunk(
         client=client,
@@ -194,9 +192,7 @@ def generate_vllm_chunk(
     """Generate ``rollouts_per_prompt`` completions per prompt via vLLM HTTP."""
     from seiso.slime.rollout_http import resolve_vllm_base_url, vllm_engine_urls
 
-    prompts = truncate_prompt_texts(
-        tokenizer, prompts, max_prompt_tokens=config.max_prompt_tokens
-    )
+    prompts = truncate_prompt_texts(tokenizer, prompts, max_prompt_tokens=config.max_prompt_tokens)
     client = VLLMRolloutClient.from_config(config)
     engines = vllm_engine_urls(config, allow_empty_primary=True)
     if not engines:

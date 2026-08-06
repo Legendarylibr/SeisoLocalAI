@@ -30,9 +30,7 @@ def run_awq_quantization(
     try:
         from awq import AutoAWQForCausalLM  # type: ignore
     except Exception as e:  # pragma: no cover
-        raise RuntimeError(
-            'autoawq is not installed. Install with: pip install ".[quant]"'
-        ) from e
+        raise RuntimeError('autoawq is not installed. Install with: pip install ".[quant]"') from e
 
     tok = AutoTokenizer.from_pretrained(
         in_model_dir, use_fast=True, trust_remote_code=trust_remote_code
@@ -49,9 +47,7 @@ def run_awq_quantization(
         "zero_point": True,
         "version": "GEMM",
     }
-    calib = sample_calibration_texts(
-        dataset_cfg, samples=cfg.calibration_samples, seed=cfg.seed
-    )
+    calib = sample_calibration_texts(dataset_cfg, samples=cfg.calibration_samples, seed=cfg.seed)
     calib_fingerprint = hash_calibration_texts(calib)
     model.quantize(tok, quant_config=quant_config, calib_data=calib)
     model.save_quantized(out_dir)

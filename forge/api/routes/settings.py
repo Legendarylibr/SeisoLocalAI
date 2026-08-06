@@ -135,9 +135,7 @@ async def save_hf_token(
 
     token = _normalize_token(body.token)
     if not token:
-        raise HTTPException(
-            status_code=400, detail="Invalid Hugging Face token format."
-        )
+        raise HTTPException(status_code=400, detail="Invalid Hugging Face token format.")
 
     result = probe_hf_hub(token=token)
     if not result.reachable:

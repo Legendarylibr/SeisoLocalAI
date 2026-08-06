@@ -317,9 +317,7 @@ def enforce_nvidia_secure_boundary(*, context: str = "training") -> dict[str, ob
         return report
 
     if _env_enabled(_SKIP_BOUNDARY_ENV):
-        message = (
-            f"NVIDIA secure boundary skipped during {context} ({_SKIP_BOUNDARY_ENV}=1)."
-        )
+        message = f"NVIDIA secure boundary skipped during {context} ({_SKIP_BOUNDARY_ENV}=1)."
         if _env_enabled(_ABORT_ENV):
             raise SystemExit(message)
         print(message, file=sys.stderr)

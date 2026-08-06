@@ -78,9 +78,7 @@ def resolve_training_dataset_path(
 
     rel_parts = [p for p in path.parts if p not in (".",)]
     # Prefer uploads for bare filenames (historical CLI UX).
-    search_roots = ("uploads",) + tuple(
-        sorted(r for r in USER_SCOPED_DATA_ROOTS if r != "uploads")
-    )
+    search_roots = ("uploads",) + tuple(sorted(r for r in USER_SCOPED_DATA_ROOTS if r != "uploads"))
     for category in search_roots:
         try:
             root = user_dir(sandbox_root, user_id, category)
@@ -155,9 +153,7 @@ def _assert_resolved_scope(
             and log_rel.parts[1] == user_id
         ):
             return
-        raise SecurityError(
-            "Shared cache paths are only reachable via your model inventory"
-        )
+        raise SecurityError("Shared cache paths are only reachable via your model inventory")
 
     raise SecurityError(f"Access denied to path root: {root!r}")
 
@@ -188,9 +184,7 @@ def assert_user_path(sandbox_root: Path, user_id: str, target: str | Path) -> Pa
 
     resolved = assert_within(base, source.resolve())
     if source.is_symlink() and not resolved.exists():
-        raise SecurityError(
-            f"Model cache link is broken — re-download from Hub: {logical.name}"
-        )
+        raise SecurityError(f"Model cache link is broken — re-download from Hub: {logical.name}")
     _assert_resolved_scope(base, user_id, logical, resolved)
     return resolved
 
@@ -216,9 +210,7 @@ def assert_user_download_file(
         try:
             candidate.relative_to(container.resolve())
         except ValueError as exc:
-            raise SecurityError(
-                "Download file must be inside the model directory"
-            ) from exc
+            raise SecurityError("Download file must be inside the model directory") from exc
         source = candidate
     return assert_user_path(sandbox_root, user_id, source)
 

@@ -27,9 +27,7 @@ def create_access_token(
     *,
     hours: int | None = None,
 ) -> str:
-    expire = datetime.now(timezone.utc) + timedelta(
-        hours=hours or settings.session_hours
-    )
+    expire = datetime.now(timezone.utc) + timedelta(hours=hours or settings.session_hours)
     payload = {
         "sub": subject,
         "exp": expire,
@@ -83,9 +81,7 @@ async def get_current_user_id(
         else:
             cookie = request.cookies.get("seiso_token")
             if not cookie:
-                raise HTTPException(
-                    status.HTTP_401_UNAUTHORIZED, "Authentication required"
-                )
+                raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Authentication required")
             user_id = decode_token(cookie, settings)
     except InvalidTokenError as exc:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(exc)) from exc
@@ -114,22 +110,14 @@ class RateLimiter:
             self._hits.pop(client_ip, None)
         if len(pruned) >= self.max_per_minute:
             self._hits[client_ip] = pruned
-            raise HTTPException(
-                status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit exceeded"
-            )
+            raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit exceeded")
         # Hard cap distinct IPs so a many-source flood cannot grow memory forever.
         if client_ip not in self._hits and len(self._hits) >= self._MAX_TRACKED_IPS:
-            stale = [
-                ip
-                for ip, hits in self._hits.items()
-                if not hits or hits[-1] <= cutoff
-            ]
+            stale = [ip for ip, hits in self._hits.items() if not hits or hits[-1] <= cutoff]
             for ip in stale[:128]:
                 self._hits.pop(ip, None)
             if len(self._hits) >= self._MAX_TRACKED_IPS:
-                raise HTTPException(
-                    status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit exceeded"
-                )
+                raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, "Rate limit exceeded")
         pruned.append(now)
         self._hits[client_ip] = pruned
         # Opportunistic sweep of other idle IPs (bounded work per request).

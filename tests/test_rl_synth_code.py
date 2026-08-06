@@ -195,9 +195,7 @@ def test_emit_standard_artifacts_with_eval(tmp_path: Path):
     assert (tmp_path / "slime_code_eval.jsonl").is_file()
 
 
-def test_distill_data_designer_requires_package_outside_smoke(
-    tmp_path: Path, monkeypatch
-):
+def test_distill_data_designer_requires_package_outside_smoke(tmp_path: Path, monkeypatch):
     from seiso.distill_rl.preferences import materialize_data_designer_prompt_library
 
     monkeypatch.setattr(

@@ -190,9 +190,7 @@ def test_mesh_requires_buzz_agent_even_when_allowed(
         require_mesh_allowed()
 
 
-def test_mesh_auth_tag_alone_cannot_sign(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_mesh_auth_tag_alone_cannot_sign(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path / "data"))
     monkeypatch.setenv("SEISO_ALLOW_MESH", "1")
     monkeypatch.setenv("SEISO_MESH_TOKEN", "shared-secret-16+")

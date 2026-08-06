@@ -172,14 +172,10 @@ def generate_outcome_preference_rows(
     for prompt, completions in zip(verifiable_prompts, grouped_outputs, strict=True):
         sample = prompt_to_verifier_sample(prompt)
         is_code = sample.get("tests") is not None or (
-            (prompt.benchmark or "").lower()
-            in {"code", "python", "humaneval", "mbpp", "code_exec"}
+            (prompt.benchmark or "").lower() in {"code", "python", "humaneval", "mbpp", "code_exec"}
         )
         if is_code:
-            scored = [
-                score_code_completion(completion, sample)
-                for completion in completions
-            ]
+            scored = [score_code_completion(completion, sample) for completion in completions]
             pair = select_preference_pair(
                 scored,
                 hard_negatives=hard_negatives,
@@ -210,9 +206,7 @@ def generate_outcome_preference_rows(
         scored_generic: list[ScoredCompletion] = []
         group_rewards: list[float] = []
         for completion in completions:
-            reward = float(
-                outcome_reward(completion, prompt.answer, benchmark=prompt.benchmark)
-            )
+            reward = float(outcome_reward(completion, prompt.answer, benchmark=prompt.benchmark))
             group_rewards.append(reward)
             scored_generic.append(
                 ScoredCompletion(
@@ -266,9 +260,7 @@ def _prompt_seed(base_seed: int, prompt_id: str) -> int:
     return int(digest[:8], 16)
 
 
-def _format_generation_prompt(
-    tokenizer, prompt: str, *, use_chat_template: bool
-) -> str:
+def _format_generation_prompt(tokenizer, prompt: str, *, use_chat_template: bool) -> str:
     if use_chat_template and hasattr(tokenizer, "apply_chat_template"):
         return str(
             tokenizer.apply_chat_template(
@@ -371,9 +363,7 @@ def generate_completion_groups(
             for row in generated:
                 new_tokens = row[input_len:]
                 # Score and store raw generations only — do not inject synthetic tags.
-                completion = tokenizer.decode(
-                    new_tokens, skip_special_tokens=True
-                ).strip()
+                completion = tokenizer.decode(new_tokens, skip_special_tokens=True).strip()
                 prompt_outputs.append(completion)
             outputs.append(prompt_outputs)
     finally:

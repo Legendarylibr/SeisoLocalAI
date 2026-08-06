@@ -72,7 +72,6 @@ def _training_caps_for_model(
     }
 
 
-
 def apply_training_memory_guards(config: Any) -> Any:
     """Clamp memory-sensitive training knobs to hardware/model-safe ceilings."""
     from seiso.training.config import TrainConfig
@@ -189,4 +188,3 @@ def apply_training_oom_fallback(config: Any) -> Any:
             "max_seq_length": max_seq,
         }
     )
-

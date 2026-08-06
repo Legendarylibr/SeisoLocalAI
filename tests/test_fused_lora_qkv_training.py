@@ -61,12 +61,8 @@ def test_stacked_a_matmul_matches_separate():
     rows, in_dim, out_dim, rank = 64, 512, 512, 16
     dtype = torch.float32
     x = torch.randn(rows, in_dim, device="cuda", dtype=dtype)
-    mats = [
-        torch.randn(rank, in_dim, device="cuda", dtype=dtype) * 0.01 for _ in range(3)
-    ]
-    bs = [
-        torch.randn(out_dim, rank, device="cuda", dtype=dtype) * 0.01 for _ in range(3)
-    ]
+    mats = [torch.randn(rank, in_dim, device="cuda", dtype=dtype) * 0.01 for _ in range(3)]
+    bs = [torch.randn(out_dim, rank, device="cuda", dtype=dtype) * 0.01 for _ in range(3)]
     out_q = torch.zeros(rows, out_dim, device="cuda", dtype=dtype)
     out_k = torch.zeros(rows, out_dim, device="cuda", dtype=dtype)
     out_v = torch.zeros(rows, out_dim, device="cuda", dtype=dtype)

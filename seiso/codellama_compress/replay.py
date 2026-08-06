@@ -186,9 +186,7 @@ def append_artifact_record(
     manifest = load_manifest(run_dir) if _manifest_path(run_dir).exists() else None
     if manifest is not None:
         stages: list[dict[str, Any]] = list(manifest.get("stages") or [])
-        stages = [
-            s for s in stages if s.get("name") != stage or s.get("status") != "started"
-        ]
+        stages = [s for s in stages if s.get("name") != stage or s.get("status") != "started"]
         stages.append(
             {
                 "name": stage,
@@ -204,9 +202,7 @@ def append_artifact_record(
     return record
 
 
-def artifact_sha256_for_stage(
-    run_dir: Path, stage: str, *, role: str = "output"
-) -> str | None:
+def artifact_sha256_for_stage(run_dir: Path, stage: str, *, role: str = "output") -> str | None:
     path = run_dir / ARTIFACTS_NAME
     if not path.exists():
         manifest = load_manifest(run_dir)

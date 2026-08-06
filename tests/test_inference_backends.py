@@ -1544,9 +1544,7 @@ def test_sidecar_large_weight_caps_num_batch(monkeypatch):
     monkeypatch.setattr(protection_mod, "estimate_path_vram_mb", lambda p: 22_984)
 
     assert (
-        llamaswap.sidecar_ollama_num_batch(
-            model_path="/tmp/gemma-4-12b-it-BF16.gguf", num_ctx=2048
-        )
+        llamaswap.sidecar_ollama_num_batch(model_path="/tmp/gemma-4-12b-it-BF16.gguf", num_ctx=2048)
         == 256
     )
 

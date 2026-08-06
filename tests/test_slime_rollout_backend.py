@@ -309,9 +309,7 @@ def test_vllm_client_strips_v1_suffix_and_loads_lora(tmp_path: Path):
     assert any(u.endswith("/v1/load_lora_adapter") for u in urls)
     assert any(u.endswith("/v1/completions") for u in urls)
     load_bodies = [
-        json.loads(s["body"])
-        for s in seen
-        if s["url"].endswith("/v1/load_lora_adapter")
+        json.loads(s["body"]) for s in seen if s["url"].endswith("/v1/load_lora_adapter")
     ]
     assert load_bodies[0]["lora_name"] == "policy_lora"
     assert load_bodies[0]["lora_path"] == "/tmp/adapter"
@@ -547,7 +545,9 @@ def test_generate_sglang_chunk_truncates_before_http(tmp_path: Path):
     )
     with (
         patch("seiso.slime.rollout_generate.SGLangRolloutClient", _Client),
-        patch("seiso.slime.rollout_http.sglang_engine_urls", return_value=["http://127.0.0.1:30000"]),
+        patch(
+            "seiso.slime.rollout_http.sglang_engine_urls", return_value=["http://127.0.0.1:30000"]
+        ),
     ):
         gen = generate_sglang_chunk(
             tokenizer=_Tok(),

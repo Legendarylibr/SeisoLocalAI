@@ -108,13 +108,9 @@ def test_port_lock_blocks_second_instance_on_same_port():
 
 
 def test_acquire_forge_instance_locks_holds_both(tmp_path: Path):
-    locks = acquire_forge_instance_locks(
-        host="127.0.0.1", port=18765, data_dir=tmp_path
-    )
+    locks = acquire_forge_instance_locks(host="127.0.0.1", port=18765, data_dir=tmp_path)
     try:
         with pytest.raises(ForgeAlreadyRunningError):
-            acquire_forge_instance_locks(
-                host="127.0.0.1", port=18765, data_dir=tmp_path / "other"
-            )
+            acquire_forge_instance_locks(host="127.0.0.1", port=18765, data_dir=tmp_path / "other")
     finally:
         locks.release()

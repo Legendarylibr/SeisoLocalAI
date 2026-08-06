@@ -75,9 +75,7 @@ def attest_manifest(
         # Default allowlist = hostnames of the configured relay URLs.
         from urllib.parse import urlparse
 
-        host_allowlist = [
-            (urlparse(r).hostname or "").lower() for r in relay_urls if r.strip()
-        ]
+        host_allowlist = [(urlparse(r).hostname or "").lower() for r in relay_urls if r.strip()]
     normalized = normalize_relay_list(
         relay_urls, allowlist=host_allowlist, allow_loopback=allow_loopback
     )
@@ -167,15 +165,12 @@ def verify_attestation(
 
     host_allowlist = allowlist
     if host_allowlist is None:
-        host_allowlist = [
-            (urlparse(r).hostname or "").lower() for r in relay_urls if r.strip()
-        ]
+        host_allowlist = [(urlparse(r).hostname or "").lower() for r in relay_urls if r.strip()]
     normalized = normalize_relay_list(
         relay_urls, allowlist=host_allowlist, allow_loopback=allow_loopback
     )
     expected_d = str(
-        receipt.get("d_tag")
-        or f"{attestation.get('pipeline')}:{attestation.get('run_id')}"
+        receipt.get("d_tag") or f"{attestation.get('pipeline')}:{attestation.get('run_id')}"
     )
     receipt_pubkey = str(receipt.get("pubkey") or "").strip().lower()
     event = fetch_event_by_id(
@@ -228,11 +223,7 @@ def verify_attestation(
     except (TypeError, ValueError):
         kind_ok = False
     tags = event.get("tags") or []
-    d_tags = [
-        str(t[1])
-        for t in tags
-        if isinstance(t, list) and len(t) >= 2 and str(t[0]) == "d"
-    ]
+    d_tags = [str(t[1]) for t in tags if isinstance(t, list) and len(t) >= 2 and str(t[0]) == "d"]
     d_ok = bool(d_tags) and expected_d in d_tags
 
     report["event"] = {
@@ -244,9 +235,7 @@ def verify_attestation(
     report["event_pubkey_match"] = pubkey_ok
     report["event_kind_ok"] = kind_ok
     report["event_d_tag_ok"] = d_ok
-    report["event_verified"] = bool(
-        sig_ok and remote_match and pubkey_ok and kind_ok and d_ok
-    )
+    report["event_verified"] = bool(sig_ok and remote_match and pubkey_ok and kind_ok and d_ok)
     report["ok"] = bool(local_ok and report["event_verified"])
     if not report["ok"] and not report.get("error"):
         report["error"] = "attestation mismatch or invalid event signature"

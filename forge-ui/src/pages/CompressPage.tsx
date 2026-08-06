@@ -31,6 +31,7 @@ export function CompressPage() {
     localModels,
     modelsReady,
     starting,
+    startError,
     runPipeline,
     logs,
     result,
@@ -125,6 +126,7 @@ export function CompressPage() {
       jobsEmptyMessage="No compression jobs yet."
       canStart={presetsReady && modelsReady && !!teacherModel && !!studentModel}
       starting={starting}
+      startError={startError}
       onStart={start}
       startLabel="Run compression pipeline"
     >

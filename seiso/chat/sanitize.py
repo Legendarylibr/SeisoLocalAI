@@ -23,9 +23,7 @@ _CHUNK_SIZE = 1_200
 _TOOL_OPEN = TOOL_CALL_OPEN
 _TOOL_CLOSE = TOOL_CALL_CLOSE
 _PARTIAL_TOOL_PREFIXES = tuple(_TOOL_OPEN[:i] for i in range(1, len(_TOOL_OPEN) + 1))
-_PARTIAL_TOOL_CLOSE_PREFIXES = tuple(
-    _TOOL_CLOSE[:i] for i in range(1, len(_TOOL_CLOSE) + 1)
-)
+_PARTIAL_TOOL_CLOSE_PREFIXES = tuple(_TOOL_CLOSE[:i] for i in range(1, len(_TOOL_CLOSE) + 1))
 
 _FUNCTION_JSON_PATTERN = re.compile(
     r'\{\s*"name"\s*:\s*"[^"]+"\s*,\s*"arguments"\s*:\s*\{.*?\}\s*\}',
@@ -33,9 +31,7 @@ _FUNCTION_JSON_PATTERN = re.compile(
 )
 _THINKING_CLOSE_RE = re.compile(r"</(?:redacted_thinking|think)>", re.IGNORECASE)
 # Match attributed opens (e.g. <think channel="analysis">) like thinking.py.
-_THINKING_OPEN_RE = re.compile(
-    r"<(?:redacted_thinking|think)\b[^>]*>", re.IGNORECASE
-)
+_THINKING_OPEN_RE = re.compile(r"<(?:redacted_thinking|think)\b[^>]*>", re.IGNORECASE)
 _THINK_BLOCK_RE = re.compile(
     r"<(?:redacted_thinking|think)\b[^>]*>.*?</(?:redacted_thinking|think)>",
     flags=re.IGNORECASE | re.DOTALL,

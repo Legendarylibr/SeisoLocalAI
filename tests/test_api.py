@@ -38,9 +38,7 @@ async def test_onboarding_flow(app):
         assert body.get("nsec", "").startswith("nsec1")
         assert body["user"].get("npub", "").startswith("npub1")
 
-        me = await client.get(
-            "/api/auth/me", headers={"Authorization": f"Bearer {token}"}
-        )
+        me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
         assert me.status_code == 200
         assert me.json()["display_name"] == "Admin"
         assert me.json().get("npub", "").startswith("npub1")
@@ -66,9 +64,7 @@ async def test_onboarding_flow(app):
 
 
 @pytest.mark.asyncio
-async def test_onboarding_requires_storage_choice_when_unconfigured(
-    monkeypatch, tmp_path
-):
+async def test_onboarding_requires_storage_choice_when_unconfigured(monkeypatch, tmp_path):
     monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SEISO_SECRET_KEY", "test-secret-key-for-jwt-signing-32b")
     monkeypatch.delenv("SEISO_DB_EPHEMERAL", raising=False)
@@ -84,8 +80,8 @@ async def test_onboarding_requires_storage_choice_when_unconfigured(
         assert status.json()["storage_mode_configured"] is False
 
         missing = await client.post(
-            "/api/auth/register", json={"generate": True}
-        , headers=RETURN_TOKEN_HEADERS)
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
         assert missing.status_code == 400
 
         reg = await client.post(
@@ -94,9 +90,7 @@ async def test_onboarding_requires_storage_choice_when_unconfigured(
             headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201
-        assert (tmp_path / ".storage_mode").read_text(
-            encoding="utf-8"
-        ).strip() == "persistent"
+        assert (tmp_path / ".storage_mode").read_text(encoding="utf-8").strip() == "persistent"
         assert (tmp_path / "forge.db").exists()
 
 
@@ -181,9 +175,7 @@ async def test_reset_session_returns_instance_to_onboarding(app):
             headers=RETURN_TOKEN_HEADERS,
         )
         assert reg2.status_code == 201
-        assert get_settings().get_inference_api_key_owner() == reg2.json()["user"][
-            "nostr_pubkey"
-        ]
+        assert get_settings().get_inference_api_key_owner() == reg2.json()["user"]["nostr_pubkey"]
 
 
 @pytest.mark.asyncio

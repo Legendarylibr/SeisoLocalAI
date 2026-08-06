@@ -102,9 +102,7 @@ def speculative_generate(
     if not allow_mismatched_tokenizers:
         mismatch = []
         if tok.vocab_size != draft_tok.vocab_size:
-            mismatch.append(
-                f"vocab_size target={tok.vocab_size} draft={draft_tok.vocab_size}"
-            )
+            mismatch.append(f"vocab_size target={tok.vocab_size} draft={draft_tok.vocab_size}")
         if tok.eos_token_id != draft_tok.eos_token_id:
             mismatch.append(
                 f"eos_token_id target={tok.eos_token_id} draft={draft_tok.eos_token_id}"
@@ -176,9 +174,7 @@ def speculative_generate(
         if k == 0:
             accept = 0
         else:
-            pred_positions = torch.arange(
-                prefix_len - 1, prefix_len - 1 + k, device=logits.device
-            )
+            pred_positions = torch.arange(prefix_len - 1, prefix_len - 1 + k, device=logits.device)
             preds = torch.argmax(logits[:, pred_positions, :], dim=-1)
             match = (preds == proposed_ids_t).to(torch.int32)
             accept = int(match.cumprod(dim=1).sum(dim=1).item())
@@ -197,9 +193,7 @@ def speculative_generate(
         # - if mismatch: use target greedy token at mismatch position
         # - if full accept: use target greedy token after the accepted span
         pos = prefix_len + accept - 1 if accept < k else prefix_len + k - 1
-        next_id = torch.argmax(logits[:, pos, :], dim=-1, keepdim=True).to(
-            target_device
-        )
+        next_id = torch.argmax(logits[:, pos, :], dim=-1, keepdim=True).to(target_device)
         input_ids_t = torch.cat([input_ids_t, next_id], dim=1)
         input_ids_d = input_ids_t.to(draft_device)
         tokens_generated += 1

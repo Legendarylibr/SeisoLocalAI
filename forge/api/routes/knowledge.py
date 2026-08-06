@@ -111,9 +111,7 @@ async def upload_file(
 
     content = await file.read()
     if len(content) > _MAX_UPLOAD_BYTES:
-        raise HTTPException(
-            400, f"File exceeds {_MAX_UPLOAD_BYTES // (1024 * 1024)} MiB limit"
-        )
+        raise HTTPException(400, f"File exceeds {_MAX_UPLOAD_BYTES // (1024 * 1024)} MiB limit")
 
     dest = uploads / raw_name
     # Refuse symlink / non-file destinations; write via temp + replace so we

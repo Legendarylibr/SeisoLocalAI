@@ -76,17 +76,13 @@ def test_score_held_out_completions_binary_pass_rate(tmp_path: Path):
     )
     cfg.validate()
     good = [f"```python\n{s['solution']}```" for s in samples]
-    metrics = score_held_out_completions(
-        completions=good, samples=samples, config=cfg
-    )
+    metrics = score_held_out_completions(completions=good, samples=samples, config=cfg)
     assert metrics["eval_prompt_count"] == 4.0
     assert metrics["eval_outcome_pass_rate"] == 1.0
     assert metrics["eval_proof_pass_rate"] == 1.0
 
     bad = ["def nope():\n    return None\n"] * len(samples)
-    fail = score_held_out_completions(
-        completions=bad, samples=samples, config=cfg
-    )
+    fail = score_held_out_completions(completions=bad, samples=samples, config=cfg)
     assert fail["eval_outcome_pass_rate"] == 0.0
 
 

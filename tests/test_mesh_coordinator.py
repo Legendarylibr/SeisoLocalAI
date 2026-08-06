@@ -173,9 +173,7 @@ def test_tampered_plan_nostr_refused(mesh_env: Path) -> None:
         worker_env(plan, node_rank=0)
 
 
-def test_trusted_npub_allowlist(
-    mesh_env: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_trusted_npub_allowlist(mesh_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from seiso.mesh.coordinator import build_plan, worker_env
 
     plan_out = build_plan(
@@ -338,9 +336,7 @@ def test_build_plan_requires_gpus_per_node(mesh_env: Path) -> None:
         )
 
 
-def test_mesh_token_mismatch_refused(
-    mesh_env: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_mesh_token_mismatch_refused(mesh_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from seiso.mesh.coordinator import build_plan, worker_env
 
     plan_out = build_plan(
@@ -355,9 +351,7 @@ def test_mesh_token_mismatch_refused(
         worker_env(plan_out["plan"], node_rank=0)
 
 
-def test_short_mesh_token_refused(
-    mesh_env: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_short_mesh_token_refused(mesh_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     from seiso.mesh.coordinator import build_plan
 
     monkeypatch.setenv("SEISO_MESH_TOKEN", "short")
@@ -371,9 +365,7 @@ def test_short_mesh_token_refused(
         )
 
 
-def test_load_plan_refuses_foreign_absolute_path(
-    mesh_env: Path, tmp_path: Path
-) -> None:
+def test_load_plan_refuses_foreign_absolute_path(mesh_env: Path, tmp_path: Path) -> None:
     from seiso.mesh.coordinator import load_plan
 
     foreign = tmp_path / "evil-plan.json"

@@ -244,8 +244,7 @@ def test_build_continue_messages_empty_output_reprompts():
     }
     # No empty assistant stub — re-ask only.
     assert not any(
-        m.get("role") == "assistant" and not str(m.get("content") or "").strip()
-        for m in msgs
+        m.get("role") == "assistant" and not str(m.get("content") or "").strip() for m in msgs
     )
 
 

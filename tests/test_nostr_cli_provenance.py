@@ -84,9 +84,7 @@ def test_provenance_keygen_show_attest_verify(tmp_path: Path, monkeypatch):
             ],
         )
         assert verify.exit_code == 0, verify.output
-        local = runner.invoke(
-            provenance_app, ["verify", str(path), "--local-only"]
-        )
+        local = runner.invoke(provenance_app, ["verify", str(path), "--local-only"])
         assert local.exit_code == 0, local.output
 
 
