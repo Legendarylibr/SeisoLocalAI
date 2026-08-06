@@ -1,6 +1,7 @@
 """Tests for AST-based code execution sandbox."""
 
 import json
+import time
 
 from forge.tools.code_exec import _validate_code, execute_code
 
@@ -119,3 +120,47 @@ def test_code_exec_child_env_omits_secrets(tmp_path, monkeypatch):
     result = json.loads(execute_code("print(1+1)", sandbox_root=str(tmp_path), user_id="u1"))
     assert "2" in result.get("stdout", "")
 
+
+def test_bignum_pow_rejected_fast():
+    start = time.monotonic()
+    err = _validate_code("x = 9**9**9**9")
+    elapsed = time.monotonic() - start
+    assert err is not None
+    assert "Allocation too large" in err
+    assert elapsed < 1.0
+
+
+def test_bignum_pow_alloc_rejected_fast():
+    start = time.monotonic()
+    err = _validate_code("y = [0] * (2**10**10)")
+    elapsed = time.monotonic() - start
+    assert err is not None
+    assert "Allocation too large" in err
+    assert elapsed < 1.0
+
+
+def test_small_powers_allowed():
+    assert _validate_code("x = 2**10") is None
+    assert _validate_code("y = [0] * 1000") is None
+
+
+def test_range_checks_all_args():
+    err = _validate_code("for i in range(0, 10**10):\n    pass")
+    assert err is not None
+    assert "Allocation too large" in err
+
+
+def test_range_small_args_allowed():
+    assert _validate_code("for i in range(0, 1000, 2):\n    pass") is None
+
+
+def test_blocks_ag_frame_escape():
+    err = _validate_code("async def f():\n    yield 1\ng = f()\ng.ag_frame")
+    assert err is not None
+    assert "ag_frame" in err
+
+
+def test_blocks_cr_code_escape():
+    err = _validate_code("async def f():\n    pass\nc = f()\nc.cr_code")
+    assert err is not None
+    assert "cr_code" in err

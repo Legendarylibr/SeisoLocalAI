@@ -22,9 +22,7 @@ class ModelsMixin:
                     rows = await cur.fetchall()
                     return [dict(r) for r in rows]
 
-            async with conn.execute(
-                "SELECT * FROM local_models ORDER BY created_at DESC"
-            ) as cur:
+            async with conn.execute("SELECT * FROM local_models ORDER BY created_at DESC") as cur:
                 rows = await cur.fetchall()
                 return [dict(r) for r in rows]
 
@@ -95,9 +93,7 @@ class ModelsMixin:
             row = await cur.fetchone()
             return dict(row) if row else None
 
-    async def get_model_by_metadata_repo_id(
-        self, user_id: str, repo_id: str
-    ) -> dict | None:
+    async def get_model_by_metadata_repo_id(self, user_id: str, repo_id: str) -> dict | None:
         """Lookup by metadata_json.repo_id without scanning the full inventory."""
         async with (
             self._conn() as conn,
@@ -112,6 +108,10 @@ class ModelsMixin:
             return dict(row) if row else None
 
     async def upsert_model(self, user_id: str, source: str, **fields: Any) -> dict:
+        if source is None:
+            # ON CONFLICT(user_id, source) no-ops on NULL (SQLite NULLs are
+            # distinct), which would insert duplicate rows on every call.
+            raise ValueError("upsert_model source must not be None")
         mid = str(uuid.uuid4())
         now = now_iso()
         async with self._conn() as conn:
@@ -138,6 +138,10 @@ class ModelsMixin:
     async def upsert_models(self, user_id: str, records: list[dict[str, Any]]) -> int:
         if not records:
             return 0
+        for record in records:
+            if record.get("source") is None:
+                # NULL source defeats ON CONFLICT(user_id, source) (see upsert_model).
+                raise ValueError("upsert_models records must have a non-None source")
         now = now_iso()
         rows = [
             (

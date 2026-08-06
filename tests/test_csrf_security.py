@@ -168,6 +168,49 @@ async def test_csrf_blocks_v1_without_header(app):
 
 
 @pytest.mark.asyncio
+async def test_csrf_rejects_mutation_outside_api_prefixes(app):
+    """Default-deny: mutating requests outside /api and /v1 fail CSRF."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post(
+            "/api/auth/register",
+            json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
+        )
+        assert reg.status_code == 201
+
+        res = await client.post("/other")
+        assert res.status_code == 403
+        assert "CSRF" in res.json()["detail"]
+
+
+def test_validate_csrf_denies_mutation_outside_api_unit():
+    from unittest.mock import MagicMock
+
+    from forge.security.csrf import validate_csrf
+
+    request = MagicMock()
+    request.method = "POST"
+    request.url.path = "/other"
+    request.headers = {}
+    request.cookies = {}
+    assert not validate_csrf(request)
+
+
+def test_validate_csrf_allows_safe_method_outside_api_unit():
+    from unittest.mock import MagicMock
+
+    from forge.security.csrf import validate_csrf
+
+    request = MagicMock()
+    request.method = "GET"
+    request.url.path = "/other"
+    request.headers = {}
+    request.cookies = {}
+    assert validate_csrf(request)
+
+
+@pytest.mark.asyncio
 async def test_cookie_session_auth(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -256,9 +299,7 @@ async def test_settings_includes_security_posture(app):
         )
         token = reg.json()["access_token"]
 
-        res = await client.get(
-            "/api/settings", headers={"Authorization": f"Bearer {token}"}
-        )
+        res = await client.get("/api/settings", headers={"Authorization": f"Bearer {token}"})
         assert res.status_code == 200
         sec = res.json()["security"]
         assert sec["bind_localhost"] is True

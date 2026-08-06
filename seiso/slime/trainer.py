@@ -104,6 +104,23 @@ def train_slime(
     ``train_single_gpu_slime`` is a compatibility alias for this function.
     """
 
+    import torch
+
+    dist_ctx = _distributed_context(torch, config)
+    try:
+        return _train_slime_loop(config, dist_ctx=dist_ctx, should_stop=should_stop)
+    finally:
+        # Tear down only a process group this run initialized (all exit paths).
+        if dist_ctx.owns_process_group and torch.distributed.is_initialized():
+            torch.distributed.destroy_process_group()
+
+
+def _train_slime_loop(
+    config: SingleGpuSlimeConfig,
+    *,
+    dist_ctx: _DistributedSlimeContext,
+    should_stop: Callable[[], bool] | None = None,
+) -> Path:
     stop_fn = should_stop or (lambda: False)
     config.validate()
     if config.kl_coef == 0.0 and config.epochs > 1:
@@ -122,7 +139,6 @@ def train_slime(
     import torch
     from transformers import AutoModelForCausalLM, AutoTokenizer
 
-    dist_ctx = _distributed_context(torch, config)
     config = _maybe_materialize_data_gen(config, dist_ctx)
     config = replace(config, device=dist_ctx.device)
     _require_single_gpu(config)
@@ -304,6 +320,26 @@ def train_slime(
                         },
                     )
                 global_step += 1
+                # Match the other exit paths: keep rollout engines on the last
+                # good weights and record final held-out eval before saving.
+                _sync_rollout_engine_weights(
+                    model=model,
+                    tokenizer=tokenizer,
+                    config=config,
+                    dist_ctx=dist_ctx,
+                    step=global_step,
+                    sync_state=weight_sync_state,
+                )
+                _maybe_run_held_out_eval(
+                    model=model,
+                    tokenizer=tokenizer,
+                    config=config,
+                    torch=torch,
+                    dist_ctx=dist_ctx,
+                    step=global_step,
+                    metrics_path=metrics_path,
+                    force=True,
+                )
                 _write_training_state(config, global_step, health_reason, auto_stop, dist_ctx)
                 _save_distributed(model, tokenizer, final_output_dir, dist_ctx)
                 # Fail the job so Forge marks FAILED (not COMPLETED).
@@ -362,7 +398,13 @@ def train_slime(
                 # Apply any partial accumulation window before exiting so early
                 # stop does not silently drop healthy grads (DDP-safe flush).
                 if pending_accumulation_steps:
-                    _flush_accumulated_gradients(model, dist_ctx, torch)
+                    _flush_accumulated_gradients(
+                        model,
+                        dist_ctx,
+                        torch,
+                        pending_steps=pending_accumulation_steps,
+                        configured_steps=config.gradient_accumulation_steps,
+                    )
                     _optimizer_step(model, optimizer, torch, config)
                     pending_accumulation_steps = 0
                     _sync_rollout_engine_weights(
@@ -390,7 +432,13 @@ def train_slime(
                 return final_output_dir
             if config.max_steps is not None and global_step >= config.max_steps:
                 if pending_accumulation_steps:
-                    _flush_accumulated_gradients(model, dist_ctx, torch)
+                    _flush_accumulated_gradients(
+                        model,
+                        dist_ctx,
+                        torch,
+                        pending_steps=pending_accumulation_steps,
+                        configured_steps=config.gradient_accumulation_steps,
+                    )
                     _optimizer_step(model, optimizer, torch, config)
                     pending_accumulation_steps = 0
                     _sync_rollout_engine_weights(
@@ -441,7 +489,13 @@ def train_slime(
             "or set dynamic_sampling_filter: none only for debugging."
         )
     if pending_accumulation_steps:
-        _flush_accumulated_gradients(model, dist_ctx, torch)
+        _flush_accumulated_gradients(
+            model,
+            dist_ctx,
+            torch,
+            pending_steps=pending_accumulation_steps,
+            configured_steps=config.gradient_accumulation_steps,
+        )
         _optimizer_step(model, optimizer, torch, config)
         pending_accumulation_steps = 0
         _sync_rollout_engine_weights(
@@ -596,12 +650,20 @@ def _refill_visible_group_count(
     return _distributed_min_int(local_groups, torch, dist_ctx)
 
 
+# One-hot rollout-backend flags are per-collection constants, not counts;
+# summing them across refill rounds would inflate them to N+1.
+_MAX_MERGE_STATS_KEYS = frozenset({"rollout_backend_is_sglang", "rollout_backend_is_vllm"})
+
+
 def _merge_rollout_collection_stats(
     target: dict[str, float],
     update: dict[str, float],
 ) -> None:
     for key, value in update.items():
-        target[key] = float(target.get(key, 0.0)) + float(value)
+        if key in _MAX_MERGE_STATS_KEYS:
+            target[key] = max(float(target.get(key, 0.0)), float(value))
+        else:
+            target[key] = float(target.get(key, 0.0)) + float(value)
 
 
 def _collect_rollouts(
@@ -1053,16 +1115,37 @@ def _backprop_policy_step(
     return stats
 
 
-def _flush_accumulated_gradients(model, dist_ctx: _DistributedSlimeContext, torch) -> None:
+def _flush_accumulated_gradients(
+    model,
+    dist_ctx: _DistributedSlimeContext,
+    torch,
+    *,
+    pending_steps: int,
+    configured_steps: int,
+) -> None:
     """Average local grads across ranks after a no_sync accumulation window.
 
     Used when training ends mid-accumulation so ``optimizer.step`` sees the same
     DDP-averaged gradient as a full sync backward would have produced.
 
+    Micro-batch losses are scaled by ``1 / configured_steps``, so a partial
+    window of ``pending_steps`` micro-batches holds only
+    ``pending_steps / configured_steps`` of the intended gradient magnitude.
+    Rescale by ``configured_steps / pending_steps`` so the final step matches a
+    full window. A full window (``pending_steps == configured_steps``) rescales
+    by exactly 1.0.
+
     Missing grads are zeroed before all_reduce so ranks never disagree on which
     parameters participate in the collective.
     """
+    if pending_steps < 1:
+        return
+    rescale = float(configured_steps) / float(pending_steps)
     if not dist_ctx.enabled:
+        if rescale != 1.0:
+            for param in model.parameters():
+                if param.requires_grad and param.grad is not None:
+                    param.grad.mul_(rescale)
         return
     world = float(dist_ctx.world_size)
     for param in model.parameters():
@@ -1072,6 +1155,8 @@ def _flush_accumulated_gradients(model, dist_ctx: _DistributedSlimeContext, torc
             param.grad = torch.zeros_like(param)
         torch.distributed.all_reduce(param.grad, op=torch.distributed.ReduceOp.SUM)
         param.grad /= world
+        if rescale != 1.0:
+            param.grad.mul_(rescale)
 
 
 def _build_optimizer(model, config: SingleGpuSlimeConfig):

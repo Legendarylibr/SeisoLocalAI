@@ -32,6 +32,7 @@ export function useStagePipelinePage<TJob extends { id: string }>({
 }: StagePipelinePageOptions<TJob>) {
   const [jobs, setJobs] = useState<TJob[]>([]);
   const [starting, setStarting] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
   const { models: localModels, loading: modelsLoading } = useTrainingModels();
 
   const presets = useStagePipelinePresets(fallbackStages, loadPresets, initialPreset);
@@ -51,6 +52,7 @@ export function useStagePipelinePage<TJob extends { id: string }>({
       opts?: { onEvent?: (event: string, data: string) => void },
     ) => {
       setStarting(true);
+      setStartError(null);
       resetStream();
       try {
         const res = await startJob(body);
@@ -69,7 +71,7 @@ export function useStagePipelinePage<TJob extends { id: string }>({
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to start pipeline";
         console.error(err);
-        throw new Error(message);
+        setStartError(message);
       } finally {
         setStarting(false);
       }
@@ -82,6 +84,7 @@ export function useStagePipelinePage<TJob extends { id: string }>({
     localModels,
     modelsReady: !modelsLoading,
     starting,
+    startError,
     runPipeline,
     logs,
     result,

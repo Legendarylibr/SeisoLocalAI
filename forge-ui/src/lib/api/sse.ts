@@ -147,6 +147,20 @@ export function subscribeSSE(
 /** Stream chat completions via SSE (cookie session + CSRF). Returns abort handle. */
 let _cancelGenerationChain: Promise<void> = Promise.resolve();
 
+/** Max time a cancel-generation request may block the next chat stream. */
+const CANCEL_GENERATION_TIMEOUT_MS = 5000;
+
+/** Resolve once `promise` settles or the timeout elapses, whichever comes first. */
+function withTimeout(promise: Promise<void>, ms: number): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const timer = setTimeout(resolve, ms);
+    promise.then(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
+}
+
 export function streamChat(
   body: Record<string, unknown>,
   handlers: {
@@ -200,7 +214,10 @@ export function streamChat(
       })
         .then(() => undefined)
         .catch(() => undefined);
-      _cancelGenerationChain = _cancelGenerationChain.then(() => cancel);
+      // Bound each link so one hung cancel request cannot block future streams.
+      _cancelGenerationChain = _cancelGenerationChain.then(() =>
+        withTimeout(cancel, CANCEL_GENERATION_TIMEOUT_MS),
+      );
     },
   };
 }

@@ -59,6 +59,12 @@ def _alloc_size(node: ast.AST) -> int | None:
             base = _alloc_size(node.left)
             exp = _alloc_size(node.right)
             if base is not None and exp is not None and exp >= 0:
+                # Never materialize attacker-controlled bignums: estimating
+                # the bit length is O(1) while base**exp can exhaust RAM/CPU.
+                if abs(base) > 1 and exp > 0:
+                    bits = exp * abs(base).bit_length()
+                    if bits > _MAX_ALLOC_SIZE.bit_length() * 8:
+                        return _MAX_ALLOC_SIZE + 1
                 try:
                     return int(base**exp)
                 except OverflowError:
@@ -104,7 +110,8 @@ class _CodeValidator(ast.NodeVisitor):
             if node.func.id in _BLOCKED_NAMES:
                 self.errors.append(f"Call blocked: {node.func.id}()")
             elif node.func.id == "range" and node.args:
-                _check_alloc_size(self, node.args[0])
+                for arg in node.args:
+                    _check_alloc_size(self, arg)
             elif node.func.id == "list" and node.args:
                 arg = node.args[0]
                 if (
@@ -113,7 +120,8 @@ class _CodeValidator(ast.NodeVisitor):
                     and arg.func.id == "range"
                     and arg.args
                 ):
-                    _check_alloc_size(self, arg.args[0])
+                    for range_arg in arg.args:
+                        _check_alloc_size(self, range_arg)
         self.generic_visit(node)
 
     def visit_Attribute(self, node: ast.Attribute) -> None:
@@ -163,9 +171,7 @@ def _scrubbed_child_env(base: Path) -> dict[str, str]:
     return env
 
 
-def execute_code(
-    code: str, sandbox_root: str | None = None, user_id: str | None = None
-) -> str:
+def execute_code(code: str, sandbox_root: str | None = None, user_id: str | None = None) -> str:
     """Run user code in isolated subprocess with AST pre-check."""
     err = _validate_code(code)
     if err:
@@ -210,9 +216,7 @@ def execute_code(
             print(out or json.dumps({{"status": "ok"}}))
         """)
 
-    with tempfile.NamedTemporaryFile(
-        mode="w", suffix=".py", dir=base, delete=False
-    ) as f:
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".py", dir=base, delete=False) as f:
         f.write(wrapped)
         script = Path(f.name)
     with contextlib.suppress(OSError):

@@ -48,7 +48,10 @@ Dependabot npm PRs get digests + `forge-ui/bun.lock` refresh automatically via `
 ### Lint detail
 
 1. **Ruff check** — style, imports, pyupgrade, bugbear, simplify rules (`pyproject.toml`)
-2. **Pylint** — fatal/error class only (`--enable=E,F`), optional deps ignored
+2. **Ruff format --check** — files must already match `ruff format` output. Ruff is
+   pinned to one version everywhere (`pyproject.toml` dev extra, `locks/python.lock`,
+   `.pre-commit-config.yaml`); bump it only together with a tree-wide reformat.
+3. **Pylint** — fatal/error class only (`--enable=E,F`), optional deps ignored
 
 Ruff uses a **baseline** (`scripts/ruff-baseline.txt`): CI fails only on *new* issues. Refresh after intentional cleanup:
 
@@ -150,8 +153,9 @@ This mode deliberately does not claim full transitive coverage. Run
 
 ## GitHub Actions
 
-CI runs dependency locks, lint, Mypy, CPU tests, security, and frontend checks
-as independent parallel jobs. Python jobs install via `uv` with
+CI runs dependency locks, lint (Python 3.10 and 3.12), Mypy, CPU tests,
+security, optional-extra import smokes, and frontend checks as independent
+parallel jobs. Python jobs install via `uv` with
 `UV_TORCH_BACKEND=cpu` so runners skip multi-gigabyte CUDA wheels that CPU CI
 never exercises. Each job calls the local runner with `--skip-install`. Pull
 requests use path filters so frontend-only or Python-only changes skip the

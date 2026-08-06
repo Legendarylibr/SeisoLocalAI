@@ -207,6 +207,27 @@ def test_jwt_revocation_overflow_evicts_oldest(monkeypatch):
     clear_revocations_for_tests()
 
 
+def test_expired_jti_not_revoked_without_full_prune():
+    import time
+
+    from forge.security import token_revocation as tr
+
+    clear_revocations_for_tests()
+    now = time.time()
+    # Seed the store directly: revoke_jti prunes on write, so expired entries
+    # can only linger from loads or elapsed time between writes.
+    tr._revoked["expired-a"] = now - 10
+    tr._revoked["expired-b"] = now - 5
+    tr._revoked["live"] = now + 3600
+
+    assert not is_jti_revoked("expired-a")
+    assert is_jti_revoked("live")
+    # Read path prunes only the looked-up entry, never the whole table.
+    assert "expired-a" not in tr._revoked
+    assert "expired-b" in tr._revoked
+    clear_revocations_for_tests()
+
+
 @pytest.mark.asyncio
 async def test_jwt_revocation_retained_until_expiry(monkeypatch):
     from forge.config import get_settings
@@ -273,6 +294,38 @@ def test_client_ip_ignores_forwarded_without_trusted_proxy(monkeypatch):
     request.headers = {"x-forwarded-for": "198.51.100.99"}
 
     assert client_ip(request) == "203.0.113.10"
+
+
+def _xff_request(monkeypatch, peer: str, xff: str):
+    from unittest.mock import MagicMock
+
+    from forge.config import ForgeSettings
+    from forge.security.client_ip import client_ip
+
+    settings = ForgeSettings(trust_proxy=True, trusted_proxy_ips="10.0.0.1,10.0.0.2")
+    monkeypatch.setattr("forge.security.client_ip.get_settings", lambda: settings)
+
+    request = MagicMock()
+    request.client.host = peer
+    request.headers = {"x-forwarded-for": xff}
+    return client_ip(request)
+
+
+def test_client_ip_skips_spoofed_leftmost_xff(monkeypatch):
+    # Attacker-controlled leftmost entries are ignored; the first untrusted
+    # hop walking right-to-left from the trusted proxy wins.
+    assert (
+        _xff_request(monkeypatch, "10.0.0.1", "198.51.100.99, 203.0.113.5, 10.0.0.1")
+        == "203.0.113.5"
+    )
+
+
+def test_client_ip_single_trusted_proxy_append(monkeypatch):
+    assert _xff_request(monkeypatch, "10.0.0.1", "203.0.113.5") == "203.0.113.5"
+
+
+def test_client_ip_falls_back_to_peer_when_all_xff_trusted(monkeypatch):
+    assert _xff_request(monkeypatch, "10.0.0.1", "10.0.0.2, 10.0.0.1") == "10.0.0.1"
 
 
 def test_remote_access_requires_ack(monkeypatch, tmp_path):

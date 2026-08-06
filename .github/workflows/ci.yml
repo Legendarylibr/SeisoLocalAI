@@ -65,9 +65,10 @@ jobs:
                 python=true
                 ;;
             esac
-            # Nested markdown / requirements (bash case * does not cross '/').
+            # bash case '*' matches across '/', so '*.md' above already covers
+            # nested markdown; only nested requirements files need this pattern.
             case "$path" in
-              */*.md|*/*/*.md|*/requirements*.txt)
+              */requirements*.txt)
                 python=true
                 ;;
             esac
@@ -109,15 +110,20 @@ jobs:
         run: python scripts/check_python_lock_freshness.py
 
   lint:
-    name: Lint
+    name: Lint (Python ${{ matrix.python-version }})
     needs: changes
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        # 3.10 is the primary target; 3.12 covers the recommended 3.11+ docs.
+        python-version: ["3.10", "3.12"]
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
         with:
-          python-version: "3.10"
+          python-version: ${{ matrix.python-version }}
           enable-cache: true
           activate-environment: true
           cache-dependency-glob: |
@@ -207,6 +213,27 @@ jobs:
       - name: Run security checks
         run: python scripts/run_ci_local.py --job security --skip-install
 
+  imports:
+    name: Optional-extra imports
+    needs: changes
+    if: needs.changes.outputs.python == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: "3.10"
+          enable-cache: true
+          activate-environment: true
+          cache-dependency-glob: |
+            pyproject.toml
+            requirements-dev.txt
+            locks/python.lock
+      - name: Install dependencies
+        run: uv pip install -e ".[forge,train,dev]"
+      - name: Run optional-extra import smokes
+        run: python scripts/run_ci_local.py --job imports --skip-install
+
   frontend:
     name: Frontend
     needs: changes
@@ -230,7 +257,7 @@ jobs:
   quality:
     name: Quality gate
     if: always()
-    needs: [changes, deps, lint, types, tests, security, frontend]
+    needs: [changes, deps, lint, types, tests, security, imports, frontend]
     runs-on: ubuntu-latest
     steps:
       - name: Fail when a required job did not pass
@@ -241,6 +268,7 @@ jobs:
           TYPES: ${{ needs.types.result }}
           TESTS: ${{ needs.tests.result }}
           SECURITY: ${{ needs.security.result }}
+          IMPORTS: ${{ needs.imports.result }}
           FRONTEND: ${{ needs.frontend.result }}
           PYTHON: ${{ needs.changes.outputs.python }}
           FRONTEND_NEEDED: ${{ needs.changes.outputs.frontend }}
@@ -266,6 +294,7 @@ jobs:
           check types "$TYPES" "$PYTHON"
           check tests "$TESTS" "$PYTHON"
           check security "$SECURITY" "$PYTHON"
+          check imports "$IMPORTS" "$PYTHON"
           check frontend "$FRONTEND" "$FRONTEND_NEEDED"
           exit "$failed"
       - name: Confirm required jobs passed

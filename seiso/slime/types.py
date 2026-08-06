@@ -75,6 +75,8 @@ class _DistributedSlimeContext:
     rank: int = 0
     local_rank: int = 0
     device: str = "cuda"
+    # True only when this context performed init_process_group (and must destroy it).
+    owns_process_group: bool = False
 
     @property
     def is_main(self) -> bool:

@@ -5,6 +5,7 @@ from __future__ import annotations
 import contextlib
 import hashlib
 import json
+import logging
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -23,8 +24,12 @@ from seiso.security import generate_secret_key, resolve_data_dir
 
 StorageMode = Literal["persistent", "ephemeral"]
 
+logger = logging.getLogger(__name__)
+
 # Local Forge + Vite dev — 127.0.0.1 and localhost are different browser origins.
-DEFAULT_CORS_ORIGINS = "http://127.0.0.1:8765,http://localhost:8765,http://127.0.0.1:5173,http://localhost:5173"
+DEFAULT_CORS_ORIGINS = (
+    "http://127.0.0.1:8765,http://localhost:8765,http://127.0.0.1:5173,http://localhost:5173"
+)
 
 
 class ForgeSettings(BaseSettings):
@@ -185,16 +190,12 @@ class ForgeSettings(BaseSettings):
 
     def _resolve_storage_mode(self) -> None:
         marker = self.data_dir / ".storage_mode"
-        env_configured = (
-            "SEISO_DB_EPHEMERAL" in os.environ or "SEISO_DB_STORAGE_MODE" in os.environ
-        )
+        env_configured = "SEISO_DB_EPHEMERAL" in os.environ or "SEISO_DB_STORAGE_MODE" in os.environ
         if env_configured:
             raw_mode = os.environ.get("SEISO_DB_STORAGE_MODE", "").strip().lower()
             if raw_mode:
                 if raw_mode not in {"persistent", "ephemeral"}:
-                    raise ValueError(
-                        "SEISO_DB_STORAGE_MODE must be 'persistent' or 'ephemeral'"
-                    )
+                    raise ValueError("SEISO_DB_STORAGE_MODE must be 'persistent' or 'ephemeral'")
                 self.db_ephemeral = raw_mode == "ephemeral"
             elif self.db_ephemeral is None:
                 self.db_ephemeral = False
@@ -297,13 +298,41 @@ class ForgeSettings(BaseSettings):
 
     @property
     def hf_token_encryption_key(self) -> bytes:
-        """Dedicated key for HF token files, stored separately from JWT secret."""
+        """Dedicated random key for HF token files, stored separately from JWT secret."""
         key_file = self.data_dir / ".hf_token_encryption_key"
         if key_file.exists():
-            return load_encryption_key_file(key_file)
-        legacy = hashlib.sha256(f"seiso:hf-token:{self.secret_key}".encode()).digest()
-        persist_encryption_key_file(key_file, legacy)
-        return legacy
+            key = load_encryption_key_file(key_file)
+            legacy = hashlib.sha256(f"seiso:hf-token:{self.secret_key}".encode()).digest()
+            if key != legacy:
+                return key
+            # Legacy installs derived the key from the JWT secret (no key
+            # separation): rotate to a random key and re-encrypt stored tokens.
+            new_key = generate_encryption_key()
+            self._reencrypt_hf_tokens(legacy, new_key)
+            persist_encryption_key_file(key_file, new_key)
+            return new_key
+        key = generate_encryption_key()
+        persist_encryption_key_file(key_file, key)
+        return key
+
+    def _reencrypt_hf_tokens(self, old_key: bytes, new_key: bytes) -> None:
+        from forge.db.crypto import decrypt_field, encrypt_field
+
+        token_dir = self.data_dir / "hf_tokens"
+        if not token_dir.is_dir():
+            return
+        for path in token_dir.iterdir():
+            if not path.is_file():
+                continue
+            try:
+                raw = path.read_text(encoding="utf-8").strip()
+                if not raw:
+                    continue
+                token = decrypt_field(raw, old_key)
+                path.write_text(encrypt_field(token, new_key), encoding="utf-8")
+                path.chmod(0o600)
+            except Exception:
+                logger.warning("Could not re-encrypt HF token file: %s", path.name)
 
     @property
     def models_dir(self) -> Path:

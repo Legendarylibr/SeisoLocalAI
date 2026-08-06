@@ -188,6 +188,15 @@ def repair_cuda_ptxas_toolkit(*, auto_install: bool | None = None) -> bool:
         if cache_root.is_dir():
             for path in cache_root.glob("*/seiso_cuda_kernels"):
                 shutil.rmtree(path, ignore_errors=True)
+        # The kernel backend may have been resolved (and lru_cached) before the
+        # repair — drop the stale resolution. Lazy import: seiso.kernels
+        # modules import back through seiso.platform at module load.
+        try:
+            from seiso.kernels.dispatch import active_backend
+
+            active_backend.cache_clear()
+        except ImportError:
+            pass
         return True
     return False
 
@@ -227,9 +236,7 @@ def preload_cuda_shared_libraries(*, lib_dirs: list[str] | None = None) -> list[
             except OSError:
                 continue
     # Require libcudart.so.12 when present in preload list — partial load breaks llama.cpp.
-    needs_cudart12 = any(
-        (Path(d) / "libcudart.so.12").is_file() for d in dirs
-    )
+    needs_cudart12 = any((Path(d) / "libcudart.so.12").is_file() for d in dirs)
     if needs_cudart12:
         _cuda_preloaded = any("libcudart.so.12" in path for path in loaded)
     else:

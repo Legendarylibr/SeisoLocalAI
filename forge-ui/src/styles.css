@@ -4300,6 +4300,18 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
   text-overflow: ellipsis;
 }
 
+.chat-tab-button {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
 .chat-tab:hover {
   color: var(--text);
   background: rgba(255, 255, 255, 0.03);
@@ -4331,6 +4343,12 @@ th { color: var(--muted); font-weight: 500; font-size: 0.78rem; text-transform: 
   justify-content: center;
   width: 1.15rem;
   height: 1.15rem;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
   border-radius: var(--radius-xs);
   opacity: 0.45;
   font-size: 0.9rem;

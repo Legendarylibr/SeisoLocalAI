@@ -9,7 +9,7 @@ Jobs:
   security  — Bandit, detect-secrets, pip-audit, pip check
   deps      — dependency lockfile integrity
   frontend  — bun/npm typecheck + production build (forge-ui)
-  imports   — optional-extra import smokes (train, compress, mlx)
+  imports   — optional-extra import smokes (train, mlx)
 
 Usage:
   python3 scripts/run_ci_local.py              # all jobs
@@ -326,6 +326,13 @@ def job_lint(
         update_baseline=update_baseline,
     )
 
+    _step(
+        "Ruff format check",
+        [python, "-m", "ruff", "format", "--check", *lint_targets],
+        cwd=root,
+        env=env,
+    )
+
     pylint_targets = [
         path for path in lint_targets if Path(path).parts and Path(path).parts[0] in PY_SOURCE_ROOTS
     ]
@@ -560,7 +567,8 @@ def job_frontend(root: Path, env: dict[str, str]) -> None:
         else:
             _step("npm ci", [*pm_cmd, "ci"], cwd=ui, env=env)
     _step("TypeScript check", [*pm_cmd, "run", "typecheck"], cwd=ui, env=env)
-    _step("Unit tests (vitest)", [*pm_cmd, "test"], cwd=ui, env=env)
+    # `bun test` is Bun's native runner (no jsdom); the package script is vitest.
+    _step("Unit tests (vitest)", [*pm_cmd, "run", "test"], cwd=ui, env=env)
     _step("Production build", [*pm_cmd, "run", "build"], cwd=ui, env=env)
 
 
