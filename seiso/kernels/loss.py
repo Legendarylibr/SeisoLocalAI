@@ -14,15 +14,11 @@ class _FusedCrossEntropyFn(torch.autograd.Function):
         if backend == "cuda":
             from seiso.kernels.cuda_ops import cross_entropy_forward
 
-            row_loss, row_max, row_lse = cross_entropy_forward(
-                logits, labels, ignore_index
-            )
+            row_loss, row_max, row_lse = cross_entropy_forward(logits, labels, ignore_index)
         else:
             from seiso.kernels.triton_ops import fused_cross_entropy_forward
 
-            row_loss, row_max, row_lse = fused_cross_entropy_forward(
-                logits, labels, ignore_index
-            )
+            row_loss, row_max, row_lse = fused_cross_entropy_forward(logits, labels, ignore_index)
 
         mask = labels != ignore_index
         valid = mask.sum()
@@ -66,9 +62,7 @@ def fused_cross_entropy_loss(
     Falls back to PyTorch on CPU.
     """
     if not logits.is_cuda:
-        return torch.nn.functional.cross_entropy(
-            logits.float(), labels, ignore_index=ignore_index
-        )
+        return torch.nn.functional.cross_entropy(logits.float(), labels, ignore_index=ignore_index)
 
     if logits.dim() != 2:
         raise ValueError("logits must be 2D")

@@ -71,12 +71,8 @@ def test_linux_cpu_brand_uses_proc_when_cpuinfo_pkg_missing(monkeypatch, tmp_pat
         lambda path="/proc/cpuinfo": real_proc(str(cpuinfo)),
     )
     # Without /proc, platform.processor() on native Linux is often just arch.
-    monkeypatch.setattr(
-        "seiso.hardware.platforms.linux.platform.processor", lambda: "x86_64"
-    )
-    monkeypatch.setattr(
-        "seiso.hardware.platforms.linux.platform.machine", lambda: "x86_64"
-    )
+    monkeypatch.setattr("seiso.hardware.platforms.linux.platform.processor", lambda: "x86_64")
+    monkeypatch.setattr("seiso.hardware.platforms.linux.platform.machine", lambda: "x86_64")
 
     brand = linux.cpu_brand()
     assert "7700X" in brand

@@ -42,9 +42,7 @@ def test_code_proof_partial_score():
     assert result.score == 0.5
     assert result.tests_passed == 1
     # Outcome adapters are binary — partial fraction is not GRPO credit.
-    score, checker, _ = verify_outcome(
-        completion, None, checker="code", sample=sample
-    )
+    score, checker, _ = verify_outcome(completion, None, checker="code", sample=sample)
     assert checker == "code"
     assert score == 0.0
     scored = score_completion(completion, sample, checker="code")
@@ -75,9 +73,7 @@ def test_code_proof_with_prompt_prefix():
 def test_verify_outcome_code_checker():
     completion = "def is_even(n):\n    return n % 2 == 0\n"
     sample = {"tests": ["assert is_even(2) is True", "assert is_even(3) is False"]}
-    score, checker, extracted = verify_outcome(
-        completion, None, checker="code", sample=sample
-    )
+    score, checker, extracted = verify_outcome(completion, None, checker="code", sample=sample)
     assert checker == "code"
     assert score == 1.0
     assert "is_even" in extracted

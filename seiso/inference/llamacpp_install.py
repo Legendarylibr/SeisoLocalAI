@@ -69,9 +69,7 @@ def pip_install_strategies(*, prefer_cuda: bool) -> list[list[str]]:
 
     if prefer_cuda:
         for index in _CUDA_WHEEL_INDEXES:
-            strategies.append(
-                [*base, "--only-binary", ":all:", "--extra-index-url", index]
-            )
+            strategies.append([*base, "--only-binary", ":all:", "--extra-index-url", index])
             strategies.append([*base, "--extra-index-url", index])
 
     strategies.extend(
@@ -156,9 +154,7 @@ def ensure_llamacpp_installed(*, auto_install: bool | None = None) -> dict[str, 
     Ensure ``llama_cpp`` imports and, when NVIDIA hardware is visible, prefer a GPU-capable wheel.
     """
     if auto_install is None:
-        auto_install = os.environ.get(
-            "SEISO_SKIP_LLAMACPP_INSTALL", ""
-        ).strip().lower() not in {
+        auto_install = os.environ.get("SEISO_SKIP_LLAMACPP_INSTALL", "").strip().lower() not in {
             "1",
             "true",
             "yes",
@@ -228,9 +224,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         description="Install/verify llama-cpp-python for Seiso GGUF chat"
     )
-    parser.add_argument(
-        "--quiet", action="store_true", help="Only exit code, no stdout"
-    )
+    parser.add_argument("--quiet", action="store_true", help="Only exit code, no stdout")
     args = parser.parse_args(argv)
 
     result = ensure_llamacpp_installed()

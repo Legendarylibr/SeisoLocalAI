@@ -38,22 +38,16 @@ def distill_rl_run(
         "reproducible",
         help="reproducible | full | smoke (CI fixture only)",
     ),
-    config: str | None = typer.Option(
-        None, "--config", "-c", help="JSON/YAML job config"
-    ),
+    config: str | None = typer.Option(None, "--config", "-c", help="JSON/YAML job config"),
     teacher_model: str | None = typer.Option(None, help="Teacher HF model ID or path"),
     student_model: str | None = typer.Option(None, help="Student HF model ID or path"),
     distilled_path: str | None = typer.Option(
         None, help="Existing distilled checkpoint (skip distill stage)"
     ),
     distill_steps: int | None = typer.Option(None, help="KL distillation steps"),
-    rollout_prompts: int | None = typer.Option(
-        None, help="Max prompts for preference rollouts"
-    ),
+    rollout_prompts: int | None = typer.Option(None, help="Max prompts for preference rollouts"),
     dpo_epochs: int | None = typer.Option(None, help="DPO training epochs"),
-    prompt_library: str | None = typer.Option(
-        None, help="Prompt JSON/JSONL for rollouts"
-    ),
+    prompt_library: str | None = typer.Option(None, help="Prompt JSON/JSONL for rollouts"),
     require_thinking_trace: bool = typer.Option(
         True,
         "--thinking-trace/--no-thinking-trace",
@@ -92,9 +86,7 @@ def distill_rl_run(
         "--auto-sweep/--no-auto-sweep",
         help="Grid-search DPO hyperparameters before the full run (default: on)",
     ),
-    json_out: bool = typer.Option(
-        False, "--json", help="Print machine-readable summary JSON"
-    ),
+    json_out: bool = typer.Option(False, "--json", help="Print machine-readable summary JSON"),
 ) -> None:
     """Distill teacher → student, build teacher/student preferences, run DPO."""
     import json as json_mod
@@ -114,9 +106,7 @@ def distill_rl_run(
         "verifiable_outcome_rewards": verifiable_outcome_rewards,
         "grpo_group_size": grpo_group_size,
         "benchmark_verifiable": benchmark_verifiable,
-        "benchmark_tasks": [
-            task.strip() for task in benchmark_tasks.split(",") if task.strip()
-        ],
+        "benchmark_tasks": [task.strip() for task in benchmark_tasks.split(",") if task.strip()],
     }
     if config:
         payload["config_file"] = config

@@ -106,9 +106,7 @@ class UsersMixin:
     async def get_user_by_email(self, email: str) -> dict | None:
         async with (
             self._conn() as conn,
-            conn.execute(
-                "SELECT * FROM users WHERE email = ?", (email.lower(),)
-            ) as cur,
+            conn.execute("SELECT * FROM users WHERE email = ?", (email.lower(),)) as cur,
         ):
             row = await cur.fetchone()
             return dict(row) if row else None
@@ -134,9 +132,7 @@ class UsersMixin:
             if cur.rowcount == 0:
                 raise ValueError("User not found")
             await conn.commit()
-            async with conn.execute(
-                "SELECT * FROM users WHERE id = ?", (user_id,)
-            ) as fetch:
+            async with conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)) as fetch:
                 row = await fetch.fetchone()
         if row is None:
             raise ValueError("User not found")

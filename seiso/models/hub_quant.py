@@ -101,26 +101,18 @@ def native_quant_training_block_reason(
     """Return a user-facing error when native hub quant weights cannot be fine-tuned."""
     method = native_quant_method_from_config(config) if config is not None else None
     if method is None:
-        config = config or peek_model_config(
-            model_ref, trust_remote_code=trust_remote_code
-        )
+        config = config or peek_model_config(model_ref, trust_remote_code=trust_remote_code)
         method = native_quant_method_from_config(config) if config is not None else None
     if method is None and "-fp8" in str(model_ref).lower():
         method = "fp8"
     if method not in UNTRAINABLE_NATIVE_QUANT_METHODS:
         return None
-    return NATIVE_QUANT_TRAINING_MESSAGE.format(
-        method=method, method_upper=method.upper()
-    )
+    return NATIVE_QUANT_TRAINING_MESSAGE.format(method=method, method_upper=method.upper())
 
 
 def active_params_from_config(config: Any) -> float | None:
     """Best-effort active parameter count (billions) from model config."""
-    label = str(
-        getattr(config, "name_or_path", "")
-        or getattr(config, "_name_or_path", "")
-        or ""
-    )
+    label = str(getattr(config, "name_or_path", "") or getattr(config, "_name_or_path", "") or "")
     sizing = sizing_from_reference(label, config=config)
     return sizing.active_params_b
 

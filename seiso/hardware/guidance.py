@@ -24,7 +24,10 @@ def build_guidance(
     # the probe omitted a VRAM total (legacy stubs) or reported unified size.
     if backend == Backend.MLX or any(
         g.get("unified_memory") is True
-        or ("apple" in str(g.get("name") or "").lower() and "mlx" in str(g.get("name") or "").lower())
+        or (
+            "apple" in str(g.get("name") or "").lower()
+            and "mlx" in str(g.get("name") or "").lower()
+        )
         for g in gpus
     ):
         vram_total = max(vram_total, int(float(ram_gb or 0) * 1024))
@@ -57,9 +60,7 @@ def build_guidance(
                     3,
                 )
             )
-            steps.append(
-                GuideStep("Open Chat", "Pick a model and start chatting.", "/chat", 2)
-            )
+            steps.append(GuideStep("Open Chat", "Pick a model and start chatting.", "/chat", 2))
         elif gpus:
             steps.append(
                 GuideStep(
@@ -154,9 +155,7 @@ def build_guidance(
             )
         )
         steps.append(
-            GuideStep(
-                "Open Chat", "Run local inference via llama.cpp or MLX.", "/chat", 3
-            )
+            GuideStep("Open Chat", "Run local inference via llama.cpp or MLX.", "/chat", 3)
         )
         if vram_total < 6000 and not gpus:
             steps.append(
@@ -169,15 +168,9 @@ def build_guidance(
             )
 
     else:
+        steps.append(GuideStep("Browse the catalog", "Newest models are listed first.", "/hub", 2))
         steps.append(
-            GuideStep(
-                "Browse the catalog", "Newest models are listed first.", "/hub", 2
-            )
-        )
-        steps.append(
-            GuideStep(
-                "Open Chat", "Encrypted memory lasts until you sign out.", "/chat", 2
-            )
+            GuideStep("Open Chat", "Encrypted memory lasts until you sign out.", "/chat", 2)
         )
 
     steps.sort(key=lambda s: -s.priority)

@@ -66,10 +66,7 @@ def format_hub_error(
     # and must not be misread as gated-repo auth failures (which empty the catalog).
     if transport or "proxy" in lowered:
         if "proxy" in lowered or "proxy" in exc.__class__.__name__.lower():
-            return (
-                "Network proxy blocked Hugging Face Hub. "
-                "Check proxy settings and try again."
-            )
+            return "Network proxy blocked Hugging Face Hub. Check proxy settings and try again."
         if "timeout" in lowered or "timed out" in lowered:
             if context == "download" and repo_id:
                 return (
@@ -83,10 +80,7 @@ def format_hub_error(
                 f"HF_HUB_DOWNLOAD_TIMEOUT. ({msg})"
             )
         if context == "download" and repo_id:
-            return (
-                f"Cannot reach huggingface.co while downloading {repo_id}. "
-                "Check your network."
-            )
+            return f"Cannot reach huggingface.co while downloading {repo_id}. Check your network."
         if context == "search":
             return "Cannot reach huggingface.co. Check your network and try again."
         return f"Cannot reach huggingface.co — check your network connection. ({msg})"
@@ -115,12 +109,7 @@ def format_hub_error(
             "to access gated models."
         )
 
-    if (
-        code == 429
-        or "429" in msg
-        or "rate limit" in lowered
-        or "too many requests" in lowered
-    ):
+    if code == 429 or "429" in msg or "rate limit" in lowered or "too many requests" in lowered:
         if context == "download" and repo_id:
             return (
                 f"Hugging Face anonymous API rate limit reached while downloading {repo_id}. "
@@ -151,7 +140,9 @@ def format_hub_error(
             return f"Download timed out for {repo_id}. Retry or set HF_HUB_DOWNLOAD_TIMEOUT higher."
         if context == "search":
             return "Hugging Face Hub search timed out. Try again in a moment."
-        return f"Hugging Face Hub timed out — try again or increase HF_HUB_DOWNLOAD_TIMEOUT. ({msg})"
+        return (
+            f"Hugging Face Hub timed out — try again or increase HF_HUB_DOWNLOAD_TIMEOUT. ({msg})"
+        )
 
     if context == "download" and repo_id:
         return f"Hub download failed for {repo_id}: {msg}"

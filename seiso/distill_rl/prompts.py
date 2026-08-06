@@ -105,9 +105,7 @@ def _extract_prompt_records(payload: object) -> list[RolloutPrompt]:
             _normalize_prompt_row(row, fallback_id=f"row_{index}")
             for index, row in enumerate(payload["examples"])
         ]
-    raise ValueError(
-        "Unsupported prompt library format; expected list or {'prompts': [...]}"
-    )
+    raise ValueError("Unsupported prompt library format; expected list or {'prompts': [...]}")
 
 
 def _normalize_prompt_row(row: object, *, fallback_id: str) -> RolloutPrompt:

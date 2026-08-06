@@ -156,9 +156,7 @@ def load_torch(
             import torch
 
             if torch.cuda.is_available():
-                dtype = (
-                    torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
-                )
+                dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
         except ImportError:
             dtype = None
     if dtype is not None and not native_hub_quant:
@@ -233,9 +231,7 @@ def load_torch(
         quantization_requested = True
         model_kwargs["quantization_config"] = BitsAndBytesConfig(load_in_8bit=True)
 
-    tokenizer = AutoTokenizer.from_pretrained(
-        options.model_id, **tokenizer_kwargs
-    )  # nosec B615: revision pinned in tokenizer_kwargs
+    tokenizer = AutoTokenizer.from_pretrained(options.model_id, **tokenizer_kwargs)  # nosec B615: revision pinned in tokenizer_kwargs
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
 
@@ -251,16 +247,11 @@ def load_torch(
             attempt = dict(kwargs)
             attempt["attn_implementation"] = implementation
             try:
-                loaded = AutoModelForCausalLM.from_pretrained(
-                    options.model_id, **attempt
-                )  # nosec B615: revision pinned in model_kwargs
+                loaded = AutoModelForCausalLM.from_pretrained(options.model_id, **attempt)  # nosec B615: revision pinned in model_kwargs
                 return loaded, implementation
             except Exception as exc:
                 last_exc = exc
-                if (
-                    implementation == fallbacks[-1]
-                    or not _looks_like_attention_load_error(exc)
-                ):
+                if implementation == fallbacks[-1] or not _looks_like_attention_load_error(exc):
                     raise
                 from seiso.memory.protection import release_cached_memory
 
@@ -281,8 +272,7 @@ def load_torch(
         retry_kwargs = dict(model_kwargs)
         retry_kwargs.pop("quantization_config", None)
         logger.warning(
-            "Quantized torch load failed (%s) - retrying without bitsandbytes "
-            "quantization",
+            "Quantized torch load failed (%s) - retrying without bitsandbytes quantization",
             exc,
         )
         model, actual_attention = _load_with_attention_fallback(retry_kwargs)

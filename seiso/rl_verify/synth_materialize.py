@@ -43,6 +43,7 @@ def normalize_materialize_source(source: str) -> str:
         return "dataset"
     return key
 
+
 GROUNDED_FLOOR_DEFAULT = 256
 GROUNDED_FLOOR_SMOKE = 32
 
@@ -141,9 +142,7 @@ def materialize_grounded_corpus(
             "CI fixtures: preference_source=grounded_library + SEISO_ALLOW_TINY_RL=1."
         )
     if source not in SYNTH_SOURCES:
-        raise ValueError(
-            f"unknown synth source {source!r}; expected one of {SYNTH_SOURCES}"
-        )
+        raise ValueError(f"unknown synth source {source!r}; expected one of {SYNTH_SOURCES}")
     if source == "data_designer":
         result = _from_data_designer(request)
     elif source == "dataset":
@@ -215,9 +214,10 @@ def _from_data_designer(request: SynthRequest) -> SynthResult:
             "SEISO_DATA_DESIGNER_BASE_URL / SEISO_VLLM_BASE_URL. "
             "No silent localhost default."
         )
-    out = Path(
-        request.artifact_dir or Path.cwd() / "artifacts" / "data_designer"
-    ) / "grounded_prompts.jsonl"
+    out = (
+        Path(request.artifact_dir or Path.cwd() / "artifacts" / "data_designer")
+        / "grounded_prompts.jsonl"
+    )
     out.parent.mkdir(parents=True, exist_ok=True)
     cfg = DataDesignerGenConfig(
         count=max(1, int(request.count)),
@@ -285,9 +285,7 @@ def _from_dataset(request: SynthRequest) -> SynthResult:
     from seiso.training.preprocess import preprocess_training_dataset
 
     if request.dataset_ref is None or not str(request.dataset_ref).strip():
-        raise ValueError(
-            "source=dataset requires dataset_ref (HF hub id or local path)"
-        )
+        raise ValueError("source=dataset requires dataset_ref (HF hub id or local path)")
     ref = str(request.dataset_ref).strip()
     local = Path(ref).expanduser()
     # Local files/dirs need no Hub token. Public Hub sets also work without a
@@ -468,9 +466,7 @@ def _map_sample_to_slime_row(
     )
 
 
-def _extract_prompt_text(
-    sample: dict[str, Any], *, prompt_field: str | None
-) -> str:
+def _extract_prompt_text(sample: dict[str, Any], *, prompt_field: str | None) -> str:
     if prompt_field and sample.get(prompt_field) is not None:
         return _coerce_prompt(sample.get(prompt_field))
     for key in ("prompt", "question", "query", "instruction", "text"):
@@ -497,9 +493,7 @@ def _extract_prompt_text(
     return ""
 
 
-def _extract_answer_text(
-    sample: dict[str, Any], *, answer_field: str | None
-) -> str:
+def _extract_answer_text(sample: dict[str, Any], *, answer_field: str | None) -> str:
     if answer_field and sample.get(answer_field) is not None:
         return str(sample.get(answer_field)).strip()
     for key in ("answer", "label", "output", "response", "completion"):

@@ -110,9 +110,7 @@ router = build_stage_pipeline_router(
         get_orchestrator=get_compress_orchestrator,
         list_jobs=lambda db, uid: db.list_compress_jobs(uid),
         get_job=lambda db, jid, uid: db.get_compress_job(jid, uid),
-        create_job=lambda db, uid, cfg, jid: db.create_compress_job(
-            uid, cfg, job_id=jid
-        ),
+        create_job=lambda db, uid, cfg, jid: db.create_compress_job(uid, cfg, job_id=jid),
         update_status=lambda db, jid, status, **kw: db.update_compress_job_status(
             jid, status, **kw
         ),

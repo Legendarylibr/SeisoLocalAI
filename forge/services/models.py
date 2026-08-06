@@ -103,9 +103,7 @@ def resolve_training_model_id(
         if path.exists() and snapshot_has_trainable_weights(path):
             resolved = str(path.resolve())
             return resolved, resolved
-        raise ValueError(
-            f"Local model path is not a trainable snapshot: {model_id}"
-        )
+        raise ValueError(f"Local model path is not a trainable snapshot: {model_id}")
 
     hf_source = f"hf:{model_id}"
     for row in inventory or []:

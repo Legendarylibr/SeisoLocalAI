@@ -529,9 +529,7 @@ def _patch_fused_qkv_projections(
                 if x_mod is None:
                     x_mod = x
                     if hasattr(self, "_cast_input_dtype"):
-                        x_mod = self._cast_input_dtype(
-                            x_mod, self.lora_A[adapter].weight.dtype
-                        )
+                        x_mod = self._cast_input_dtype(x_mod, self.lora_A[adapter].weight.dtype)
                     dropout_p = _lora_dropout_p(self.lora_dropout[adapter])
                     if dropout_p > 0 and self.training:
                         x_mod = F.dropout(x_mod, p=dropout_p)

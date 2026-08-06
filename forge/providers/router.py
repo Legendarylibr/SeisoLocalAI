@@ -131,9 +131,7 @@ async def stream_chat_completion(
             "Set SEISO_ALLOW_CLOUD_MULTIGPU=true to enable."
         )
 
-    endpoint = resolve_pinned_endpoint(
-        config.get("base_url", ""), provider_type=ptype
-    )
+    endpoint = resolve_pinned_endpoint(config.get("base_url", ""), provider_type=ptype)
     model = config.get("model") or config.get("compat_model_id") or "default"
     api_key = config.get("api_key", "")
 
@@ -176,11 +174,7 @@ async def stream_chat_completion(
                 continue
             if isinstance(chunk, dict) and chunk.get("error"):
                 err = chunk["error"]
-                msg = (
-                    err.get("message", str(err))
-                    if isinstance(err, dict)
-                    else str(err)
-                )
+                msg = err.get("message", str(err)) if isinstance(err, dict) else str(err)
                 raise RuntimeError(msg)
             choices = chunk.get("choices") if isinstance(chunk, dict) else None
             if not choices:
@@ -199,9 +193,7 @@ async def _chat_completions_request(
     max_tokens: int,
     temperature: float | None = None,
 ) -> str:
-    endpoint = resolve_pinned_endpoint(
-        config.get("base_url", ""), provider_type=provider_type
-    )
+    endpoint = resolve_pinned_endpoint(config.get("base_url", ""), provider_type=provider_type)
     model = config.get("model") or config.get("compat_model_id") or "default"
     api_key = config.get("api_key", "")
 
@@ -222,9 +214,7 @@ async def _chat_completions_request(
         payload["temperature"] = temperature
 
     timeout = float(config.get("timeout_s") or 600)
-    resp = await pinned_post(
-        endpoint, path, headers=headers, json=payload, timeout=timeout
-    )
+    resp = await pinned_post(endpoint, path, headers=headers, json=payload, timeout=timeout)
     resp.raise_for_status()
     data = resp.json()
     return data["choices"][0]["message"]["content"]
@@ -256,7 +246,9 @@ def normalize_remote_chat_config(config: dict[str, Any]) -> dict[str, Any]:
     engine = str(out.get("engine") or out.get("backend") or "").strip()
     if engine:
         out["engine"] = engine.lower()[:64]
-    hoster = str(out.get("cloud_provider") or out.get("hoster") or out.get("provider") or "").strip()
+    hoster = str(
+        out.get("cloud_provider") or out.get("hoster") or out.get("provider") or ""
+    ).strip()
     if hoster:
         out["hoster"] = hoster.lower()[:64]
         out["cloud_provider"] = out["hoster"]  # keep legacy key for older UI

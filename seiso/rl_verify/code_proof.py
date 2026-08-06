@@ -221,9 +221,7 @@ def verify_code_proof(
     fail_exit = 0
     fail_reason = "ok"
     for unit in tests:
-        program = build_program(
-            extracted_code=code, sample=sample, test_unit=unit
-        )
+        program = build_program(extracted_code=code, sample=sample, test_unit=unit)
         result = run_python_sandboxed(code=program, timeout_s=per_test)
         # One retry only for empty-stderr failures (xdist host pressure flakes).
         # Keep AssertionError / real runtime failures single-shot.

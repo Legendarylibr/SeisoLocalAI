@@ -85,13 +85,10 @@ def validate_security_settings(settings: ForgeSettings) -> None:
         tools_dangerous = settings.allow_tools or settings.allow_compat_tools
         if tools_dangerous and not _env_enabled(_REMOTE_DANGEROUS_ACK_ENV):
             raise RuntimeError(
-                "Remote access with tools requires: "
-                f"export {_REMOTE_DANGEROUS_ACK_ENV}=1"
+                f"Remote access with tools requires: export {_REMOTE_DANGEROUS_ACK_ENV}=1"
             )
         if tools_dangerous:
-            logger.warning(
-                "Remote access with tools enabled — high risk if credentials leak."
-            )
+            logger.warning("Remote access with tools enabled — high risk if credentials leak.")
         audit_event(
             "security_elevated",
             allow_remote=True,

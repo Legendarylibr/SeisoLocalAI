@@ -242,8 +242,7 @@ def mesh_worker(
     elif not out.get("config_path"):
         next_hint = (
             "Pass --base-config path/to/train.yaml to materialize a worker "
-            "config (and --launch / --dry-run to start or preview train). "
-            + next_hint
+            "config (and --launch / --dry-run to start or preview train). " + next_hint
         )
     out["next"] = next_hint
     _print_json(out)

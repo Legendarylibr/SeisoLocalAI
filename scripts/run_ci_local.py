@@ -418,9 +418,7 @@ def _pytest_worker_args(workers: str | int, dist: str) -> list[str]:
         return []
     if value in {"auto", "logical"} or value.isdigit():
         return ["-n", value, "--dist", dist]
-    raise SystemExit(
-        f"Invalid --pytest-workers={workers!r}; use 0, N, auto, or logical."
-    )
+    raise SystemExit(f"Invalid --pytest-workers={workers!r}; use 0, N, auto, or logical.")
 
 
 def job_test(

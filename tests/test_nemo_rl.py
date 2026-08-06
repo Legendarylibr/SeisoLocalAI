@@ -57,9 +57,7 @@ def test_build_hydra_overrides_grpo():
     assert "grpo.max_num_steps=10" in overrides
     assert "grpo.num_generations_per_prompt=4" in overrides
     assert "grpo.num_prompts_per_step=2" in overrides
-    assert any(
-        o.startswith("policy.optimizer.kwargs.lr=5e-0") for o in overrides
-    )
+    assert any(o.startswith("policy.optimizer.kwargs.lr=5e-0") for o in overrides)
     assert "policy.lora_cfg.enabled=true" in overrides
     assert "logger.wandb_enabled=False" in overrides
 
@@ -240,6 +238,7 @@ def test_cli_registers_nemo_rl():
     names = {cmd.name for cmd in app.registered_commands}
     assert "nemo-rl" in names
 
+
 def test_nemo_relative_dotdot_override_is_sandboxed(tmp_path: Path, monkeypatch):
     from seiso.nemo_rl.config import NeMoRLConfig
     from seiso.nemo_rl.runner import train_nemo_rl
@@ -264,6 +263,7 @@ def test_nemo_relative_dotdot_override_is_sandboxed(tmp_path: Path, monkeypatch)
     with pytest.raises(SecurityError, match="outside sandbox"):
         train_nemo_rl(cfg)
 
+
 def test_nemo_base_config_rejects_path_escape(tmp_path: Path):
     from seiso.nemo_rl.config_builder import _resolve_base_config_path
 
@@ -273,4 +273,3 @@ def test_nemo_base_config_rejects_path_escape(tmp_path: Path):
     assert _resolve_base_config_path(root, "ok.yaml").name == "ok.yaml"
     with pytest.raises(ValueError, match="base_config|\\.\\."):
         _resolve_base_config_path(root, "../../../etc/passwd")
-

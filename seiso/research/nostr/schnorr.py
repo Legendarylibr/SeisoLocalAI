@@ -20,9 +20,7 @@ def _mod_inv(a: int, m: int) -> int:
     return pow(a % m, -1, m)
 
 
-def _point_add(
-    p1: tuple[int, int] | None, p2: tuple[int, int] | None
-) -> tuple[int, int] | None:
+def _point_add(p1: tuple[int, int] | None, p2: tuple[int, int] | None) -> tuple[int, int] | None:
     if p1 is None:
         return p2
     if p2 is None:
@@ -129,9 +127,7 @@ def sign_schnorr(secret: bytes, message: bytes, aux_rand: bytes | None = None) -
         raise RuntimeError("schnorr nonce failure")
     k = k0 if _has_even_y(r_point) else (_N - k0)
     r = _xonly(r_point)
-    e = (
-        _int_from_bytes(_tagged_hash("BIP0340/challenge", r, pubkey, message)) % _N
-    )
+    e = _int_from_bytes(_tagged_hash("BIP0340/challenge", r, pubkey, message)) % _N
     sig = r + _bytes32((k + e * d) % _N)
     if not verify_schnorr(pubkey, message, sig):
         raise RuntimeError("schnorr self-check failed")
@@ -149,9 +145,7 @@ def verify_schnorr(pubkey_xonly: bytes, message: bytes, signature: bytes) -> boo
     if r >= _P or s >= _N:
         return False
     e = (
-        _int_from_bytes(
-            _tagged_hash("BIP0340/challenge", signature[:32], pubkey_xonly, message)
-        )
+        _int_from_bytes(_tagged_hash("BIP0340/challenge", signature[:32], pubkey_xonly, message))
         % _N
     )
     # R = s*G - e*P
@@ -162,6 +156,4 @@ def verify_schnorr(pubkey_xonly: bytes, message: bytes, signature: bytes) -> boo
     # Negate ep
     ep_neg = (ep[0], _P - ep[1]) if ep[1] != 0 else ep
     r_point = _point_add(sg, ep_neg)
-    return (
-        r_point is not None and _has_even_y(r_point) and r_point[0] == r
-    )
+    return r_point is not None and _has_even_y(r_point) and r_point[0] == r

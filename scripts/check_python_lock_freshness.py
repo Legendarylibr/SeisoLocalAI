@@ -84,9 +84,7 @@ def verify_python_lock_freshness(repo_root: Path) -> list[str]:
         if only_old:
             parts.append(f"extra in lock: {', '.join(only_old[:20])}")
         if changed:
-            sample = ", ".join(
-                f"{name} ({old[name]} -> {new[name]})" for name in changed[:20]
-            )
+            sample = ", ".join(f"{name} ({old[name]} -> {new[name]})" for name in changed[:20])
             parts.append(f"pin drift: {sample}")
         raise LockDigestError(
             "locks/python.lock is stale vs pyproject.toml; "

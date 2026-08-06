@@ -69,9 +69,7 @@ def _hf_max_memory_for_auto_load() -> dict[int, str] | None:
         return None
 
 
-def _pipeline_fingerprint(
-    blob: dict, det: DeterminismConfig, config_path: str | None
-) -> dict:
+def _pipeline_fingerprint(blob: dict, det: DeterminismConfig, config_path: str | None) -> dict:
     """Stable identity for an entire multi-stage pipeline (shared run directory)."""
     from .replay import sha256_file
 
@@ -101,9 +99,7 @@ def _load_determinism_cfg(blob: dict, args: argparse.Namespace) -> DeterminismCo
     return det
 
 
-def add_determinism_args(
-    parser: argparse.ArgumentParser, *, replay: bool = False
-) -> None:
+def add_determinism_args(parser: argparse.ArgumentParser, *, replay: bool = False) -> None:
     parser.add_argument("--seed", type=int, default=42, help="Global RNG seed.")
     parser.add_argument(
         "--deterministic",
@@ -198,9 +194,7 @@ def _finish_stage(
     )
 
 
-def _finish_run(
-    *, out_root: str, run_dir: Path, max_run_dir_gb: float | None = None
-) -> None:
+def _finish_run(*, out_root: str, run_dir: Path, max_run_dir_gb: float | None = None) -> None:
     if max_run_dir_gb is None:
         return
     assert_disk_budget(root=Path(out_root), max_dir_gb=max_run_dir_gb, dir_path=run_dir)
@@ -228,13 +222,9 @@ def _cmd_distill_run(args: argparse.Namespace) -> int:
     from .distill import run_distillation
 
     out_dir = run_dir / "distilled"
-    run_distillation(
-        run_dir=run_dir, out_dir=out_dir, dataset_cfg=ds_cfg, cfg=d_cfg, seed=det.seed
-    )
+    run_distillation(run_dir=run_dir, out_dir=out_dir, dataset_cfg=ds_cfg, cfg=d_cfg, seed=det.seed)
     _finish_stage(run_dir=run_dir, stage="distill", artifact_path=out_dir)
-    _finish_run(
-        out_root=args.out_root, run_dir=run_dir, max_run_dir_gb=args.max_run_dir_gb
-    )
+    _finish_run(out_root=args.out_root, run_dir=run_dir, max_run_dir_gb=args.max_run_dir_gb)
     print(f"Done. Distilled model at: {out_dir}")
     return 0
 
@@ -288,9 +278,7 @@ def _cmd_prune_mask_mlp(args: argparse.Namespace) -> int:
 
         from .reporting import write_samples_jsonl
 
-        tok = AutoTokenizer.from_pretrained(
-            out_dir, use_fast=True, trust_remote_code=False
-        )
+        tok = AutoTokenizer.from_pretrained(out_dir, use_fast=True, trust_remote_code=False)
         model = AutoModelForCausalLM.from_pretrained(
             out_dir,
             device_map="auto",
@@ -358,9 +346,7 @@ def _cmd_finetune_run(args: argparse.Namespace) -> int:
         seed=det.seed,
     )
     _finish_stage(run_dir=run_dir, stage="finetune", artifact_path=out_dir)
-    _finish_run(
-        out_root=args.out_root, run_dir=run_dir, max_run_dir_gb=args.max_run_dir_gb
-    )
+    _finish_run(out_root=args.out_root, run_dir=run_dir, max_run_dir_gb=args.max_run_dir_gb)
     print(f"Done. Fine-tuned model at: {out_dir}")
     return 0
 
@@ -409,9 +395,7 @@ def _cmd_quant_gptq(args: argparse.Namespace) -> int:
         cfg=q_cfg,
     )
     _finish_stage(run_dir=run_dir, stage="quantize_gptq", artifact_path=out_dir)
-    _finish_run(
-        out_root=args.out_root, run_dir=run_dir, max_run_dir_gb=args.max_run_dir_gb
-    )
+    _finish_run(out_root=args.out_root, run_dir=run_dir, max_run_dir_gb=args.max_run_dir_gb)
     print(f"Done. Quantized model at: {out_dir}")
     return 0
 
@@ -460,9 +444,7 @@ def _cmd_quant_awq(args: argparse.Namespace) -> int:
         cfg=q_cfg,
     )
     _finish_stage(run_dir=run_dir, stage="quantize_awq", artifact_path=out_dir)
-    _finish_run(
-        out_root=args.out_root, run_dir=run_dir, max_run_dir_gb=args.max_run_dir_gb
-    )
+    _finish_run(out_root=args.out_root, run_dir=run_dir, max_run_dir_gb=args.max_run_dir_gb)
     print(f"Done. Quantized model at: {out_dir}")
     return 0
 
@@ -550,9 +532,7 @@ def _cmd_evaluate_benchmark(args: argparse.Namespace) -> int:
     )
     print(f"Wrote benchmark results to {out_dir}")
     # Also print high-level result keys for quick view
-    print(
-        {"tasks": args.tasks, "results_keys": sorted((res.get("results") or {}).keys())}
-    )
+    print({"tasks": args.tasks, "results_keys": sorted((res.get("results") or {}).keys())})
     return 0
 
 
@@ -655,10 +635,7 @@ def _cmd_util_verify_artifact(args: argparse.Namespace) -> int:
         trust_remote_code=args.trust_remote_code,
         **(
             {"max_memory": max_memory}
-            if (
-                torch.cuda.is_available()
-                and (max_memory := _hf_max_memory_for_auto_load())
-            )
+            if (torch.cuda.is_available() and (max_memory := _hf_max_memory_for_auto_load()))
             else {}
         ),
     )
@@ -679,9 +656,7 @@ def _cmd_util_manifest_verify(args: argparse.Namespace) -> int:
 
 def _cmd_util_manifest_create(args: argparse.Namespace) -> int:
     manifest = backfill_manifest_from_run_dir(_p(args.run_dir))
-    print(
-        f"Wrote manifest with config_fingerprint={manifest.get('config_fingerprint')}"
-    )
+    print(f"Wrote manifest with config_fingerprint={manifest.get('config_fingerprint')}")
     return 0
 
 
@@ -715,9 +690,7 @@ def build_parser() -> argparse.ArgumentParser:
     # distill run
     distill = sp.add_parser("distill", help="Knowledge distillation commands.")
     distill_sp = distill.add_subparsers(dest="sub", required=True)
-    distill_run = distill_sp.add_parser(
-        "run", help="Run teacher->student logit distillation."
-    )
+    distill_run = distill_sp.add_parser("run", help="Run teacher->student logit distillation.")
     distill_run.add_argument("--run-id", default=None)
     distill_run.add_argument("--out-root", default="output/runs")
     distill_run.add_argument("--config", default=None, help="JSON config file.")
@@ -795,13 +768,9 @@ def build_parser() -> argparse.ArgumentParser:
     finetune_run.set_defaults(func=_cmd_finetune_run)
 
     # quantize
-    quant = sp.add_parser(
-        "quantize", help="Quantization commands (some require extras)."
-    )
+    quant = sp.add_parser("quantize", help="Quantization commands (some require extras).")
     quant_sp = quant.add_subparsers(dest="sub", required=True)
-    qg = quant_sp.add_parser(
-        "gptq", help="Quantize a model with GPTQ (requires '.[quant]')."
-    )
+    qg = quant_sp.add_parser("gptq", help="Quantize a model with GPTQ (requires '.[quant]').")
     qg.add_argument("--model-dir", required=True)
     qg.add_argument("--run-id", default=None)
     qg.add_argument("--out-root", default="output/runs")
@@ -827,9 +796,7 @@ def build_parser() -> argparse.ArgumentParser:
     add_determinism_args(qg, replay=True)
     qg.set_defaults(func=_cmd_quant_gptq)
 
-    qa = quant_sp.add_parser(
-        "awq", help="Quantize a model with AWQ (requires '.[quant]')."
-    )
+    qa = quant_sp.add_parser("awq", help="Quantize a model with AWQ (requires '.[quant]').")
     qa.add_argument("--model-dir", required=True)
     qa.add_argument("--run-id", default=None)
     qa.add_argument("--out-root", default="output/runs")
@@ -861,13 +828,9 @@ def build_parser() -> argparse.ArgumentParser:
     qb.set_defaults(func=_cmd_quant_bnb)
 
     # evaluate run
-    ev = sp.add_parser(
-        "evaluate", help="Evaluation commands (lightweight smoke checks)."
-    )
+    ev = sp.add_parser("evaluate", help="Evaluation commands (lightweight smoke checks).")
     ev_sp = ev.add_subparsers(dest="sub", required=True)
-    ev_run = ev_sp.add_parser(
-        "run", help="Smoke-evaluate a model directory (small prompts)."
-    )
+    ev_run = ev_sp.add_parser("run", help="Smoke-evaluate a model directory (small prompts).")
     ev_run.add_argument("--model-dir", required=True)
     ev_run.add_argument("--out-path", default=None)
     ev_run.add_argument(
@@ -883,9 +846,7 @@ def build_parser() -> argparse.ArgumentParser:
     ev_run.add_argument("--config", default=None, help="JSON config file (reserved).")
     ev_run.set_defaults(func=_cmd_evaluate_run)
 
-    ev_bench = ev_sp.add_parser(
-        "benchmark", help="Run research benchmarks (requires '.[eval]')."
-    )
+    ev_bench = ev_sp.add_parser("benchmark", help="Run research benchmarks (requires '.[eval]').")
     ev_bench.add_argument("--model-dir", required=True)
     ev_bench.add_argument(
         "--tasks",
@@ -921,16 +882,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     ev_code.add_argument("--model-dir", required=True)
     ev_code.add_argument("--suite", choices=["humaneval", "mbpp"], required=True)
-    ev_code.add_argument(
-        "--k", type=int, default=10, help="Number of samples per problem."
-    )
+    ev_code.add_argument("--k", type=int, default=10, help="Number of samples per problem.")
     add_determinism_args(ev_code)
     ev_code.add_argument("--max-new-tokens", type=int, default=256)
     ev_code.add_argument("--temperature", type=float, default=0.2)
     ev_code.add_argument("--top-p", type=float, default=0.95)
-    ev_code.add_argument(
-        "--limit", type=int, default=None, help="Optional max problems."
-    )
+    ev_code.add_argument("--limit", type=int, default=None, help="Optional max problems.")
     ev_code.add_argument("--out-root", default="output/runs")
     ev_code.add_argument("--run-id", default=None)
     ev_code.add_argument(
@@ -964,9 +921,7 @@ def build_parser() -> argparse.ArgumentParser:
     ex_bundle.add_argument("--out-dir", default="output/export")
     ex_bundle.add_argument("--model-name", default="codellama-compressed")
     ex_bundle.add_argument("--port", type=int, default=8000)
-    ex_bundle.add_argument(
-        "--config", default=None, help="JSON config file (optional)."
-    )
+    ex_bundle.add_argument("--config", default=None, help="JSON config file (optional).")
     ex_bundle.set_defaults(func=_cmd_export_bundle)
 
     # util

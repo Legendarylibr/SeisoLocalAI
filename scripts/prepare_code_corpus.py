@@ -117,9 +117,7 @@ def main() -> int:
         default=",".join(DEFAULT_CONFIGS),
         help="Comma-separated dataset configs/subsets (empty = default split)",
     )
-    parser.add_argument(
-        "--max-samples", type=int, default=None, help="Cap rows written"
-    )
+    parser.add_argument("--max-samples", type=int, default=None, help="Cap rows written")
     parser.add_argument("--max-seq-length", type=int, default=1024)
     parser.add_argument(
         "--model-id",

@@ -97,9 +97,7 @@ class OnboardingStatus(BaseModel):
     owner_npub: str | None = None
 
 
-def _set_session_cookies(
-    response: Response, token: str, settings: ForgeSettings
-) -> None:
+def _set_session_cookies(response: Response, token: str, settings: ForgeSettings) -> None:
     csrf = generate_csrf_token()
     response.set_cookie(
         "seiso_token",
@@ -138,9 +136,7 @@ async def onboarding_status(
     )
 
 
-@router.post(
-    "/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED
-)
+@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     body: RegisterRequest,
     request: Request,
@@ -233,9 +229,7 @@ async def login(
     settings.sync_inference_api_key_owner(identity.pubkey_hex)
     token = create_access_token(user["id"], settings)
     _set_session_cookies(response, token, settings)
-    audit_event(
-        "auth_login", user_id=user["id"], nostr_pubkey=identity.pubkey_hex
-    )
+    audit_event("auth_login", user_id=user["id"], nostr_pubkey=identity.pubkey_hex)
     return AuthResponse(
         access_token=maybe_access_token(request, token),
         user=user_public_view(user),

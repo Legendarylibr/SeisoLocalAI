@@ -34,18 +34,14 @@ from seiso.security import SecurityError
 
 def test_bip340_pubkey_vector():
     pk = pubkey_xonly_from_secret(bytes.fromhex("00" * 31 + "01"))
-    assert pk.hex().upper() == (
-        "79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798"
-    )
+    assert pk.hex().upper() == ("79BE667EF9DCBBAC55A06295CE870B07029BFCDB2DCE28D959F2815B16F81798")
 
 
 def test_bip340_official_vector_0():
     """BIP-340 CSV vector index 0 (32-byte message)."""
     secret = bytes.fromhex("00" * 31 + "03")
     pk = pubkey_xonly_from_secret(secret)
-    assert pk.hex().upper() == (
-        "F9308A019258C31049344F85F89D5229B531C845836F99B08601F113BCE036F9"
-    )
+    assert pk.hex().upper() == ("F9308A019258C31049344F85F89D5229B531C845836F99B08601F113BCE036F9")
     msg = bytes.fromhex("00" * 32)
     aux = bytes.fromhex("00" * 32)
     sig = sign_schnorr(secret, msg, aux_rand=aux)
@@ -215,9 +211,7 @@ def test_attest_and_verify_with_mocked_relay(tmp_path: Path, monkeypatch):
     with (
         patch.object(attest_mod, "publish_event", side_effect=fake_publish),
         patch.object(attest_mod, "fetch_event_by_id", side_effect=fake_fetch),
-        patch.object(
-            attest_mod, "fetch_addressable_event", side_effect=fake_fetch_addressable
-        ),
+        patch.object(attest_mod, "fetch_addressable_event", side_effect=fake_fetch_addressable),
         patch.object(
             attest_mod,
             "normalize_relay_list",

@@ -54,9 +54,7 @@ def public_dns(monkeypatch):
     def fake_getaddrinfo(host, *args, **kwargs):
         return [(None, None, None, None, ("8.8.8.8", 0))]
 
-    monkeypatch.setattr(
-        "seiso.research.nostr.policy.socket.getaddrinfo", fake_getaddrinfo
-    )
+    monkeypatch.setattr("seiso.research.nostr.policy.socket.getaddrinfo", fake_getaddrinfo)
 
 
 def test_validate_relay_url_allowlist_and_loopback(public_dns):
@@ -80,9 +78,7 @@ def test_validate_relay_url_blocks_dns_to_private(monkeypatch):
     def fake_getaddrinfo(host, *args, **kwargs):
         return [(None, None, None, None, ("10.1.2.3", 0))]
 
-    monkeypatch.setattr(
-        "seiso.research.nostr.policy.socket.getaddrinfo", fake_getaddrinfo
-    )
+    monkeypatch.setattr("seiso.research.nostr.policy.socket.getaddrinfo", fake_getaddrinfo)
     with pytest.raises(SecurityError, match="blocked"):
         validate_relay_url("wss://evil.example.com")
 
@@ -161,7 +157,9 @@ def test_publish_event_requires_ok_ack():
             ["OK", event["id"], True, ""],
         ]
     )
-    with patch("seiso.research.nostr.relays._require_websockets", return_value=lambda *a, **k: ok_ws):
+    with patch(
+        "seiso.research.nostr.relays._require_websockets", return_value=lambda *a, **k: ok_ws
+    ):
         with patch(
             "seiso.research.nostr.relays.validate_relay_url",
             side_effect=lambda u, **kw: u,
@@ -171,7 +169,9 @@ def test_publish_event_requires_ok_ack():
     assert json.loads(ok_ws.sent[0]) == ["EVENT", event]
 
     fail_ws = _FakeWS([["OK", event["id"], False, "pow"]])
-    with patch("seiso.research.nostr.relays._require_websockets", return_value=lambda *a, **k: fail_ws):
+    with patch(
+        "seiso.research.nostr.relays._require_websockets", return_value=lambda *a, **k: fail_ws
+    ):
         with patch(
             "seiso.research.nostr.relays.validate_relay_url",
             side_effect=lambda u, **kw: u,
@@ -223,7 +223,9 @@ def test_fetch_event_missing_returns_none():
         def recv(self, timeout: float = 0):
             return json.dumps(["EOSE", self._sub])
 
-    with patch("seiso.research.nostr.relays._require_websockets", return_value=lambda *a, **k: _EoseWS()):
+    with patch(
+        "seiso.research.nostr.relays._require_websockets", return_value=lambda *a, **k: _EoseWS()
+    ):
         with patch(
             "seiso.research.nostr.relays.validate_relay_url",
             side_effect=lambda u, **kw: u,

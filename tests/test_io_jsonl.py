@@ -35,7 +35,5 @@ def test_file_stats_helpers(tmp_path: Path) -> None:
     (nested / "c.safetensors").write_bytes(b"1")
 
     assert path_size_bytes(tmp_path) == 11
-    assert matching_file_stats(
-        tmp_path, suffixes=frozenset({".safetensors", ".bin"})
-    ) == (3, 6)
+    assert matching_file_stats(tmp_path, suffixes=frozenset({".safetensors", ".bin"})) == (3, 6)
     assert matching_file_stats(tmp_path, "*.safetensors") == (2, 4)

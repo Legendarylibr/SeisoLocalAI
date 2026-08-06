@@ -30,9 +30,7 @@ async def run_recipe(
     # Ephemeral orchestrator job (F4-06b): short-lived recipe runs are not
     # persisted to SQLite; durable artifact state lives on the filesystem.
     job_id = orchestrator.create_job(user_id=user_id)
-    spawn_background(
-        orchestrator.start(job_id, {**body.model_dump(), "user_id": user_id})
-    )
+    spawn_background(orchestrator.start(job_id, {**body.model_dump(), "user_id": user_id}))
     return {"job_id": job_id, "status": "pending"}
 
 

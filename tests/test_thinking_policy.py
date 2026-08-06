@@ -10,11 +10,18 @@ def test_classify_task_quality_buckets():
     assert classify_task([{"role": "user", "content": "write a song about the moon"}]) == "creative"
     assert (
         classify_task(
-            [{"role": "user", "content": "Prove that the square root of 2 is irrational step by step"}]
+            [
+                {
+                    "role": "user",
+                    "content": "Prove that the square root of 2 is irrational step by step",
+                }
+            ]
         )
         == "complex"
     )
-    assert classify_task([{"role": "user", "content": "What is the capital of France?"}]) == "general"
+    assert (
+        classify_task([{"role": "user", "content": "What is the capital of France?"}]) == "general"
+    )
 
 
 def test_auto_policy_disables_thinking_for_creative_and_simple(monkeypatch):

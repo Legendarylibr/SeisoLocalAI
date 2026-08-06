@@ -96,9 +96,7 @@ def test_analyze_sample_mode_does_not_store_cleaned_cache(tmp_path: Path):
     ds.write_text(
         '{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"}]}\n'
     )
-    analysis = analyze_training_dataset(
-        ds, dataset_format=DatasetFormat.CHAT, full_scan=False
-    )
+    analysis = analyze_training_dataset(ds, dataset_format=DatasetFormat.CHAT, full_scan=False)
     assert analysis["uses_full_dataset"] is False
     assert "cleaned_cache_key" not in analysis
 
@@ -186,15 +184,12 @@ def test_knowledge_retrieve_uses_inverted_index(tmp_path: Path):
     assert [h["text"] for h in hits2] == [h["text"] for h in hits]
 
 
-
 @pytest.mark.asyncio
 async def test_db_metadata_repo_lookup(tmp_path: Path):
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
 
-    db = Database(
-        tmp_path / "t.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "t.db", encryption_key=generate_encryption_key(), ephemeral=True)
     await db.add_model(
         user_id="u1",
         source="hf:mirror/other",

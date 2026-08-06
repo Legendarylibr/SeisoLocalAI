@@ -15,9 +15,7 @@ _NIP49_TEST_NCRYPTSEC = (
     "spw8gsq6yphnm8623nsl8xn9j4jdzz84zm3frztj3z7s35vpzmqf6ksu8r89qk5z2zxfmu5gv8th8wclt0h4p"
 )
 _NIP49_TEST_PASSWORD = "nostr"
-_NIP49_TEST_SECRET_HEX = (
-    "3501454135014541350145413501453fefb02227e449e57cf4d3a3ce05378683"
-)
+_NIP49_TEST_SECRET_HEX = "3501454135014541350145413501453fefb02227e449e57cf4d3a3ce05378683"
 
 
 def _mutate_log_n(ncryptsec: str, log_n: int) -> str:

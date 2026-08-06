@@ -41,9 +41,7 @@ def test_ensure_cu12_runtime_skips_without_nvidia(monkeypatch):
     from seiso import platform as plat
 
     monkeypatch.setattr(plat, "cu12_runtime_installed", lambda: False)
-    monkeypatch.setattr(
-        "seiso.security.nvidia_boundary.nvidia_smi_visible", lambda: False
-    )
+    monkeypatch.setattr("seiso.security.nvidia_boundary.nvidia_smi_visible", lambda: False)
     assert plat.ensure_cu12_runtime_packages(auto_install=True) is True
 
 

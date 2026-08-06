@@ -30,7 +30,9 @@ def _verify_checksum(hrp: str, data: list[int]) -> bool:
     return _polymod(_hrp_expand(hrp) + data) == 1
 
 
-def _convertbits(data: bytes | list[int], from_bits: int, to_bits: int, pad: bool = True) -> list[int]:
+def _convertbits(
+    data: bytes | list[int], from_bits: int, to_bits: int, pad: bool = True
+) -> list[int]:
     acc = 0
     bits = 0
     ret: list[int] = []

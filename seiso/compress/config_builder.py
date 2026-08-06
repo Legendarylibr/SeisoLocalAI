@@ -93,17 +93,13 @@ def build_pipeline_config(
     preset_name, preset = resolve_preset(PRESETS, str(payload.get("preset", "full")))
 
     config_blob: dict[str, Any] = {}
-    if path := resolve_config_file_path(
-        payload.get("config_file"), bundle_root=bundle_root()
-    ):
+    if path := resolve_config_file_path(payload.get("config_file"), bundle_root=bundle_root()):
         from seiso.codellama_compress.config import load_config_file
 
         config_blob = load_config_file(path)
         preset.update(config_blob.get("pipeline", {}))
 
-    stages = list(
-        payload.get("stages") or preset.get("stages") or PRESETS["smoke"]["stages"]
-    )
+    stages = list(payload.get("stages") or preset.get("stages") or PRESETS["smoke"]["stages"])
     validate_stages(stages, STAGE_ORDER)
     stages = sort_stages(stages, STAGE_ORDER)
 
@@ -164,8 +160,16 @@ def build_pipeline_config(
         ),
         "trust_remote_code": bool(payload.get("trust_remote_code", False)),
     }
-    for key in ("lr", "seq_len", "warmup_steps", "weight_decay", "grad_accum_steps",
-                "micro_batch_size", "max_grad_norm", "precision"):
+    for key in (
+        "lr",
+        "seq_len",
+        "warmup_steps",
+        "weight_decay",
+        "grad_accum_steps",
+        "micro_batch_size",
+        "max_grad_norm",
+        "precision",
+    ):
         if key in finetune_file and key not in payload:
             finetune_overrides[key] = finetune_file[key]
     finetune_cfg = merge_dataclass(
@@ -180,9 +184,7 @@ def build_pipeline_config(
             "calibration_samples",
             gptq_file.get(
                 "calibration_samples",
-                awq_file.get(
-                    "calibration_samples", preset.get("calibration_samples", 32)
-                ),
+                awq_file.get("calibration_samples", preset.get("calibration_samples", 32)),
             ),
         )
     )
@@ -239,8 +241,7 @@ def build_pipeline_config(
         "env_report": bool(
             payload.get(
                 "env_report",
-                preset_name not in {"smoke"}
-                and bool(payload.get("deterministic", True)),
+                preset_name not in {"smoke"} and bool(payload.get("deterministic", True)),
             )
         ),
         "min_free_gb": payload.get("min_free_gb"),

@@ -64,6 +64,7 @@ Inspect at runtime:
 
 ```python
 from seiso.kernels import kernel_metadata
+
 print(kernel_metadata())
 ```
 
@@ -139,5 +140,6 @@ Inspect at runtime:
 
 ```python
 from seiso.kernels.training_profile import last_cuda_training_profile
+
 print(last_cuda_training_profile())
 ```

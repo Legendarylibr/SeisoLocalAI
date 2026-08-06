@@ -84,11 +84,7 @@ def _quant_hints_from_name(name: str) -> list[str]:
 
 def _mmproj_candidates(parent: Path) -> list[Path]:
     return sorted(
-        (
-            item
-            for item in parent.glob("*.gguf")
-            if "mmproj" in item.name.lower()
-        ),
+        (item for item in parent.glob("*.gguf") if "mmproj" in item.name.lower()),
         key=lambda item: item.name,
     )
 
@@ -175,9 +171,7 @@ def build_llama_vision_chat_handler(model_path: str, mmproj_path: str) -> Any | 
                     exc,
                 )
                 warned = True
-            logger.debug(
-                "Vision handler %s failed for %s: %s", class_name, model_path, exc
-            )
+            logger.debug("Vision handler %s failed for %s: %s", class_name, model_path, exc)
 
     if last_exc is not None:
         logger.warning(
@@ -189,9 +183,7 @@ def build_llama_vision_chat_handler(model_path: str, mmproj_path: str) -> Any | 
     return None
 
 
-def apply_llama_vision_load_kwargs(
-    load_kwargs: dict[str, Any], model_path: str
-) -> dict[str, Any]:
+def apply_llama_vision_load_kwargs(load_kwargs: dict[str, Any], model_path: str) -> dict[str, Any]:
     """Attach a vision chat handler to llama.cpp load kwargs when appropriate."""
     mmproj = resolve_mmproj_path(model_path)
     if not mmproj:

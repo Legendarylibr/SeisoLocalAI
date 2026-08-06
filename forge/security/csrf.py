@@ -45,9 +45,7 @@ def set_csrf_cookie(response: Response, token: str, *, secure: bool) -> None:
 
 def clear_csrf_cookie(response: Response, *, secure: bool = False) -> None:
     # Must match set_csrf_cookie attributes or browsers keep Secure cookies.
-    response.delete_cookie(
-        CSRF_COOKIE, path="/", samesite="strict", secure=secure
-    )
+    response.delete_cookie(CSRF_COOKIE, path="/", samesite="strict", secure=secure)
 
 
 def validate_csrf(request: Request) -> bool:

@@ -17,9 +17,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_QUANTS = ("q4_k_m", "q8_0", "f16")
 
 # Direct HF→GGUF outtypes supported by the installed convert_hf_to_gguf.py.
-DIRECT_CONVERT_OUTTYPES = frozenset(
-    {"f32", "f16", "bf16", "q8_0", "tq1_0", "tq2_0", "auto"}
-)
+DIRECT_CONVERT_OUTTYPES = frozenset({"f32", "f16", "bf16", "q8_0", "tq1_0", "tq2_0", "auto"})
 
 # K-quants produced via llama-quantize from an intermediate F16 GGUF.
 LLAMA_QUANTIZE_TYPES: dict[str, str] = {
@@ -107,9 +105,7 @@ def normalize_gguf_quants(quantizations: list[str] | tuple[str, ...]) -> list[st
     for label in quantizations:
         quant = normalize_gguf_quant(label)
         if quant not in SUPPORTED_GGUF_QUANTS:
-            logger.warning(
-                "Unknown GGUF quant %r — using as-is (may fail at convert time)", label
-            )
+            logger.warning("Unknown GGUF quant %r — using as-is (may fail at convert time)", label)
         if quant not in seen:
             seen.add(quant)
             out.append(quant)
@@ -253,9 +249,7 @@ def _convert_hf_dir_direct(
     for prefix in converters:
         cmd = [*prefix, str(source), "--outfile", str(dest), "--outtype", outtype]
         try:
-            subprocess.run(
-                cmd, check=True, capture_output=True, text=True, timeout=7200
-            )
+            subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=7200)
             if dest.exists() and dest.stat().st_size > 0:
                 log(f"GGUF written: {dest} ({outtype})")
                 return True
@@ -347,9 +341,7 @@ def _export_quants(
     try:
         # Ensure shared F16 intermediate once when any quant needs it.
         needs_f16 = any(
-            q == "f16"
-            or q in LLAMA_QUANTIZE_TYPES
-            or q not in DIRECT_CONVERT_OUTTYPES
+            q == "f16" or q in LLAMA_QUANTIZE_TYPES or q not in DIRECT_CONVERT_OUTTYPES
             for q in quantizations
         )
         f16_path = ensure_f16_source() if needs_f16 else None
@@ -365,9 +357,7 @@ def _export_quants(
                 return None
 
             if quant in LLAMA_QUANTIZE_TYPES or quant not in DIRECT_CONVERT_OUTTYPES:
-                if f16_path is not None and quantize_gguf_file(
-                    f16_path, gguf_path, quant, log
-                ):
+                if f16_path is not None and quantize_gguf_file(f16_path, gguf_path, quant, log):
                     return quant, quant_dir, gguf_path
                 return None
 

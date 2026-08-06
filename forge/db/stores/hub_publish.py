@@ -11,6 +11,7 @@ from forge.db.stores.constants import _HUB_PUBLISH_LIST_COLUMNS, column_list, no
 
 class HubPublishMixin:
     if TYPE_CHECKING:
+
         def _enc(self, value: str) -> str: ...
 
         def _decrypt_row(self, table: str, row: dict[str, Any]) -> dict[str, Any]: ...

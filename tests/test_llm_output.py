@@ -28,10 +28,7 @@ def test_sanitize_llm_output_strips_when_requested():
 
 
 def test_sanitize_llm_output_strips_redacted_thinking():
-    raw = (
-        "<think> Okay, the user said hey. </think> "
-        "Hey! How can I help you today?"
-    )
+    raw = "<think> Okay, the user said hey. </think> Hey! How can I help you today?"
     assert sanitize_llm_output(raw, strip_tool_calls=True) == "Hey! How can I help you today?"
 
 
@@ -91,9 +88,7 @@ def test_streaming_output_sanitizer_preserves_reasoning_header():
 
 def test_streaming_output_sanitizer_preserves_thinking_process():
     guard = StreamingOutputSanitizer(strip_tool_calls=True)
-    assert guard.feed("Thinking Process: 1. **Analyze") == [
-        "Thinking Process: 1. **Analyze"
-    ]
+    assert guard.feed("Thinking Process: 1. **Analyze") == ["Thinking Process: 1. **Analyze"]
     assert guard.finish() == []
     final = sanitize_llm_output(
         'Thinking Process: 6. **Final Decision:** "Yo!"',

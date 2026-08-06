@@ -78,9 +78,7 @@ def build_preference_bundle(
     if verifiable_outcome_rewards:
         grounded = [p for p in prompts if is_verifiable_prompt(p)]
         floor = (
-            GROUNDED_LIBRARY_FLOOR
-            if min_grounded_prompts is None
-            else int(min_grounded_prompts)
+            GROUNDED_LIBRARY_FLOOR if min_grounded_prompts is None else int(min_grounded_prompts)
         )
         if len(grounded) < floor:
             raise ValueError(
@@ -140,9 +138,7 @@ def build_preference_bundle(
     all_rows = train_rows + val_rows
     if all_rows:
         verifiable_n = sum(
-            1
-            for row in all_rows
-            if _is_grounded_reward_source(row.get("reward_source"))
+            1 for row in all_rows if _is_grounded_reward_source(row.get("reward_source"))
         )
         teacher_style_n = len(all_rows) - verifiable_n
         if teacher_style_n > verifiable_n:
@@ -229,10 +225,7 @@ def materialize_data_designer_prompt_library(
     out_path = output_dir / "data_designer_prompts.jsonl"
     tiny = allow_tiny_rl(preset=preset)
     if on_log:
-        on_log(
-            f"Materializing Distill-RL prompts via shared Data Designer path "
-            f"(count={count})"
-        )
+        on_log(f"Materializing Distill-RL prompts via shared Data Designer path (count={count})")
     materialize_grounded_corpus(
         out_path,
         SynthRequest(

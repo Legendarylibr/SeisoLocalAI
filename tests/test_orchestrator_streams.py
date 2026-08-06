@@ -73,9 +73,7 @@ async def test_metric_stream_removes_subscriber_after_finished_job(tmp_path):
     orchestrator._emit_metric(job_id, {"loss": 1.0})
     orchestrator.get_job(job_id).status = JobStatus.COMPLETED  # type: ignore[union-attr]
 
-    assert [point async for point in orchestrator.stream_metrics(job_id)] == [
-        {"loss": 1.0}
-    ]
+    assert [point async for point in orchestrator.stream_metrics(job_id)] == [{"loss": 1.0}]
     assert len(orchestrator._metric_subscribers[job_id]) == 0
 
 
@@ -131,9 +129,7 @@ async def test_live_only_stream_skips_buffer_replay(tmp_path):
     orchestrator._emit_log(job_id, "persisted")
     orchestrator.get_job(job_id).status = JobStatus.COMPLETED  # type: ignore[union-attr]
 
-    assert [
-        line async for line in orchestrator.stream_logs(job_id, replay_buffer=False)
-    ] == []
+    assert [line async for line in orchestrator.stream_logs(job_id, replay_buffer=False)] == []
 
 
 @pytest.mark.asyncio

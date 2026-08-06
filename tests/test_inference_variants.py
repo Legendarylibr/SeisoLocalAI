@@ -12,19 +12,11 @@ from forge.services.inference_variants import (
 
 
 def test_extract_quant_label_from_filename():
-    assert (
-        extract_quant_label(name="model-Q4_K_M.gguf", path="model-Q4_K_M.gguf")
-        == "Q4_K_M"
-    )
+    assert extract_quant_label(name="model-Q4_K_M.gguf", path="model-Q4_K_M.gguf") == "Q4_K_M"
     assert extract_quant_label(name="model", path="weights-IQ4_XS.gguf") == "IQ4_XS"
+    assert extract_quant_label(name="model", path="model-Q4_K_XL.gguf") == "Q4_K_XL"
     assert (
-        extract_quant_label(name="model", path="model-Q4_K_XL.gguf")
-        == "Q4_K_XL"
-    )
-    assert (
-        extract_quant_label(
-            name="model", path="model-q8_0.gguf", metadata={"quant": "Q8_0"}
-        )
+        extract_quant_label(name="model", path="model-q8_0.gguf", metadata={"quant": "Q8_0"})
         == "Q8_0"
     )
 
@@ -101,6 +93,5 @@ async def test_get_model_variants_groups_local_quants(monkeypatch):
     assert len(variants["local_variants"]) == 2
     assert variants["local_variants"][0]["selected"] is True
     assert any(
-        row["quant"] == "Q3_K_M" and not row["downloaded"]
-        for row in variants["hub_variants"]
+        row["quant"] == "Q3_K_M" and not row["downloaded"] for row in variants["hub_variants"]
     )

@@ -175,9 +175,7 @@ def build_data_designer_columns(
     import data_designer.config as dd
 
     # LLM authors numeric/choice only. Code weight is redistributed (no code_corpus).
-    llm_streams = {
-        k: v for k, v in stream_mix.items() if k in {"numeric", "choice"} and v > 0
-    }
+    llm_streams = {k: v for k, v in stream_mix.items() if k in {"numeric", "choice"} and v > 0}
     code_w = float(stream_mix.get("code", 0) or 0)
     if code_w > 0:
         logger.warning(
@@ -472,9 +470,7 @@ def materialize_for_slime_config(
         )
     model = str(getattr(config, "vllm_model", "") or "").strip() or config.model_id
     api_key = str(getattr(config, "vllm_api_key", "EMPTY") or "EMPTY")
-    seed = int(
-        config.data_gen_seed if config.data_gen_seed is not None else config.seed
-    )
+    seed = int(config.data_gen_seed if config.data_gen_seed is not None else config.seed)
     artifact_dir = config.output_dir / "data_designer_artifacts"
     cfg = DataDesignerGenConfig(
         count=count,

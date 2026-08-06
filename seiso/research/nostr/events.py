@@ -116,9 +116,7 @@ def verify_event(event: dict[str, Any]) -> bool:
         )
         if expected != event_id:
             return False
-        return verify_schnorr(
-            bytes.fromhex(pubkey), bytes.fromhex(event_id), bytes.fromhex(sig)
-        )
+        return verify_schnorr(bytes.fromhex(pubkey), bytes.fromhex(event_id), bytes.fromhex(sig))
     except Exception:
         return False
 

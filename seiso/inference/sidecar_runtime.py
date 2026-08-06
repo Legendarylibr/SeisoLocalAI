@@ -67,9 +67,7 @@ def ollama_health_ok(*, url: str | None = None) -> bool:
     target = urllib.parse.urljoin(f"{(url or ollama_url()).rstrip('/')}/", "api/tags")
     req = urllib.request.Request(target, method="GET")
     try:
-        with urllib.request.urlopen(
-            req, timeout=_ollama_health_timeout_s()
-        ) as response:
+        with urllib.request.urlopen(req, timeout=_ollama_health_timeout_s()) as response:
             return 200 <= int(getattr(response, "status", 200)) < 300
     except (OSError, urllib.error.URLError, TimeoutError):
         return False
@@ -106,9 +104,7 @@ def sidecar_enabled() -> bool:
     if "SEISO_LLAMASWAP_ENABLED" in os.environ:
         return env_bool("SEISO_LLAMASWAP_ENABLED", False)
     return bool(
-        os.environ.get("SEISO_LLAMASWAP_URL")
-        or shutil.which("llama-swap")
-        or ollama_health_ok()
+        os.environ.get("SEISO_LLAMASWAP_URL") or shutil.which("llama-swap") or ollama_health_ok()
     )
 
 
@@ -156,9 +152,7 @@ def llamaswap_health_ok(*, url: str | None = None) -> bool:
     target = urllib.parse.urljoin(f"{(url or llamaswap_url()).rstrip('/')}/", "health")
     req = urllib.request.Request(target, method="GET")
     try:
-        with urllib.request.urlopen(
-            req, timeout=_llamaswap_health_timeout_s()
-        ) as response:
+        with urllib.request.urlopen(req, timeout=_llamaswap_health_timeout_s()) as response:
             return 200 <= int(getattr(response, "status", 200)) < 300
     except (OSError, urllib.error.URLError, TimeoutError):
         return False

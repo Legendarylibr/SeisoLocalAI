@@ -193,9 +193,7 @@ def infer_lora_target_modules(model) -> list[str]:
         return targets
 
     generic = sorted(
-        suffix
-        for suffix in suffixes
-        if suffix.endswith(("proj", "dense", "linear", "fc"))
+        suffix for suffix in suffixes if suffix.endswith(("proj", "dense", "linear", "fc"))
     )
     return generic
 
@@ -211,9 +209,7 @@ def has_multimodal_language_model_backbone(model) -> bool:
         with suppress(Exception):
             module_names = [name for name, _ in model.named_parameters()]
 
-    has_language_model = any(
-        _LANGUAGE_MODEL_MARKER in name.split(".") for name in module_names
-    )
+    has_language_model = any(_LANGUAGE_MODEL_MARKER in name.split(".") for name in module_names)
     has_multimodal_backbone = any(
         any(part in _MULTIMODAL_BACKBONE_MARKERS for part in name.split("."))
         for name in module_names
@@ -276,9 +272,7 @@ def resolve_lora_target_modules(
     )
 
 
-def modules_exist_in_model(
-    model, target_modules: list[str] | str
-) -> list[str] | str:
+def modules_exist_in_model(model, target_modules: list[str] | str) -> list[str] | str:
     """Filter target modules to those actually present in the model."""
     if isinstance(target_modules, str):
         try:

@@ -138,9 +138,7 @@ def test_replay_manifest_from_bundled_package(tmp_path: Path):
         effective_config=effective,
         stage="distill",
     )
-    append_artifact_record(
-        run_dir, stage="distill", artifact_path=artifact, role="output"
-    )
+    append_artifact_record(run_dir, stage="distill", artifact_path=artifact, role="output")
 
     ok = verify_manifest(run_dir)
     assert ok["ok"] is True
@@ -181,12 +179,14 @@ def test_run_smoke_pipeline(tmp_path: Path):
     manifest = result.get("manifest") or {}
     assert manifest.get("ok") is True
 
+
 def test_forge_pipeline_defaults_are_product_presets():
     from forge.api.routes.compress import CompressStartRequest
     from forge.api.routes.distill_rl import DistillRLStartRequest
 
     assert DistillRLStartRequest().preset == "reproducible"
     assert CompressStartRequest().preset == "full"
+
 
 def test_compress_refuses_lora_only_model_dir(tmp_path: Path):
     lora = tmp_path / "adapter"
@@ -201,4 +201,3 @@ def test_compress_refuses_lora_only_model_dir(tmp_path: Path):
     }
     with pytest.raises(ValueError, match="LoRA adapter only"):
         _resolve_model_dir(cfg, tmp_path / "run", "prune")
-

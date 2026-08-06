@@ -48,8 +48,6 @@ class TtlCache(Generic[K, V]):
             self._data.clear()
 
     def _purge_expired(self, now: float) -> None:
-        expired = [
-            key for key, (ts, _) in self._data.items() if now - ts >= self._ttl_s
-        ]
+        expired = [key for key, (ts, _) in self._data.items() if now - ts >= self._ttl_s]
         for key in expired:
             del self._data[key]

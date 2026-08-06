@@ -187,5 +187,3 @@ def llama_offload_fits_headroom(
         free_mb=headroom_mb,
     )
     return gpu_weight_mb + kv_mb <= headroom_mb
-
-

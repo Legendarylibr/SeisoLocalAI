@@ -89,9 +89,7 @@ def test_maybe_materialize_data_gen_rewrites_dataset(tmp_path: Path, monkeypatch
         require_held_out_eval=False,
     )
     cfg.validate()
-    dist = _DistributedSlimeContext(
-        enabled=False, world_size=1, rank=0, local_rank=0, device="cpu"
-    )
+    dist = _DistributedSlimeContext(enabled=False, world_size=1, rank=0, local_rank=0, device="cpu")
     fake = DataGenResult(
         rows=[{"prompt": "x", "label": "1"} for _ in range(24)],
         stream_counts={"numeric": 24},

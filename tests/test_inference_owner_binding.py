@@ -156,9 +156,7 @@ async def test_login_omits_access_token_unless_opted_in(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_legacy_unbound_inference_key_binds_on_first_compat_use(
-    tmp_path, monkeypatch
-):
+async def test_legacy_unbound_inference_key_binds_on_first_compat_use(tmp_path, monkeypatch):
     """Pre-binding installs: first valid /v1 call binds key to sole owner npub."""
     monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SEISO_SECRET_KEY", "test-secret-key-for-jwt-signing-32b")

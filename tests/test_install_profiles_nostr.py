@@ -65,11 +65,11 @@ def test_install_profiles_all_include_forge():
     common = _common_sh()
     # Every named profile / auto OS path must pull [forge] so Nostr relay deps install.
     for needle in (
-        'printf \'%s\\n\' "forge,train,cuda,llamacpp"',
-        'printf \'%s\\n\' "forge,train,llamacpp"',
-        'printf \'%s\\n\' "forge,train,llamacpp,mlx"',
-        'printf \'%s\\n\' "forge,llamacpp,mlx"',
-        'printf \'%s\\n\' "forge,llamacpp"',
+        "printf '%s\\n' \"forge,train,cuda,llamacpp\"",
+        "printf '%s\\n' \"forge,train,llamacpp\"",
+        "printf '%s\\n' \"forge,train,llamacpp,mlx\"",
+        "printf '%s\\n' \"forge,llamacpp,mlx\"",
+        "printf '%s\\n' \"forge,llamacpp\"",
         'extras="forge,train,llamacpp,mlx"',
         'extras="forge,train,cuda,llamacpp"',
         'extras="forge,train,llamacpp"',
@@ -172,7 +172,7 @@ def test_ui_pkg_manager_linux_prefers_npm_macos_prefers_bun():
     assert "seiso_run_with_timeout" in common
     assert "SEISO_BUN_INSTALL_TIMEOUT_SEC" in common
     assert "status" in common and "124" in common
-    assert 'export SEISO_USE_NPM=1' in common
+    assert "export SEISO_USE_NPM=1" in common
     assert re.search(
         r"seiso_ui_install_deps\(\)[\s\S]*?"
         r"bun install --frozen-lockfile[\s\S]*?"

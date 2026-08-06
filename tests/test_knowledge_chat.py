@@ -103,6 +103,7 @@ def test_format_knowledge_context_uses_unique_nonce_per_call():
     assert a != b
     assert "[KB_REFERENCE id=" in a and "[KB_REFERENCE id=" in b
 
+
 def test_knowledge_upload_refuses_symlink_destination(tmp_path: Path):
     import asyncio
 
@@ -139,6 +140,7 @@ def test_knowledge_upload_refuses_symlink_destination(tmp_path: Path):
     assert victim.read_text(encoding="utf-8") == "secret"
     assert dest.is_symlink()
 
+
 def test_knowledge_retrieve_skips_corrupt_jsonl_lines(tmp_path: Path):
     from forge.services.knowledge_context import (
         count_knowledge_chunks,
@@ -170,6 +172,7 @@ def test_knowledge_retrieve_skips_corrupt_jsonl_lines(tmp_path: Path):
     assert hits[0]["id"] == "a"
     # Quarantined / corrupt rows must not inflate the Studio chunk count.
     assert count_knowledge_chunks(tmp_path, user_id=user, knowledge_base_id=kb) == 1
+
 
 def test_knowledge_ingest_rewrites_index_atomically(tmp_path: Path):
     import asyncio
@@ -211,6 +214,7 @@ def test_knowledge_ingest_rewrites_index_atomically(tmp_path: Path):
     assert "hello world from knowledge ingest" in text
     assert not any(kb_dir.glob(".index-*.tmp"))
 
+
 def test_knowledge_retrieve_cache_busts_on_index_change(tmp_path: Path):
     from forge.services.knowledge_context import retrieve_knowledge_chunks
     from seiso.security import safe_join
@@ -237,4 +241,3 @@ def test_knowledge_retrieve_cache_busts_on_index_change(tmp_path: Path):
     )
     # Query no longer matches new corpus — must not return stale first hit.
     assert second == []
-

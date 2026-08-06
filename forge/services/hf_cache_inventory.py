@@ -131,10 +131,7 @@ def _latest_snapshot_dirs(repo_cache_dir: Path) -> list[Path]:
             snapshots.append((path.stat().st_mtime, path))
         except OSError:
             continue
-    return [
-        path
-        for _mtime, path in sorted(snapshots, key=lambda item: item[0], reverse=True)
-    ]
+    return [path for _mtime, path in sorted(snapshots, key=lambda item: item[0], reverse=True)]
 
 
 def _gguf_inventory_source(inventory_repo: str, filenames: list[str], *, canonical: bool) -> str:
@@ -192,9 +189,7 @@ def _gguf_records_from_snapshot(
             target,
         )
         size_bytes = sum(path.stat().st_size for path in paths)
-        quant = extract_quant_label_from_text(filenames[0]) or (
-            entry.quant if entry else None
-        )
+        quant = extract_quant_label_from_text(filenames[0]) or (entry.quant if entry else None)
         metadata: dict[str, Any] = {
             "repo_id": inventory_repo,
             "cache_dir": str(hf_cache_dir),
@@ -210,13 +205,9 @@ def _gguf_records_from_snapshot(
         # historical hf:repo source so download/cache lookups stay stable.
         records.append(
             {
-                "source": _gguf_inventory_source(
-                    inventory_repo, filenames, canonical=index == 0
-                ),
+                "source": _gguf_inventory_source(inventory_repo, filenames, canonical=index == 0),
                 "name": (
-                    target.name
-                    if target.is_file()
-                    else _display_name_for_shards(filenames[0])
+                    target.name if target.is_file() else _display_name_for_shards(filenames[0])
                 ),
                 "path": str(link.absolute()),
                 "format": "gguf",

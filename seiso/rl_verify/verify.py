@@ -81,8 +81,7 @@ def resolve_checker(
         if key in aliases:
             return aliases[key]
         raise ValueError(
-            f"unknown checker {name!r}; expected one of: "
-            f"{', '.join(sorted(set(aliases)))}"
+            f"unknown checker {name!r}; expected one of: {', '.join(sorted(set(aliases)))}"
         )
     bench = (benchmark or "").strip().lower()
     if bench in {"gsm8k", "aime", "math", "numeric"}:
@@ -124,12 +123,8 @@ def verify_outcome(
             if resolved == "auto":
                 if answer is None or not str(answer).strip():
                     return 0.0, "exact_match", ""
-                text_probe = (
-                    final_answer_text(completion) if prefer_final_answer else completion
-                )
-                if last_number(str(answer)) is not None and last_number(
-                    text_probe
-                ) is not None:
+                text_probe = final_answer_text(completion) if prefer_final_answer else completion
+                if last_number(str(answer)) is not None and last_number(text_probe) is not None:
                     resolved = "numeric"
                 else:
                     resolved = "exact_match"
@@ -157,9 +152,7 @@ def verify_outcome(
     if answer is None or not str(answer).strip():
         return 0.0, resolved if resolved != "auto" else "exact_match", ""
 
-    text_for_outcome = (
-        final_answer_text(completion) if prefer_final_answer else completion
-    )
+    text_for_outcome = final_answer_text(completion) if prefer_final_answer else completion
     expected = str(answer).strip()
 
     if resolved == "numeric":
@@ -260,10 +253,7 @@ def resolve_code_reward_mode(mode: str | None) -> str:
         return "dense"
     if key in {"auto", "curriculum"}:
         return "auto"
-    raise ValueError(
-        f"unknown code_reward_mode {mode!r}; expected one of: "
-        "binary, dense, auto"
-    )
+    raise ValueError(f"unknown code_reward_mode {mode!r}; expected one of: binary, dense, auto")
 
 
 def code_outcome_value(
@@ -367,24 +357,13 @@ def score_completion(
             min_thinking_tokens=min_thinking_tokens,
         )
 
-    penalty = (
-        missing_format_penalty
-        if require_thinking_trace and not format_ok
-        else 0.0
-    )
+    penalty = missing_format_penalty if require_thinking_trace and not format_ok else 0.0
     reward = (
-        outcome_weight * outcome
-        + format_weight * format_score
-        + process_weight * process
-        - penalty
+        outcome_weight * outcome + format_weight * format_score + process_weight * process - penalty
     )
     # Code: passed iff all unit tests pass (outcome already binary).
     # Text/math: binary (or dense field) threshold.
-    passed = (
-        bool(proof_passed)
-        if use_code and proof_passed is not None
-        else outcome > 0.5
-    )
+    passed = bool(proof_passed) if use_code and proof_passed is not None else outcome > 0.5
     detail = None
     if use_code and proof_detail is not None:
         detail = proof_detail

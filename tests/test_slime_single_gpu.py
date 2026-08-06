@@ -37,7 +37,6 @@ from seiso.slime.trainer import (
     _filter_rollout_groups,
     _final_output_dir,
     _flush_accumulated_gradients,
-    _format_rollout_prompt,
     _freeze_multimodal_backbones,
     _group_reward_spread_mean,
     _group_verifier_stats,
@@ -1349,6 +1348,7 @@ def test_response_mask_drops_pad_when_pad_differs_from_eos():
     )
     assert mask.tolist() == [False, False, True, True, False, False]
 
+
 def test_smoke_slime_max_steps_projects_via_train_config(monkeypatch):
     monkeypatch.setenv("SEISO_ALLOW_TINY_RL", "1")
     from seiso.training.config import TrainConfig
@@ -1357,6 +1357,7 @@ def test_smoke_slime_max_steps_projects_via_train_config(monkeypatch):
     assert cfg.max_steps == 1
     slime = cfg.to_single_gpu_slime_config()
     assert slime.max_steps == 1
+
 
 def test_slime_distributed_context_ignores_stale_world_size(monkeypatch):
     monkeypatch.setenv("WORLD_SIZE", "8")
@@ -1396,6 +1397,7 @@ def test_slime_distributed_context_ignores_stale_world_size(monkeypatch):
     ctx = _distributed_context(_Torch(), cfg)
     assert ctx.enabled is False
     assert ctx.world_size == 1
+
 
 def test_slime_manifest_uses_runtime_world_size(monkeypatch, tmp_path: Path):
     for key in (
@@ -1442,6 +1444,7 @@ def test_slime_manifest_uses_runtime_world_size(monkeypatch, tmp_path: Path):
     payload = json.loads((tmp_path / "seiso_manifest.json").read_text(encoding="utf-8"))
     assert payload["post_training_algorithm"] == "distributed_slime_grpo"
 
+
 def test_broadcast_vllm_full_resumes_after_update_failure(monkeypatch):
     from seiso.slime import rollout_sync
     from seiso.slime.config import SingleGpuSlimeConfig
@@ -1482,6 +1485,7 @@ def test_broadcast_vllm_full_resumes_after_update_failure(monkeypatch):
         rollout_sync._broadcast_vllm_full(cfg, model_path="/tmp/w", weight_version="v1")
     assert events == ["pause", "update", "resume"]
 
+
 def test_keep_rollout_group_uses_sample_std():
     """Filter std must match GRPO advantage unbiased std (n-1)."""
     from seiso.slime.config import SingleGpuSlimeConfig
@@ -1512,6 +1516,7 @@ def test_keep_rollout_group_uses_sample_std():
 
     assert _keep_rollout_group([_r(0.0), _r(1.0)], cfg) is True
 
+
 def test_slime_multi_epoch_auto_kl(monkeypatch, tmp_path: Path):
     monkeypatch.delenv("SEISO_SLIME_ALLOW_ZERO_KL", raising=False)
     cfg = SingleGpuSlimeConfig(
@@ -1524,6 +1529,7 @@ def test_slime_multi_epoch_auto_kl(monkeypatch, tmp_path: Path):
     cfg.validate()
     assert cfg.kl_coef == pytest.approx(0.02)
 
+
 def test_slime_allow_zero_kl_env(monkeypatch, tmp_path: Path):
     monkeypatch.setenv("SEISO_SLIME_ALLOW_ZERO_KL", "1")
     cfg = SingleGpuSlimeConfig(
@@ -1535,6 +1541,7 @@ def test_slime_allow_zero_kl_env(monkeypatch, tmp_path: Path):
     )
     cfg.validate()
     assert cfg.kl_coef == 0.0
+
 
 def test_slime_rejects_weight_dir_path_escape(tmp_path: Path):
     cfg = SingleGpuSlimeConfig(

@@ -21,9 +21,7 @@ logger = logging.getLogger(__name__)
 _DOMAIN_LABELS: dict[str, str] = {
     "instruction_tuning": "Instruction tuning (prompt → completion pairs)",
     "conversational": "Multi-turn conversational supervision",
-    "preference_pairs": (
-        "Preference pairs (use Distill-RL DPO; not SFT unless preference_as_sft)"
-    ),
+    "preference_pairs": ("Preference pairs (use Distill-RL DPO; not SFT unless preference_as_sft)"),
     "preference_chosen_sft": (
         "Chosen-response SFT (explicit preference_as_sft; rejected discarded — not DPO)"
     ),
@@ -48,9 +46,7 @@ _CODE_COLUMNS = frozenset(
         "lang",
     }
 )
-_MATH_COLUMNS = frozenset(
-    {"question", "answer", "query", "response", "solution", "problem"}
-)
+_MATH_COLUMNS = frozenset({"question", "answer", "query", "response", "solution", "problem"})
 
 
 def _stratified_indices(n: int, *, max_samples: int = 48, seed: int = 42) -> list[int]:
@@ -176,9 +172,7 @@ def _recommend_train_on_responses(fmt: DatasetFormat, domain: str) -> bool:
     return not (fmt == DatasetFormat.TEXT or domain == "code_pretraining")
 
 
-def _preview_rows(
-    rows: list[dict[str, Any]], *, limit: int = 3
-) -> list[dict[str, Any]]:
+def _preview_rows(rows: list[dict[str, Any]], *, limit: int = 3) -> list[dict[str, Any]]:
     preview: list[dict[str, Any]] = []
     for row in rows[:limit]:
         clipped: dict[str, Any] = {}
@@ -367,8 +361,7 @@ def _analyze_sampled(
 
     if not cleaned_rows:
         raise ValueError(
-            "Dataset sample has no trainable rows after normalization "
-            f"(format={fmt.value})"
+            f"Dataset sample has no trainable rows after normalization (format={fmt.value})"
         )
 
     sample_n = max(1, len(schema_samples))
@@ -479,9 +472,7 @@ def analyze_training_dataset(
             dataset_format=dataset_format,
         )
 
-    effective_fmt = (
-        inferred_fmt if dataset_format == DatasetFormat.AUTO else dataset_format
-    )
+    effective_fmt = inferred_fmt if dataset_format == DatasetFormat.AUTO else dataset_format
     # Preference pairs: analyze chosen-side structure with an explicit opt-in for
     # stats only. Do not cache cleaned rows — SFT train must refuse without
     # preference_as_sft (real alignment is Distill-RL/DPO).

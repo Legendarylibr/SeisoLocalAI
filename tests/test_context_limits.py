@@ -24,14 +24,8 @@ def test_hf_config_context_length_reads_max_position(tmp_path: Path):
 
 
 def test_resolve_model_context_ceiling_from_name():
-    assert (
-        resolve_model_context_ceiling("/models/foo-32k.gguf", model_format="gguf")
-        == 32768
-    )
-    assert (
-        resolve_model_context_ceiling("/models/foo.gguf", model_name="Llama-3.1-128k")
-        == 131072
-    )
+    assert resolve_model_context_ceiling("/models/foo-32k.gguf", model_format="gguf") == 32768
+    assert resolve_model_context_ceiling("/models/foo.gguf", model_name="Llama-3.1-128k") == 131072
 
 
 def test_resolve_model_context_ceiling_defaults_unknown():

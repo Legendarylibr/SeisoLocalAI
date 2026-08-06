@@ -252,9 +252,7 @@ async def build_trusted_messages(
             for m in stored
             if m.get("role") in ("user", "assistant")
         ]
-        model_changed = bool(
-            track_model and (thread.get("model_id") or None) != track_model
-        )
+        model_changed = bool(track_model and (thread.get("model_id") or None) != track_model)
         need_persist = (
             not history or history[-1]["role"] != "user" or history[-1]["content"] != content
         )

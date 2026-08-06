@@ -29,8 +29,7 @@ def nemo_rl(
         cfg = NeMoRLConfig.from_yaml(path)
 
     console.print(
-        f"NeMo RL [cyan]{cfg.recipe}[/] model=[cyan]{cfg.model_id}[/] "
-        f"(external NVIDIA-NeMo/RL)"
+        f"NeMo RL [cyan]{cfg.recipe}[/] model=[cyan]{cfg.model_id}[/] (external NVIDIA-NeMo/RL)"
     )
     with gpu_task("nemo_rl"):
         out = train_nemo_rl(cfg)

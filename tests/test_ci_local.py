@@ -20,9 +20,7 @@ def test_baseline_ignores_location_changes(tmp_path):
     run_ci_local._baseline_check(
         label="mypy",
         baseline_path=baseline,
-        current_lines=[
-            "seiso/example.py:99:8: error: Bad value  [arg-type]"
-        ],
+        current_lines=["seiso/example.py:99:8: error: Bad value  [arg-type]"],
         update_baseline=False,
     )
 
@@ -56,9 +54,7 @@ def test_baseline_normalizes_windows_path_separators(tmp_path):
     run_ci_local._baseline_check(
         label="mypy",
         baseline_path=baseline,
-        current_lines=[
-            "C:/repo/seiso/example.py:40: error: Bad value  [arg-type]"
-        ],
+        current_lines=["C:/repo/seiso/example.py:40: error: Bad value  [arg-type]"],
         update_baseline=False,
     )
 
@@ -67,9 +63,7 @@ def test_types_fails_when_mypy_crashes(monkeypatch, tmp_path):
     responses = iter(
         [
             subprocess.CompletedProcess([], 0, stdout="3.10\n", stderr=""),
-            subprocess.CompletedProcess(
-                [], 2, stdout="", stderr="mypy: internal error\n"
-            ),
+            subprocess.CompletedProcess([], 2, stdout="", stderr="mypy: internal error\n"),
         ]
     )
     monkeypatch.setattr(

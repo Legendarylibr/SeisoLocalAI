@@ -125,16 +125,13 @@ def _sandbox_config_path(config: str | None) -> str | None:
                 candidate = safe_join(configs_root, *parts)
             except SecurityError as exc:
                 raise ValueError(
-                    "config must be a relative path under configs/ "
-                    f"(rejected: {raw!r})"
+                    f"config must be a relative path under configs/ (rejected: {raw!r})"
                 ) from exc
             return str(candidate)
     try:
         resolved = assert_within(configs_root, candidate)
     except SecurityError as exc:
-        raise ValueError(
-            "config must resolve under configs/ " f"(rejected: {raw!r})"
-        ) from exc
+        raise ValueError(f"config must resolve under configs/ (rejected: {raw!r})") from exc
     if not resolved.is_file():
         raise ValueError(f"config not found under configs/: {raw}")
     return str(resolved)
@@ -194,9 +191,7 @@ def start_job(
 
 def _artifact_dir(job: dict[str, Any], data_dir: Path | None) -> Path:
     root = pay_root(data_dir)
-    path = safe_join(
-        root, "artifacts", str(job["session_id"]), str(job["job_id"])
-    )
+    path = safe_join(root, "artifacts", str(job["session_id"]), str(job["job_id"]))
     path.mkdir(parents=True, exist_ok=True)
     return path
 
@@ -221,9 +216,7 @@ def _cli_command(job: dict[str, Any], artifact: Path) -> list[str]:
 
     if jt == "nemo_rl":
         if not (os.environ.get("SEISO_NEMO_RL_ROOT") or "").strip():
-            raise RuntimeError(
-                "nemo_rl requires SEISO_NEMO_RL_ROOT on the operator host"
-            )
+            raise RuntimeError("nemo_rl requires SEISO_NEMO_RL_ROOT on the operator host")
         cfg = config or "configs/smoke_nemo_rl.yaml"
         return [py, "-m", "seiso_cli.main", "nemo-rl", "-c", cfg]
 
@@ -292,15 +285,11 @@ def _execute_job(job: dict[str, Any], *, data_dir: Path | None) -> dict[str, Any
         "artifact_dir": str(artifact),
         "quote": job.get("quote"),
     }
-    (artifact / "manifest.json").write_text(
-        json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
-    )
+    (artifact / "manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
     return _complete_job(job, data_dir=data_dir, dry_run=False)
 
 
-def _complete_job(
-    job: dict[str, Any], *, data_dir: Path | None, dry_run: bool
-) -> dict[str, Any]:
+def _complete_job(job: dict[str, Any], *, data_dir: Path | None, dry_run: bool) -> dict[str, Any]:
     fresh = _reload_job(job, data_dir)
     if _is_cancelled_or_refunded(fresh):
         return fresh
@@ -350,9 +339,7 @@ def _complete_job(
     job["settlement"] = receipt.as_dict()
     # Do not clear refunded_sats — a cancelled/refunded job must keep markers.
     if dry_run:
-        job["artifact_dir"] = job.get("artifact_dir") or str(
-            _artifact_dir(job, data_dir)
-        )
+        job["artifact_dir"] = job.get("artifact_dir") or str(_artifact_dir(job, data_dir))
         _append_log(job, "dry_run complete (no trainer invoked)", data_dir)
     save_job(job, data_dir)
     return job

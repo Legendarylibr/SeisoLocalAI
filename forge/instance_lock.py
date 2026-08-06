@@ -25,9 +25,7 @@ _WINDOWS_ADDR_IN_USE = frozenset({10048, 10049})
 class ForgeAlreadyRunningError(RuntimeError):
     """Raised when another Forge instance holds the port or data directory."""
 
-    def __init__(
-        self, message: str, *, url: str | None = None, pid: int | None = None
-    ) -> None:
+    def __init__(self, message: str, *, url: str | None = None, pid: int | None = None) -> None:
         super().__init__(message)
         self.url = url
         self.pid = pid
@@ -206,9 +204,7 @@ class _ExclusiveFileLock:
             if retry_stale and pid and not _pid_alive(pid):
                 os.close(fd)
                 path.unlink(missing_ok=True)
-                self._try_acquire(
-                    path, meta=meta, busy_factory=busy_factory, retry_stale=False
-                )
+                self._try_acquire(path, meta=meta, busy_factory=busy_factory, retry_stale=False)
                 return
             os.close(fd)
             raise busy_factory(existing) from exc
@@ -306,9 +302,7 @@ class ForgeInstanceLocks:
             self.port_lock = None
 
 
-def acquire_forge_instance_locks(
-    *, host: str, port: int, data_dir: Path
-) -> ForgeInstanceLocks:
+def acquire_forge_instance_locks(*, host: str, port: int, data_dir: Path) -> ForgeInstanceLocks:
     """Acquire port + data-dir locks for `seiso forge` — held until release()."""
     if multi_forge_allowed():
         return ForgeInstanceLocks()

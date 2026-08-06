@@ -120,9 +120,7 @@ def write_samples_jsonl(
         for prompt in prompts:
             inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
             with torch.inference_mode():
-                out = model.generate(
-                    **inputs, max_new_tokens=max_new_tokens, do_sample=False
-                )
+                out = model.generate(**inputs, max_new_tokens=max_new_tokens, do_sample=False)
             text = tokenizer.decode(out[0], skip_special_tokens=True)
             write(
                 {

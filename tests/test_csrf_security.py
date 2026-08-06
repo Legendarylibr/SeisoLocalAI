@@ -333,6 +333,7 @@ def test_jti_revocation_store_enforces_cap(monkeypatch):
     assert len(tr._revoked) <= 100
     tr.clear_revocations_for_tests()
 
+
 def test_csrf_empty_bearer_helper():
     from starlette.requests import Request
 
@@ -352,4 +353,3 @@ def test_csrf_empty_bearer_helper():
         "server": ("test", 80),
     }
     assert validate_csrf(Request(scope)) is False
-

@@ -105,9 +105,7 @@ def test_detect_backend_linux_nvidia_smi_without_cuda(monkeypatch):
 
     detect_backend.cache_clear()
     monkeypatch.setattr("seiso.models.loader.platform.system", lambda: "Linux")
-    monkeypatch.setattr(
-        "seiso.security.nvidia_boundary.nvidia_smi_visible", lambda: True
-    )
+    monkeypatch.setattr("seiso.security.nvidia_boundary.nvidia_smi_visible", lambda: True)
 
     import torch
 
@@ -121,9 +119,7 @@ def test_detect_backend_windows_nvidia_smi_without_cuda(monkeypatch):
 
     detect_backend.cache_clear()
     monkeypatch.setattr("seiso.models.loader.platform.system", lambda: "Windows")
-    monkeypatch.setattr(
-        "seiso.security.nvidia_boundary.nvidia_smi_visible", lambda: True
-    )
+    monkeypatch.setattr("seiso.security.nvidia_boundary.nvidia_smi_visible", lambda: True)
 
     import torch
 
@@ -170,9 +166,7 @@ def test_query_nvidia_gpus_cache(monkeypatch):
 
     def fake_probe(_exe: str | None = None) -> list[dict[str, object]]:
         calls["count"] += 1
-        return [
-            {"index": 0, "name": "NVIDIA GeForce RTX 4090", "memory_total_mb": 24564}
-        ]
+        return [{"index": 0, "name": "NVIDIA GeForce RTX 4090", "memory_total_mb": 24564}]
 
     clear_nvidia_gpu_query_cache()
     monkeypatch.setattr(
@@ -241,9 +235,7 @@ def test_format_catalog_note_shows_download_and_runtime():
     assert "Download ~19.7 GB" in note
     assert "Runtime ~2.9 GB est." in note
 
-    moe_est = estimate_gguf_download_bytes(
-        "35B", tags=("moe",), repo_id="Qwen/Qwen3.6-35B-A3B"
-    )
+    moe_est = estimate_gguf_download_bytes("35B", tags=("moe",), repo_id="Qwen/Qwen3.6-35B-A3B")
     # MoE artifacts contain every expert even though only A3B runs per token.
     assert 15 * 1024**3 < moe_est < 25 * 1024**3
 

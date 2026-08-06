@@ -32,10 +32,7 @@ class _Rows:
         assert kwargs.get("batched") is True
         batch = {key: [row[key] for row in self._rows] for key in self.column_names}
         mapped = fn(batch)
-        out = [
-            {key: value[i] for key, value in mapped.items()}
-            for i in range(len(self._rows))
-        ]
+        out = [{key: value[i] for key, value in mapped.items()} for i in range(len(self._rows))]
         return _Rows(out, column_names=list(mapped.keys()))
 
 
@@ -102,9 +99,7 @@ class _ChatTokenizer:
     def __call__(self, text, truncation=True, max_length=2048, padding=False):
         if isinstance(text, list):
             rows = [
-                self(
-                    item, truncation=truncation, max_length=max_length, padding=padding
-                )
+                self(item, truncation=truncation, max_length=max_length, padding=padding)
                 for item in text
             ]
             return {
@@ -312,9 +307,7 @@ def test_text_tokenization_uses_batched_map():
 
 def test_format_dataset_text_uses_batched_map_and_appends_eos():
     ds = _Rows([{"text": "hello"}, {"text": "already<eos>"}])
-    formatted, fmt = format_dataset_text(
-        ds, _ChatTokenizer(), DatasetFormat.TEXT, num_proc=2
-    )
+    formatted, fmt = format_dataset_text(ds, _ChatTokenizer(), DatasetFormat.TEXT, num_proc=2)
 
     assert fmt == DatasetFormat.TEXT
     assert ds.map_kwargs == {"batched": True, "num_proc": 2}
@@ -332,13 +325,8 @@ def test_format_dataset_text_uses_batched_map_and_appends_eos():
         (False, True, DatasetFormat.CHAT, False),
     ],
 )
-def test_should_disable_packing_for_response_mask(
-    packing, responses_only, fmt, expected
-):
-    assert (
-        should_disable_packing_for_response_mask(packing, responses_only, fmt)
-        is expected
-    )
+def test_should_disable_packing_for_response_mask(packing, responses_only, fmt, expected):
+    assert should_disable_packing_for_response_mask(packing, responses_only, fmt) is expected
 
 
 class _PlainTokenizer:
@@ -424,8 +412,8 @@ def test_ensure_eos_supervises_template_eos_when_mask_ignored_it():
     assert out_labels[-1] == 99
     assert out_labels[0] == -100
 
+
 def test_format_sample_uses_code_column():
     from seiso.training.datasets import DatasetFormat, format_sample
 
     assert format_sample({"code": "print(1)"}, DatasetFormat.TEXT, None) == "print(1)"
-

@@ -35,9 +35,7 @@ def protocol_fee_bps() -> int:
     try:
         bps = int(raw)
     except ValueError as exc:
-        raise ValueError(
-            f"SEISO_PROTOCOL_FEE_BPS must be an integer, got {raw!r}"
-        ) from exc
+        raise ValueError(f"SEISO_PROTOCOL_FEE_BPS must be an integer, got {raw!r}") from exc
     if bps < 0:
         raise ValueError("SEISO_PROTOCOL_FEE_BPS must be >= 0")
     override = _truthy(os.environ.get("SEISO_PROTOCOL_FEE_OVERRIDE"))
@@ -58,9 +56,7 @@ def operator_ark() -> str:
 
 
 def forge_base_url() -> str:
-    return (
-        os.environ.get("SEISO_FORGE_URL") or "http://127.0.0.1:8765"
-    ).rstrip("/")
+    return (os.environ.get("SEISO_FORGE_URL") or "http://127.0.0.1:8765").rstrip("/")
 
 
 def pay_settle_ready() -> tuple[bool, str]:

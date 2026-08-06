@@ -245,11 +245,7 @@ def ensure_load_fits(
             logger.warning("Memory overcommit allowed: %s", reason)
         else:
             raise MemoryLoadBlockedError(reason)
-    if (
-        mode == "chat"
-        and fit.get("memory_load_budget_exceeded")
-        and not llamacpp_backend
-    ):
+    if mode == "chat" and fit.get("memory_load_budget_exceeded") and not llamacpp_backend:
         est_gb = round(int(fit.get("est_vram_mb") or 0) / 1024, 1)
         reason = (
             f"Needs ~{est_gb:.1f} GB at runtime but free memory is low right now. "
@@ -257,4 +253,3 @@ def ensure_load_fits(
         )
         logger.warning("Inference memory preflight advisory: %s", reason)
     return fit
-

@@ -96,7 +96,9 @@ def recommend_pretraining_epochs(
         note = "Subset fits within one Chinchilla-optimal pass."
     else:
         recommended = min(3, epochs_for_chinchilla)
-        note = f"Chinchilla-optimal pass suggests up to {epochs_for_chinchilla} epochs on this subset."
+        note = (
+            f"Chinchilla-optimal pass suggests up to {epochs_for_chinchilla} epochs on this subset."
+        )
 
     return {
         "recommended_epochs": recommended,

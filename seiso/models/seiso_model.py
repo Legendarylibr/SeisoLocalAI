@@ -86,9 +86,7 @@ class SeisoModel:
             configured=target_modules,
         )
 
-        if use_gradient_checkpointing and hasattr(
-            model, "gradient_checkpointing_enable"
-        ):
+        if use_gradient_checkpointing and hasattr(model, "gradient_checkpointing_enable"):
             model.gradient_checkpointing_enable(
                 gradient_checkpointing_kwargs={"use_reentrant": False}
             )
@@ -137,9 +135,7 @@ class SeisoModel:
             model.config.use_cache = True
         return model
 
-    def export_merged(
-        self, save_directory: str | Path, *, safe_serialization: bool = True
-    ) -> Path:
+    def export_merged(self, save_directory: str | Path, *, safe_serialization: bool = True) -> Path:
         """Merge LoRA into base weights and write a Hugging Face checkpoint."""
         dest = Path(save_directory)
         dest.mkdir(parents=True, exist_ok=True)

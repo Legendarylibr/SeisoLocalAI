@@ -150,9 +150,7 @@ def load_policy_and_reference(
     if use_peft:
         from peft import get_peft_model
 
-        policy_model = get_peft_model(
-            base_model, _build_lora_config(settings, base_model)
-        )
+        policy_model = get_peft_model(base_model, _build_lora_config(settings, base_model))
         reference_model = None
         reference_uses_adapter_disable = True
     else:

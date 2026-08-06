@@ -247,9 +247,7 @@ def test_slime_data_gen_source_off_fails_loud(tmp_path: Path):
         require_held_out_eval=False,
         rollouts_per_prompt=2,
     )
-    dist = _DistributedSlimeContext(
-        enabled=False, world_size=1, rank=0, local_rank=0, device="cpu"
-    )
+    dist = _DistributedSlimeContext(enabled=False, world_size=1, rank=0, local_rank=0, device="cpu")
     with (
         patch("seiso.slime.trainer._distributed_barrier"),
         patch(
@@ -282,16 +280,12 @@ def test_slime_hf_dataset_alone_does_not_rewrite_dataset(tmp_path: Path):
         require_held_out_eval=False,
         rollouts_per_prompt=2,
     )
-    dist = _DistributedSlimeContext(
-        enabled=False, world_size=1, rank=0, local_rank=0, device="cpu"
-    )
+    dist = _DistributedSlimeContext(enabled=False, world_size=1, rank=0, local_rank=0, device="cpu")
     out = _maybe_materialize_data_gen(cfg, dist)
     assert out.dataset == train
 
 
-def test_slime_hf_dataset_alone_does_not_skip_held_out_gate(
-    tmp_path: Path, monkeypatch
-):
+def test_slime_hf_dataset_alone_does_not_skip_held_out_gate(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
     train = tmp_path / "train.jsonl"
     train.write_text("{}\n", encoding="utf-8")
@@ -308,9 +302,7 @@ def test_slime_hf_dataset_alone_does_not_skip_held_out_gate(
         cfg.validate()
 
 
-def test_slime_orphan_data_gen_count_does_not_skip_held_out_gate(
-    tmp_path: Path, monkeypatch
-):
+def test_slime_orphan_data_gen_count_does_not_skip_held_out_gate(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
     train = tmp_path / "train.jsonl"
     train.write_text("{}\n", encoding="utf-8")
@@ -328,9 +320,7 @@ def test_slime_orphan_data_gen_count_does_not_skip_held_out_gate(
         cfg.validate()
 
 
-def test_slime_auto_without_hf_or_dd_does_not_skip_held_out_gate(
-    tmp_path: Path, monkeypatch
-):
+def test_slime_auto_without_hf_or_dd_does_not_skip_held_out_gate(tmp_path: Path, monkeypatch):
     monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
     train = tmp_path / "train.jsonl"
     train.write_text("{}\n", encoding="utf-8")
@@ -349,9 +339,7 @@ def test_slime_auto_without_hf_or_dd_does_not_skip_held_out_gate(
         cfg.validate()
 
 
-def test_distill_rollout_min_grounded_honors_allow_tiny_env(
-    tmp_path: Path, monkeypatch
-):
+def test_distill_rollout_min_grounded_honors_allow_tiny_env(tmp_path: Path, monkeypatch):
     """SEISO_ALLOW_TINY_RL must lower preference floors, not only materialize."""
     monkeypatch.setenv("SEISO_ALLOW_TINY_RL", "1")
     from seiso.distill_rl.config import build_distill_rl_config
@@ -574,9 +562,7 @@ def test_slime_held_out_split_keeps_train_floor(tmp_path: Path, monkeypatch):
         require_held_out_eval=True,
         rollouts_per_prompt=2,
     )
-    dist = _DistributedSlimeContext(
-        enabled=False, world_size=1, rank=0, local_rank=0, device="cpu"
-    )
+    dist = _DistributedSlimeContext(enabled=False, world_size=1, rank=0, local_rank=0, device="cpu")
     rows = [
         {
             "prompt": [{"role": "user", "content": f"q{i}"}],
@@ -634,9 +620,7 @@ def test_slime_does_not_attach_stale_held_out(tmp_path: Path, monkeypatch):
         require_held_out_eval=False,
         rollouts_per_prompt=2,
     )
-    dist = _DistributedSlimeContext(
-        enabled=False, world_size=1, rank=0, local_rank=0, device="cpu"
-    )
+    dist = _DistributedSlimeContext(enabled=False, world_size=1, rank=0, local_rank=0, device="cpu")
     rows = [
         {
             "prompt": [{"role": "user", "content": f"q{i}"}],
@@ -764,9 +748,7 @@ def test_distill_grounded_cache_respects_fingerprint(tmp_path: Path, monkeypatch
     assert calls == ["materialize", "materialize"]
 
 
-def test_distill_grounded_cache_invalidates_when_tiny_allow_flips(
-    tmp_path: Path, monkeypatch
-):
+def test_distill_grounded_cache_invalidates_when_tiny_allow_flips(tmp_path: Path, monkeypatch):
     from seiso.distill_rl.config import build_distill_rl_config
     from seiso.distill_rl.grounded_data import materialize_distill_grounded_prompts
 
@@ -857,9 +839,7 @@ def test_slime_hf_materialize_auto_answer_field_not_default_label(tmp_path: Path
         require_held_out_eval=False,
         rollouts_per_prompt=2,
     )
-    dist = _DistributedSlimeContext(
-        enabled=False, world_size=1, rank=0, local_rank=0, device="cpu"
-    )
+    dist = _DistributedSlimeContext(enabled=False, world_size=1, rank=0, local_rank=0, device="cpu")
     captured: list[SynthRequest] = []
 
     def _materialize(out_path, request):
@@ -953,7 +933,6 @@ async def test_forge_distill_rejects_cross_user_hf_dataset_in_config_file(
     with pytest.raises(HTTPException) as exc_info:
         await _prepare_distill_rl_config(body, db=None, user_id=attacker, settings=settings)  # type: ignore[arg-type]
     assert exc_info.value.status_code == 403
-
 
 
 def test_distill_rejects_outcome_false_for_grounded_sources(tmp_path: Path, monkeypatch):
@@ -1114,9 +1093,7 @@ def test_slime_dd_endpoint_uses_managed_vllm_url(tmp_path: Path):
         require_held_out_eval=False,
         rollouts_per_prompt=2,
     )
-    dist = _DistributedSlimeContext(
-        enabled=False, world_size=1, rank=0, local_rank=0, device="cpu"
-    )
+    dist = _DistributedSlimeContext(enabled=False, world_size=1, rank=0, local_rank=0, device="cpu")
     fake = DataGenResult(
         rows=[{"prompt": "x", "label": "1"} for _ in range(4)],
         stream_counts={"numeric": 4},

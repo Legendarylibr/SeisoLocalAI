@@ -54,9 +54,7 @@ def test_mlx_stream_kwargs_with_temperature(monkeypatch):
 def test_torch_generate_kwargs_greedy():
     inputs = {"input_ids": object()}
     streamer = object()
-    kwargs = torch_generate_kwargs(
-        {"max_tokens": 256, "temperature": 0}, inputs, streamer
-    )
+    kwargs = torch_generate_kwargs({"max_tokens": 256, "temperature": 0}, inputs, streamer)
     assert kwargs["do_sample"] is False
     assert kwargs["num_beams"] == 1
     assert kwargs["use_cache"] is True
@@ -94,10 +92,7 @@ def test_generate_with_cache_fallback_retries_unsupported_cache_impl():
                 )
             return "ok"
 
-    assert (
-        generate_with_cache_fallback(_Model(), {"cache_implementation": "dynamic"})
-        == "ok"
-    )
+    assert generate_with_cache_fallback(_Model(), {"cache_implementation": "dynamic"}) == "ok"
     assert calls == [{"cache_implementation": "dynamic"}, {}]
 
 
@@ -203,9 +198,7 @@ def test_apply_inference_kernels_commits_session_on_success(monkeypatch):
     monkeypatch.setattr(
         tuning,
         "env_bool",
-        lambda name, default=False: (
-            True if name == "SEISO_INFERENCE_FUSED_KERNELS" else default
-        ),
+        lambda name, default=False: True if name == "SEISO_INFERENCE_FUSED_KERNELS" else default,
     )
     monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
     monkeypatch.setattr(
@@ -244,9 +237,7 @@ def test_apply_inference_kernels_restores_session_on_apply_failure(monkeypatch):
     monkeypatch.setattr(
         tuning,
         "env_bool",
-        lambda name, default=False: (
-            True if name == "SEISO_INFERENCE_FUSED_KERNELS" else default
-        ),
+        lambda name, default=False: True if name == "SEISO_INFERENCE_FUSED_KERNELS" else default,
     )
     monkeypatch.setitem(__import__("sys").modules, "torch", fake_torch)
     monkeypatch.setattr(
@@ -266,9 +257,7 @@ def test_apply_inference_kernels_restores_session_on_apply_failure(monkeypatch):
 
 def test_estimate_llama_n_ctx_sizes_to_prompt(monkeypatch):
     monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 16384)
-    monkeypatch.setattr(
-        "seiso.platform.use_linux_nvidia_inference_guards", lambda **_: False
-    )
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda **_: False)
     messages = [{"role": "user", "content": "x" * 4000}]
     n_ctx = estimate_llama_n_ctx(messages, max_tokens=256)
     assert 2048 <= n_ctx <= 131072
@@ -276,15 +265,9 @@ def test_estimate_llama_n_ctx_sizes_to_prompt(monkeypatch):
 
 
 def test_estimate_llama_n_ctx_uses_coarse_buckets(monkeypatch):
-    monkeypatch.setattr(
-        "seiso.platform.use_linux_nvidia_inference_guards", lambda: False
-    )
-    short = estimate_llama_n_ctx(
-        [{"role": "user", "content": "hi"}], max_tokens=128
-    )
-    medium = estimate_llama_n_ctx(
-        [{"role": "user", "content": "x" * 8000}], max_tokens=256
-    )
+    monkeypatch.setattr("seiso.platform.use_linux_nvidia_inference_guards", lambda: False)
+    short = estimate_llama_n_ctx([{"role": "user", "content": "hi"}], max_tokens=128)
+    medium = estimate_llama_n_ctx([{"role": "user", "content": "x" * 8000}], max_tokens=256)
     assert short == 2048
     # Growing history should jump buckets, not 512-token steps.
     assert medium in (2048, 4096, 8192)

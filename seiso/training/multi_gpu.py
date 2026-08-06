@@ -116,9 +116,7 @@ def resolve_distributed_env(device_count: int | None = None) -> DistributedEnv:
         try:
             import torch
 
-            device_count = (
-                int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
-            )
+            device_count = int(torch.cuda.device_count()) if torch.cuda.is_available() else 0
         except ImportError:
             device_count = 0
 
@@ -182,15 +180,11 @@ def detect_training_layout() -> GpuLayout:
     try:
         import torch
     except ImportError:
-        return GpuLayout(
-            world_size=1, local_rank=0, device="cpu", use_ddp=False, device_count=0
-        )
+        return GpuLayout(world_size=1, local_rank=0, device="cpu", use_ddp=False, device_count=0)
 
     device_count = torch.cuda.device_count() if torch.cuda.is_available() else 0
     if device_count == 0:
-        return GpuLayout(
-            world_size=1, local_rank=0, device="cpu", use_ddp=False, device_count=0
-        )
+        return GpuLayout(world_size=1, local_rank=0, device="cpu", use_ddp=False, device_count=0)
 
     dist_env = resolve_distributed_env(device_count)
     use_ddp = dist_env.enabled
@@ -212,8 +206,7 @@ def distributed_requested(config: Any) -> bool:
     if strategy == "ddp":
         return True
     return bool(
-        getattr(config, "multi_gpu", False)
-        or getattr(config, "extra", {}).get("multi_gpu", False)
+        getattr(config, "multi_gpu", False) or getattr(config, "extra", {}).get("multi_gpu", False)
     )
 
 
@@ -245,9 +238,7 @@ def resolve_distributed_plan(
     if strategy not in {"auto", "ddp"}:
         raise ValueError(f"Unsupported distributed strategy: {strategy}")
     if node_rank >= nnodes:
-        raise ValueError(
-            "distributed_node_rank must be less than distributed_num_nodes"
-        )
+        raise ValueError("distributed_node_rank must be less than distributed_num_nodes")
     if layout.device_count <= 0:
         return DistributedPlan(
             enabled=False,
@@ -293,9 +284,7 @@ def configure_distributed_training_args(
         return args
 
     args["local_rank"] = layout.local_rank
-    args["ddp_find_unused_parameters"] = bool(
-        getattr(config, "ddp_find_unused_parameters", False)
-    )
+    args["ddp_find_unused_parameters"] = bool(getattr(config, "ddp_find_unused_parameters", False))
     ddp_backend = getattr(config, "ddp_backend", None)
     if ddp_backend:
         args["ddp_backend"] = str(ddp_backend)
@@ -406,9 +395,7 @@ def gpu_stats() -> list[dict]:
                     "total_bytes": props.total_memory,
                     "allocated_bytes": allocated,
                     "reserved_bytes": reserved,
-                    "utilization_pct": round(
-                        100 * allocated / max(props.total_memory, 1), 1
-                    ),
+                    "utilization_pct": round(100 * allocated / max(props.total_memory, 1), 1),
                 }
             )
     except ImportError:

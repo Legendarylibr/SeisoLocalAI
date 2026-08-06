@@ -80,9 +80,7 @@ def test_export_quants_reuses_single_f16_intermediate(monkeypatch, tmp_path: Pat
     assert list(results) == ["gguf_q4_k_m", "gguf_q5_k_m"]
 
 
-def test_export_quants_reuses_requested_f16_for_later_k_quant(
-    monkeypatch, tmp_path: Path
-):
+def test_export_quants_reuses_requested_f16_for_later_k_quant(monkeypatch, tmp_path: Path):
     calls: list[tuple[str, Path]] = []
     quantized: list[tuple[str, Path]] = []
 
@@ -148,9 +146,7 @@ def test_resolve_merge_base_model_from_manifest(tmp_path: Path):
 def test_resolve_merge_base_model_falls_back_to_adapter_hub_id(tmp_path: Path):
     ckpt = tmp_path / "adapter"
     ckpt.mkdir()
-    (ckpt / "adapter_config.json").write_text(
-        '{"base_model_name_or_path": "remote/model"}'
-    )
+    (ckpt / "adapter_config.json").write_text('{"base_model_name_or_path": "remote/model"}')
 
     assert _resolve_merge_base_model(ckpt) == "remote/model"
 
@@ -163,9 +159,7 @@ def test_merge_lora_uses_local_base(mock_deps, tmp_path: Path):
 
     ckpt = tmp_path / "ckpt"
     ckpt.mkdir()
-    (ckpt / "adapter_config.json").write_text(
-        '{"base_model_name_or_path": "remote/model"}'
-    )
+    (ckpt / "adapter_config.json").write_text('{"base_model_name_or_path": "remote/model"}')
     (ckpt / "seiso_manifest.json").write_text(
         f'{{"resolved_model_path": "{base}", "model_id": "remote/model"}}'
     )
@@ -176,9 +170,7 @@ def test_merge_lora_uses_local_base(mock_deps, tmp_path: Path):
 
     deps = mock_deps.return_value
     mock_model = deps.auto_model.from_pretrained.return_value
-    deps.peft_model.from_pretrained.return_value.merge_and_unload.return_value = (
-        mock_model
-    )
+    deps.peft_model.from_pretrained.return_value.merge_and_unload.return_value = mock_model
 
     merge_lora_checkpoint(ckpt, merged, lambda _msg: None)
     deps.auto_model.from_pretrained.assert_called_once()

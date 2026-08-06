@@ -30,9 +30,7 @@ def guess_params_from_name(name: str) -> float | None:
     return float(m.group(1)) if m else None
 
 
-def _resident_params_b(
-    params: str, tags: tuple[str, ...] | list[str], repo_id: str = ""
-) -> float:
+def _resident_params_b(params: str, tags: tuple[str, ...] | list[str], repo_id: str = "") -> float:
     """Parameter count for disk/VRAM residency (MoE = all experts)."""
     text = f"{params} {repo_id}"
     if is_moe_model(text) or "moe" in {t.lower() for t in tags}:
@@ -40,9 +38,7 @@ def _resident_params_b(
     return _active_params_b(params, tags, repo_id)
 
 
-def _active_params_b(
-    params: str, tags: tuple[str, ...] | list[str], repo_id: str = ""
-) -> float:
+def _active_params_b(params: str, tags: tuple[str, ...] | list[str], repo_id: str = "") -> float:
     """Effective parameter count for VRAM estimates (MoE / active experts)."""
     text = f"{params} {repo_id}".lower()
     named_active = active_params_from_name(text)

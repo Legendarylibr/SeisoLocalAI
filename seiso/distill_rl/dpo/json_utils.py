@@ -35,9 +35,7 @@ _JSONL_REQUIRE_INTEGRITY_CHAIN_ENV = "SEISO_DPO_JSONL_REQUIRE_INTEGRITY_CHAIN"
 def enforce_local_read_limit(path: str | Path, *, label: str = "File") -> None:
     p = Path(path)
     if p.is_file() and p.stat().st_size > MAX_LOCAL_READ_BYTES:
-        raise ValueError(
-            f"{label} exceeds local read limit ({MAX_LOCAL_READ_BYTES} bytes): {p}"
-        )
+        raise ValueError(f"{label} exceeds local read limit ({MAX_LOCAL_READ_BYTES} bytes): {p}")
 
 
 def enforce_safe_parsed_json(value: Any, *, label: str = "JSON") -> None:
@@ -307,9 +305,7 @@ def _verify_jsonl_record_integrity(
     record: dict[str, Any], *, prev_hash: str, label: str, require: bool | None = None
 ) -> str:
     stored_hash = record.get("_integrity_hash")
-    require_chain = (
-        _jsonl_require_integrity_chain_enabled() if require is None else bool(require)
-    )
+    require_chain = _jsonl_require_integrity_chain_enabled() if require is None else bool(require)
     if stored_hash is None:
         if require_chain:
             raise ValueError(

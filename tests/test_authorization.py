@@ -27,14 +27,10 @@ async def test_thread_cross_user_idor(app):
         _, token_b = await make_second_user()
         headers_b = {"Authorization": f"Bearer {token_b}"}
 
-        res = await client.get(
-            f"/api/inference/threads/{tid}/messages", headers=headers_b
-        )
+        res = await client.get(f"/api/inference/threads/{tid}/messages", headers=headers_b)
         assert res.status_code == 404
 
-        res_owner = await client.get(
-            f"/api/inference/threads/{tid}/messages", headers=headers_a
-        )
+        res_owner = await client.get(f"/api/inference/threads/{tid}/messages", headers=headers_a)
         assert res_owner.status_code == 200
 
 
@@ -82,9 +78,7 @@ async def test_training_job_cross_user_cancel_and_stream(app, auth_client, monke
 
         out = Path(config.output_dir) / "checkpoint-idor"
         out.mkdir(parents=True, exist_ok=True)
-        (out / "adapter_config.json").write_text(
-            '{"base_model_name_or_path": "test/model"}'
-        )
+        (out / "adapter_config.json").write_text('{"base_model_name_or_path": "test/model"}')
         return out
 
     monkeypatch.setattr("forge.orchestrators.training.run_training", fake_run_training)
@@ -131,6 +125,7 @@ async def test_training_job_cross_user_cancel_and_stream(app, auth_client, monke
     )
     assert stream.status_code == 404
 
+
 @pytest.mark.asyncio
 async def test_cross_user_model_path_rejected(app, auth_client):
     client, _token, headers, data_dir = auth_client
@@ -160,6 +155,7 @@ async def test_cross_user_model_path_rejected(app, auth_client):
     )
     assert res.status_code == 403
 
+
 @pytest.mark.asyncio
 async def test_knowledge_bases_scoped_per_user(app, auth_client):
     client, _token, headers, data_dir = auth_client
@@ -188,6 +184,7 @@ async def test_knowledge_bases_scoped_per_user(app, auth_client):
     assert retrieve.status_code == 200
     assert retrieve.json().get("results") == []
 
+
 @pytest.mark.asyncio
 async def test_cross_user_inference_cancel_rejected(app, auth_client):
     client, _token, headers_a, _data_dir = auth_client
@@ -205,6 +202,7 @@ async def test_cross_user_inference_cancel_rejected(app, auth_client):
 
     allowed = await client.post("/api/inference/cancel-generation", headers=headers_a)
     assert allowed.status_code == 200
+
 
 @pytest.mark.asyncio
 async def test_knowledge_ingest_blocks_other_user_index(app, auth_client):
@@ -235,6 +233,7 @@ async def test_knowledge_ingest_blocks_other_user_index(app, auth_client):
     )
     assert steal.status_code == 400
 
+
 @pytest.mark.asyncio
 async def test_knowledge_rejects_outside_uploads(app, auth_client):
     client, _token, headers, data_dir = auth_client
@@ -247,6 +246,7 @@ async def test_knowledge_rejects_outside_uploads(app, auth_client):
         json={"knowledge_base_id": "kb1", "source_path": str(outside)},
     )
     assert res.status_code == 400
+
 
 @pytest.mark.asyncio
 async def test_export_rejects_other_user_checkpoint(app, auth_client):
@@ -267,6 +267,7 @@ async def test_export_rejects_other_user_checkpoint(app, auth_client):
         json={"checkpoint": str(ckpt), "formats": ["lora"]},
     )
     assert res.status_code == 403
+
 
 @pytest.mark.asyncio
 async def test_training_rejects_cross_user_dataset(app, auth_client):
@@ -295,6 +296,7 @@ async def test_training_rejects_cross_user_dataset(app, auth_client):
     )
     assert res.status_code == 403
 
+
 @pytest.mark.asyncio
 async def test_training_rejects_outside_uploads(app, auth_client):
     client, _token, headers, data_dir = auth_client
@@ -315,6 +317,7 @@ async def test_training_rejects_outside_uploads(app, auth_client):
     )
     assert res.status_code == 403
 
+
 @pytest.mark.asyncio
 async def test_compress_rejects_host_config_file(app, auth_client):
     client, _token, headers, _tmp = auth_client
@@ -324,6 +327,7 @@ async def test_compress_rejects_host_config_file(app, auth_client):
         json={"preset": "smoke", "config_file": "/etc/passwd"},
     )
     assert res.status_code == 403
+
 
 @pytest.mark.asyncio
 async def test_cross_user_thread_messages_rejected(app, auth_client):
@@ -339,6 +343,7 @@ async def test_cross_user_thread_messages_rejected(app, auth_client):
 
     res = await client.get(f"/api/inference/threads/{thread['id']}/messages", headers=headers_b)
     assert res.status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_cross_user_provider_delete_rejected(app, auth_client):
@@ -356,6 +361,7 @@ async def test_cross_user_provider_delete_rejected(app, auth_client):
 
     res = await client.delete(f"/api/providers/{prov['id']}", headers=headers_b)
     assert res.status_code == 404
+
 
 @pytest.mark.asyncio
 async def test_cross_user_provider_inference_rejected(app, auth_client):
@@ -399,6 +405,7 @@ async def test_cross_user_provider_inference_rejected(app, auth_client):
     )
     assert res.status_code == 404
 
+
 def test_trainer_dataset_sandbox_blocks_other_user_path(tmp_path):
     from seiso.training.config import TrainConfig
     from seiso.training.datasets import load_training_dataset
@@ -418,4 +425,3 @@ def test_trainer_dataset_sandbox_blocks_other_user_path(tmp_path):
 
     with pytest.raises(SecurityError):
         load_training_dataset(cfg.dataset, sandbox_root=cfg.sandbox_root)
-

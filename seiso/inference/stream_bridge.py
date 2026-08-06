@@ -28,9 +28,7 @@ class ThreadStreamBridge:
 
     def __init__(self, loop: asyncio.AbstractEventLoop, *, maxsize: int = 32) -> None:
         self._loop = loop
-        self._queue: asyncio.Queue[StreamBridgeMessage] = asyncio.Queue(
-            maxsize=max(1, maxsize)
-        )
+        self._queue: asyncio.Queue[StreamBridgeMessage] = asyncio.Queue(maxsize=max(1, maxsize))
         self._cancelled = threading.Event()
         self._producer_done = threading.Event()
 

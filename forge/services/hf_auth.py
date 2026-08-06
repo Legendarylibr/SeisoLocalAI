@@ -11,9 +11,7 @@ from typing import Literal
 
 from forge.db.crypto import decrypt_field, encrypt_field
 
-TokenSource = Literal[
-    "request", "user_store", "env_seiso", "env_hf", "cli_cache", "none"
-]
+TokenSource = Literal["request", "user_store", "env_seiso", "env_hf", "cli_cache", "none"]
 
 
 @dataclass
@@ -86,9 +84,7 @@ def _user_token_path(data_dir: Path, user_id: str) -> Path:
     return safe_join(data_dir, "hf_tokens", user_id)
 
 
-def save_user_hf_token(
-    data_dir: Path, user_id: str, token: str, *, encryption_key: bytes
-) -> None:
+def save_user_hf_token(data_dir: Path, user_id: str, token: str, *, encryption_key: bytes) -> None:
     path = _user_token_path(data_dir, user_id)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(encrypt_field(token.strip(), encryption_key), encoding="utf-8")
@@ -101,9 +97,7 @@ def clear_user_hf_token(data_dir: Path, user_id: str) -> None:
         path.unlink()
 
 
-def load_user_hf_token(
-    data_dir: Path, user_id: str, *, encryption_key: bytes
-) -> str | None:
+def load_user_hf_token(data_dir: Path, user_id: str, *, encryption_key: bytes) -> str | None:
     path = _user_token_path(data_dir, user_id)
     if not path.is_file():
         return None

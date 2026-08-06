@@ -340,6 +340,7 @@ def test_attention_resolve_never_empty():
     meta = attention_metadata()
     assert meta["attn_implementation"] == impl
 
+
 def test_restore_registry_keeps_modules_on_failure(monkeypatch):
     from seiso.kernels import lifecycle as life
 
@@ -366,6 +367,7 @@ def test_restore_registry_keeps_modules_on_failure(monkeypatch):
         life._restore_registry_key(42)
     assert life._PATCH_REGISTRY[42] == [m2]
     life._PATCH_REGISTRY.clear()
+
 
 def test_patch_session_keeps_modules_on_restore_failure(monkeypatch):
     from seiso.kernels.lifecycle import KernelPatchSession, _clear_patch_markers
@@ -397,4 +399,3 @@ def test_patch_session_keeps_modules_on_restore_failure(monkeypatch):
     monkeypatch.setattr("seiso.kernels.lifecycle._clear_patch_markers", orig_clear)
     assert session.restore() == 1
     assert session._modules == []
-

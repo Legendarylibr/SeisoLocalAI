@@ -124,9 +124,7 @@ def test_sidecar_keep_alive_native_linux_stays_adaptive(monkeypatch):
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: True)
     monkeypatch.setattr(llamaswap, "_sidecar_perf_mode", lambda: False)
     monkeypatch.setattr(llamaswap, "_sidecar_headroom_mb", lambda: 20_000)
-    monkeypatch.setattr(
-        "seiso.platform.is_native_linux_nvidia", lambda **_: True
-    )
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
     # Active chat pins longer residency; idle uses adaptive 2m at roomy headroom.
     assert llamaswap.sidecar_ollama_keep_alive(active=True) == "10m"
     assert llamaswap.sidecar_ollama_keep_alive(active=False) == "2m"
@@ -139,9 +137,7 @@ def test_sidecar_keep_alive_interactive_short_pin_non_native(monkeypatch):
     monkeypatch.setenv("SEISO_INFERENCE_PROFILE", "interactive")
     monkeypatch.setattr(llamaswap, "_sidecar_native_linux_nvidia", lambda: False)
     monkeypatch.setattr(llamaswap, "_sidecar_perf_mode", lambda: False)
-    monkeypatch.setattr(
-        "seiso.platform.is_native_linux_nvidia", lambda **_: False
-    )
+    monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: False)
     assert llamaswap.sidecar_ollama_keep_alive(active=True) == "2m"
 
 
@@ -314,9 +310,7 @@ def test_speculative_low_memory_falls_back_to_target_only(monkeypatch):
     from seiso.inference.streaming import StreamToken
 
     runner = LocalInferenceRunner()
-    monkeypatch.setattr(
-        runner._pool, "torch_speculative_pair_fits", lambda *_args: False
-    )
+    monkeypatch.setattr(runner._pool, "torch_speculative_pair_fits", lambda *_args: False)
     monkeypatch.setattr(
         runner,
         "_torch_stream",
@@ -366,9 +360,7 @@ async def test_prepare_attaches_generation_plan(monkeypatch, tmp_path):
         }
 
     monkeypatch.setattr(inference_chat, "get_inference_option", option)
-    monkeypatch.setattr(
-        inference_chat, "assert_model_fits_for_load", lambda *_a, **_k: None
-    )
+    monkeypatch.setattr(inference_chat, "assert_model_fits_for_load", lambda *_a, **_k: None)
     monkeypatch.setattr(
         inference_chat,
         "assert_backend_runtime_available",

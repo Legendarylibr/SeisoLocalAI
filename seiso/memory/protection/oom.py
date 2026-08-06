@@ -71,5 +71,3 @@ def release_cached_memory(*, sync: bool = False) -> None:
                 torch.mps.synchronize()
     except Exception:
         pass
-
-

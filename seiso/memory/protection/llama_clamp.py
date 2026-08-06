@@ -249,5 +249,3 @@ def clamp_llama_cache_mb(
         host_budget = max(128, ram_mb - mmap_reserve - _host_os_reserve_mb(ram_mb))
         cap = min(cap, max(0, host_budget // 8))
     return max(0, cap)
-
-

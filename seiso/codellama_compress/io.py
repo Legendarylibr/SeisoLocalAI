@@ -60,9 +60,7 @@ def write_env_report(run_dir: Path) -> None:
         env["cuda_capability"] = ".".join(map(str, torch.cuda.get_device_capability(0)))
     save_json(run_dir / "env.json", env)
 
-    write_text(
-        run_dir / "pip_freeze.txt", _run_cmd([sys.executable, "-m", "pip", "freeze"])
-    )
+    write_text(run_dir / "pip_freeze.txt", _run_cmd([sys.executable, "-m", "pip", "freeze"]))
 
     if sys.platform.startswith("linux"):
         write_text(run_dir / "nvidia-smi.txt", _run_cmd(["nvidia-smi"]))

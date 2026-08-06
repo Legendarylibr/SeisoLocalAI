@@ -78,7 +78,6 @@ async def training_surface(
     return frontend_training_surface()
 
 
-
 def _resolve_dataset_for_user(
     dataset: str,
     *,

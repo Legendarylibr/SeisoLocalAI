@@ -56,9 +56,9 @@ def resolve_backend_label(
             return "llama-swap"
         return BACKEND_LABELS[BACKEND_LLAMASWAP]
     return BACKEND_LABELS.get(backend, backend)
-_GGUF_SHARD_RE = re.compile(
-    r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$", re.I
-)
+
+
+_GGUF_SHARD_RE = re.compile(r"^(?P<prefix>.+)-(?P<index>\d{5})-of-(?P<total>\d{5})\.gguf$", re.I)
 _GGUF_VALUE_SIZE = {
     0: 1,  # uint8
     1: 1,  # int8
@@ -92,9 +92,7 @@ _GGUF_SUFFIX_EXPERT_CNT = b".expert_count"
 # dflash-draft are specialized tiny draft models. We allow llama.cpp backend for them
 # (especially when used as speculative drafts). They are filtered from main catalogs
 # via other hints.
-_UNSUPPORTED_GGUF_ARCHITECTURES = (
-    frozenset()
-)  # was {"dflash-draft"} - now supported as drafts
+_UNSUPPORTED_GGUF_ARCHITECTURES = frozenset()  # was {"dflash-draft"} - now supported as drafts
 
 
 @dataclass(slots=True)
@@ -172,9 +170,7 @@ def resolve_gguf_file(model_path: str) -> Path:
 
 
 _GGUF_METADATA_CACHE_MAX_ENTRIES = 256
-_gguf_metadata_cache: OrderedDict[tuple[str, float, int], _GGUFMetadata] = (
-    OrderedDict()
-)
+_gguf_metadata_cache: OrderedDict[tuple[str, float, int], _GGUFMetadata] = OrderedDict()
 
 
 def clear_gguf_caches() -> None:
@@ -190,9 +186,7 @@ def _gguf_cache_key(path: Path) -> tuple[str, float, int] | None:
         return None
 
 
-def _unpack_gguf_uint(
-    mm: mmap.mmap, offset: int, value_type: int
-) -> tuple[int | None, int]:
+def _unpack_gguf_uint(mm: mmap.mmap, offset: int, value_type: int) -> tuple[int | None, int]:
     """Read a scalar integer GGUF value, returning (value, new_offset)."""
     fmt = _GGUF_UINT_FMT.get(value_type)
     if fmt is None:
@@ -201,9 +195,7 @@ def _unpack_gguf_uint(
     return int(value), offset + _GGUF_VALUE_SIZE[value_type]
 
 
-def _mean_gguf_uint_array(
-    mm: mmap.mmap, offset: int, value_type: int
-) -> tuple[float | None, int]:
+def _mean_gguf_uint_array(mm: mmap.mmap, offset: int, value_type: int) -> tuple[float | None, int]:
     """Mean of an integer GGUF array value (e.g. per-layer head_count_kv)."""
     if value_type != _GGUF_TYPE_ARRAY:
         return None, _skip_gguf_mmap_value(mm, offset, value_type)
@@ -213,10 +205,7 @@ def _mean_gguf_uint_array(
         return None, _skip_gguf_mmap_value(mm, offset, value_type)
     item_size = _GGUF_VALUE_SIZE[item_type]
     start = offset + 12
-    values = [
-        int(struct.unpack_from(fmt, mm, start + i * item_size)[0])
-        for i in range(count)
-    ]
+    values = [int(struct.unpack_from(fmt, mm, start + i * item_size)[0]) for i in range(count)]
     return sum(values) / len(values), start + item_size * count
 
 
@@ -255,9 +244,7 @@ def _read_gguf_metadata(path: Path) -> _GGUFMetadata:
             with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mm:
                 if mm[:4] != _GGUF_MAGIC:
                     return meta
-                _version, _tensor_count, kv_count = struct.unpack_from(
-                    _GGUF_HEADER_FMT, mm, 4
-                )
+                _version, _tensor_count, kv_count = struct.unpack_from(_GGUF_HEADER_FMT, mm, 4)
                 offset = 24
                 for _ in range(kv_count):
                     if offset + 12 > size:
@@ -276,9 +263,7 @@ def _read_gguf_metadata(path: Path) -> _GGUFMetadata:
                         start = offset + 8
                         end = start + value_len
                         if end <= size:
-                            meta.architecture = mm[start:end].decode(
-                                "utf-8", errors="replace"
-                            )
+                            meta.architecture = mm[start:end].decode("utf-8", errors="replace")
                         offset = end
                     elif key.endswith(_GGUF_SUFFIX_CTX_LEN):
                         value, offset = _unpack_gguf_uint(mm, offset, value_type)
@@ -293,16 +278,12 @@ def _read_gguf_metadata(path: Path) -> _GGUFMetadata:
                         if value is not None:
                             if value > 0:
                                 meta.sliding_window = value
-                            meta.has_sliding_window = (
-                                value > 0 or meta.has_sliding_window
-                            )
+                            meta.has_sliding_window = value > 0 or meta.has_sliding_window
                     elif key.endswith(_GGUF_SUFFIX_HEAD_CNT_KV):
                         # Per-layer arrays appear on mixed-attention models
                         # (e.g. gemma); the mean is exact for total KV size.
                         if value_type == _GGUF_TYPE_ARRAY:
-                            mean, offset = _mean_gguf_uint_array(
-                                mm, offset, value_type
-                            )
+                            mean, offset = _mean_gguf_uint_array(mm, offset, value_type)
                             if mean is not None:
                                 meta.head_count_kv = mean
                         else:
@@ -333,21 +314,15 @@ def _read_gguf_metadata(path: Path) -> _GGUFMetadata:
                         if key.endswith(_GGUF_SUFFIX_SLIDING_PAT):
                             meta.has_sliding_window = True
                             if value_type == _GGUF_TYPE_ARRAY:
-                                mean, offset = _mean_gguf_uint_array(
-                                    mm, offset, value_type
-                                )
+                                mean, offset = _mean_gguf_uint_array(mm, offset, value_type)
                                 if mean is not None:
                                     meta.swa_layer_fraction = mean
                             else:
-                                value, offset = _unpack_gguf_uint(
-                                    mm, offset, value_type
-                                )
+                                value, offset = _unpack_gguf_uint(mm, offset, value_type)
                                 if value is not None:
                                     meta.swa_layer_fraction = float(value)
                                 else:
-                                    offset = _skip_gguf_mmap_value(
-                                        mm, offset, value_type
-                                    )
+                                    offset = _skip_gguf_mmap_value(mm, offset, value_type)
                             continue
                         offset = _skip_gguf_mmap_value(mm, offset, value_type)
                     if offset > size:
@@ -444,9 +419,7 @@ def gguf_kv_bytes_per_token(model_path: str) -> int | None:
 
     key_length = meta.key_length
     value_length = meta.value_length
-    if (key_length is None or value_length is None) and (
-        meta.embedding_length and meta.head_count
-    ):
+    if (key_length is None or value_length is None) and (meta.embedding_length and meta.head_count):
         head_dim = meta.embedding_length // meta.head_count
         key_length = key_length if key_length is not None else head_dim
         value_length = value_length if value_length is not None else head_dim
@@ -534,18 +507,12 @@ def _assert_llamaswap_available() -> None:
         raise _llamaswap_unavailable_error(status.reason)
 
 
-def recommend_backend(
-    *, model_path: str, model_format: str | None = None
-) -> BackendName:
+def recommend_backend(*, model_path: str, model_format: str | None = None) -> BackendName:
     """Pick the single local inference engine from model format and host policy."""
     fmt = (model_format or "").lower()
     path = Path(model_path)
     if _is_gguf_model(model_path, model_format):
-        return (
-            BACKEND_LLAMASWAP
-            if _native_linux_requires_isolated_gguf()
-            else BACKEND_LLAMACPP
-        )
+        return BACKEND_LLAMASWAP if _native_linux_requires_isolated_gguf() else BACKEND_LLAMACPP
     if fmt in {"safetensors", "bin"} or path.is_dir():
         if platform.system() == "Darwin" and detect_backend() == Backend.MLX:
             return BACKEND_MLX
@@ -553,9 +520,7 @@ def recommend_backend(
     return BACKEND_TORCH
 
 
-def available_backends(
-    *, model_path: str, model_format: str | None = None
-) -> list[BackendName]:
+def available_backends(*, model_path: str, model_format: str | None = None) -> list[BackendName]:
     """Local backends exposed for this model.
 
     Preferred/default engine is first (same as ``recommend_backend``). Additional
@@ -609,11 +574,7 @@ def resolve_local_backend(
             _assert_llamaswap_available()
             return BACKEND_LLAMASWAP
         return recommend_backend(model_path=model_path, model_format=model_format)
-    if (
-        choice == BACKEND_LLAMACPP
-        and is_gguf
-        and _native_linux_requires_isolated_gguf()
-    ):
+    if choice == BACKEND_LLAMACPP and is_gguf and _native_linux_requires_isolated_gguf():
         raise _llamaswap_unavailable_error(
             "The requested backend was llamacpp; use llamaswap or set "
             "SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1."

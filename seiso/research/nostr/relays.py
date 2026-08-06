@@ -80,9 +80,7 @@ def publish_event(
     accepted: list[str] = []
     event_id = str(event.get("id") or "").strip().lower()
     for raw in relays:
-        url = validate_relay_url(
-            raw, allowlist=allowlist, allow_loopback=allow_loopback
-        )
+        url = validate_relay_url(raw, allowlist=allowlist, allow_loopback=allow_loopback)
         try:
             with connect(url, open_timeout=timeout_s, close_timeout=5) as ws:
                 ws.send(json.dumps(["EVENT", event]))
@@ -93,11 +91,7 @@ def publish_event(
                     msg = json.loads(raw_msg)
                     if not isinstance(msg, list) or not msg:
                         continue
-                    if (
-                        msg[0] == "OK"
-                        and len(msg) >= 3
-                        and str(msg[1]).strip().lower() == event_id
-                    ):
+                    if msg[0] == "OK" and len(msg) >= 3 and str(msg[1]).strip().lower() == event_id:
                         ok = bool(msg[2])
                         break
                     if msg[0] == "NOTICE":
@@ -125,9 +119,7 @@ def fetch_event_by_id(
     connect = _require_websockets()
     eid = _hex64(event_id, label="event_id")
     for raw in relays:
-        url = validate_relay_url(
-            raw, allowlist=allowlist, allow_loopback=allow_loopback
-        )
+        url = validate_relay_url(raw, allowlist=allowlist, allow_loopback=allow_loopback)
         sub_id = uuid.uuid4().hex[:16]
         try:
             with connect(url, open_timeout=timeout_s, close_timeout=5) as ws:
@@ -168,9 +160,7 @@ def fetch_addressable_event(
         "limit": 1,
     }
     for raw in relays:
-        url = validate_relay_url(
-            raw, allowlist=allowlist, allow_loopback=allow_loopback
-        )
+        url = validate_relay_url(raw, allowlist=allowlist, allow_loopback=allow_loopback)
         sub_id = uuid.uuid4().hex[:16]
         try:
             with connect(url, open_timeout=timeout_s, close_timeout=5) as ws:

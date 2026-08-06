@@ -132,9 +132,7 @@ def test_precheck_repo_owned_by_user_warns(mock_api_cls):
     info.author = "alice"
     api.repo_info.return_value = info
 
-    result = precheck_hub_export(
-        repo_id="alice/existing", token="hf_test", metadata=_meta()
-    )
+    result = precheck_hub_export(repo_id="alice/existing", token="hf_test", metadata=_meta())
     assert result.ok
     assert result.repo_owned_by_user
     assert any("already exists" in w for w in result.warnings)
@@ -185,9 +183,7 @@ def test_suggest_profile_from_manifest(tmp_path: Path):
 def test_slime_manifest_suggests_lora_profile(tmp_path: Path):
     ckpt = tmp_path / "ckpt"
     ckpt.mkdir()
-    (ckpt / "seiso_manifest.json").write_text(
-        json.dumps({"method": "slime", "adapter": "lora"})
-    )
+    (ckpt / "seiso_manifest.json").write_text(json.dumps({"method": "slime", "adapter": "lora"}))
 
     assert detect_checkpoint_kind(ckpt) == "lora"
     assert suggest_profile(ckpt) == ExportProfile.LORA_ADAPTER
@@ -318,9 +314,7 @@ def test_export_base_refuses_lora_only_checkpoint(tmp_path: Path):
 
 @patch("seiso.export.formats._push_hub")
 @patch("seiso.export.formats.merge_lora_checkpoint")
-def test_export_skip_hub_precheck_still_rechecks_before_push(
-    mock_merge, mock_push, tmp_path: Path
-):
+def test_export_skip_hub_precheck_still_rechecks_before_push(mock_merge, mock_push, tmp_path: Path):
     """skip_hub_precheck skips the pre-export gate only; push always re-prechecks."""
     sandbox = tmp_path / "data"
     ckpt = sandbox / "checkpoints" / "run1"
@@ -352,16 +346,12 @@ def test_export_skip_hub_precheck_still_rechecks_before_push(
 @patch("seiso.export.formats._push_hub")
 @patch("seiso.export.formats.precheck_hub_export")
 @patch("seiso.export.formats.merge_lora_checkpoint")
-def test_export_runs_hub_precheck_first(
-    mock_merge, mock_precheck, mock_push, tmp_path: Path
-):
+def test_export_runs_hub_precheck_first(mock_merge, mock_precheck, mock_push, tmp_path: Path):
     sandbox = tmp_path / "data"
     ckpt = sandbox / "checkpoints" / "run1"
     ckpt.mkdir(parents=True)
     mock_merge.side_effect = lambda c, d, log: d.mkdir(parents=True, exist_ok=True)
-    mock_precheck.return_value = HubPrecheckResult(
-        repo_id="alice/model", ok=True, token_valid=True
-    )
+    mock_precheck.return_value = HubPrecheckResult(repo_id="alice/model", ok=True, token_valid=True)
 
     out = sandbox / "exports" / "job1"
     export_checkpoint(
@@ -382,9 +372,7 @@ def test_export_runs_hub_precheck_first(
 
 @patch("seiso.export.formats.HfApi")
 @patch("seiso.models.hf_env.configure_hf_hub_cache")
-def test_push_hub_uses_large_folder_for_big_uploads(
-    mock_configure, mock_api_cls, tmp_path: Path
-):
+def test_push_hub_uses_large_folder_for_big_uploads(mock_configure, mock_api_cls, tmp_path: Path):
     from seiso.export.formats import _push_hub
 
     folder = tmp_path / "gguf"
@@ -481,9 +469,7 @@ async def test_export_profiles_api(app, auth_client):
 @pytest.mark.asyncio
 async def test_export_precheck_api_no_token(app, auth_client, monkeypatch):
     client, _token, headers, _data_dir = auth_client
-    monkeypatch.setattr(
-        "forge.api.routes.export.resolve_hub_publish_token", lambda *_a, **_k: None
-    )
+    monkeypatch.setattr("forge.api.routes.export.resolve_hub_publish_token", lambda *_a, **_k: None)
     res = await client.post(
         "/api/export/precheck",
         headers=headers,
@@ -597,6 +583,7 @@ async def test_export_with_profile_lora(tmp_path, app, auth_client):
     outputs = json.loads(job.get("output_paths_json") or "{}")
     assert "lora" in outputs
 
+
 def test_export_checksum_hashes_weight_files(tmp_path: Path):
     from seiso.research.provenance import directory_checksum_manifest
 
@@ -611,6 +598,7 @@ def test_export_checksum_hashes_weight_files(tmp_path: Path):
     assert manifest["readme.txt"] == "skipped-large-file"
     assert manifest["model.safetensors"] not in {"skipped-large-file", "error"}
     assert len(manifest["model.safetensors"]) == 64
+
 
 def test_export_download_requires_exact_key(tmp_path: Path):
     import asyncio
@@ -680,6 +668,7 @@ def test_export_download_requires_exact_key(tmp_path: Path):
 
     asyncio.run(_run())
 
+
 def test_select_hub_folder_skips_empty_gguf_dirs(tmp_path: Path):
     empty = tmp_path / "q4_k_m"
     empty.mkdir()
@@ -689,6 +678,7 @@ def test_select_hub_folder_skips_empty_gguf_dirs(tmp_path: Path):
     chosen = _select_hub_folder(tmp_path, [ExportFormat.GGUF])
     assert chosen == good
 
+
 def test_select_hub_folder_prefers_lora_dir(tmp_path: Path):
     from seiso.export.formats import ExportFormat, _select_hub_folder
 
@@ -697,4 +687,3 @@ def test_select_hub_folder_prefers_lora_dir(tmp_path: Path):
     lora.mkdir(parents=True)
     (lora / "adapter_config.json").write_text("{}", encoding="utf-8")
     assert _select_hub_folder(out, [ExportFormat.LORA]) == lora
-

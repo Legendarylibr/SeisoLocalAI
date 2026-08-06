@@ -191,11 +191,7 @@ def dflash_draft_infer(
         )
         tokens: list[int] | None = None
         if handle is not None:
-            if (
-                reuse_text
-                and handle._last_tokens
-                and current_text.startswith(handle._last_prompt)
-            ):
+            if reuse_text and handle._last_tokens and current_text.startswith(handle._last_prompt):
                 suffix = current_text[len(handle._last_prompt) :]
                 if not suffix:
                     tokens = list(handle._last_tokens)
@@ -222,9 +218,7 @@ def dflash_draft_infer(
                     handle._last_tokens = tokens
                 return out["choices"][0]["text"] if out.get("choices") else ""
 
-        out = _dflash_completion(
-            active_llm, current_text, gen_kwargs, reuse_prefix=reuse_text
-        )
+        out = _dflash_completion(active_llm, current_text, gen_kwargs, reuse_prefix=reuse_text)
         if handle is not None:
             handle._last_prompt = current_text
             if tokens is not None:

@@ -90,9 +90,7 @@ class ToolCallDeltaBuffer:
                     elif isinstance(arguments, str):
                         current_arguments = target.get("arguments") or ""
                         if isinstance(current_arguments, dict):
-                            current_arguments = json.dumps(
-                                current_arguments, separators=(",", ":")
-                            )
+                            current_arguments = json.dumps(current_arguments, separators=(",", ":"))
                         target["arguments"] = str(current_arguments) + arguments
                     else:
                         target["arguments"] = arguments
