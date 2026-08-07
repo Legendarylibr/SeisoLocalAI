@@ -289,9 +289,18 @@ class DPOTrainer:
             else epoch_steps
         )
         warmup_steps = int(total_steps * self.settings.warmup_ratio)
+
+        def _lr_lambda(step: int) -> float:
+            if step < warmup_steps:
+                return step / max(1, warmup_steps)
+            # Cosine decay from 1.0 to 0.0 after warmup — standard practice
+            # for DPO convergence (avoids the plateau from flat LR after warmup).
+            progress = float(step - warmup_steps) / max(1, total_steps - warmup_steps)
+            return 0.5 * (1.0 + math.cos(math.pi * min(progress, 1.0)))
+
         scheduler = torch.optim.lr_scheduler.LambdaLR(
             self.optimizer,
-            lr_lambda=lambda step: min(1.0, step / max(1, warmup_steps)),
+            lr_lambda=_lr_lambda,
         )
 
         self.optimizer.zero_grad(set_to_none=True)

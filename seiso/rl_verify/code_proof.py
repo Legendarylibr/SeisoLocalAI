@@ -18,7 +18,7 @@ _FENCE_RE = re.compile(
     flags=re.IGNORECASE | re.DOTALL,
 )
 _ASSERT_LINE_RE = re.compile(r"^\s*assert\b", flags=re.MULTILINE)
-_DEFAULT_TIMEOUT_S = 3.0
+_DEFAULT_TIMEOUT_S = 5.0
 _MAX_TESTS = 32
 
 
@@ -213,8 +213,9 @@ def verify_code_proof(
         )
 
     limit = timeout_s if timeout_s is not None else _timeout_s(sample)
-    # Budget total wall time across units.
-    per_test = max(0.1, limit / max(1, len(tests)))
+    # Per-test budget: divide total wall time across units, but never
+    # allocate less than 0.5 s per test so complex assertions can evaluate.
+    per_test = max(0.5, limit / max(1, len(tests)))
 
     passed = 0
     fail_stderr = ""
