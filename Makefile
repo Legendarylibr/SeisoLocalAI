@@ -47,3 +47,16 @@ fix:
 live-check:
 	@echo "Requires Forge running at http://127.0.0.1:8765 (seiso forge)"
 	python3 scripts/live_frontend_backend_check.py
+
+# Rust control plane (hybrid rewrite)
+cargo-test:
+	cargo test --workspace
+
+cargo-forge:
+	cargo run -p seiso-forge
+
+cargo-fmt:
+	cargo fmt --all
+
+cargo-clippy:
+	cargo clippy --workspace --all-targets -- -D warnings

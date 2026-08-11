@@ -96,3 +96,16 @@ docs/                  # user + dev guides
 ```
 
 Happy building. Keep it local, keep it safe, keep the memory guards happy.
+
+## Rust control plane (hybrid)
+
+Scaffold under `crates/` (see [docs/adr/0001-rust-hybrid-control-plane.md](docs/adr/0001-rust-hybrid-control-plane.md)).
+
+```bash
+cargo test --workspace
+cargo run -p seiso-forge          # http://127.0.0.1:8765/api/health
+cargo run -p seiso-cli -- doctor
+PYTHONPATH=python python3 -m seiso_ml_worker   # JSONL ML worker smoke
+```
+
+Python Forge remains the production default until cutover (`SEISO_FORGE_IMPL`).

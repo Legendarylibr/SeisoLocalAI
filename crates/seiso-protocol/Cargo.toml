@@ -1,0 +1,13 @@
+[package]
+name = "seiso-protocol"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Versioned JSONL worker protocol between Rust control plane and Python ML workers"
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }

@@ -42,3 +42,7 @@ uv.lock
 # Lean / Lake
 formal/**/.lake/
 formal/**/lake-packages/
+
+# Rust
+/target/
+**/*.rs.bk

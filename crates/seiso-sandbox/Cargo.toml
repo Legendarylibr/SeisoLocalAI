@@ -1,0 +1,11 @@
+[package]
+name = "seiso-sandbox"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Path sandboxing (safe_join / assert_within) for Seiso"
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+thiserror = { workspace = true }

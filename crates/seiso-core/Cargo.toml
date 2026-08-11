@@ -1,0 +1,12 @@
+[package]
+name = "seiso-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Shared config, paths, and env helpers for Seiso Rust control plane"
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { workspace = true }
+thiserror = { workspace = true }

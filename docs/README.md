@@ -283,3 +283,4 @@ Point them at `http://127.0.0.1:8765/v1` while Forge is running. See [getting-st
 | **SSE** | Server-Sent Events — live log streaming in the UI |
 | **Hub** | Hugging Face Hub — model hosting and download |
 | **Fused kernels** | Custom CUDA/Triton ops for faster training (RMSNorm, SwiGLU, CE) |
+Note: Rust hybrid control plane — see [rust-migration.md](rust-migration.md) and [adr/0001-rust-hybrid-control-plane.md](adr/0001-rust-hybrid-control-plane.md).

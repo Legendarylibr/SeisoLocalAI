@@ -1,0 +1,18 @@
+[package]
+name = "seiso-jobs"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Job supervisor: spawn Python ML workers, multiplex logs, cancel"
+repository.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+seiso-protocol = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+uuid = { workspace = true }
+chrono = { workspace = true }

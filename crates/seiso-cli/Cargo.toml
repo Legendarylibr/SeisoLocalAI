@@ -1,0 +1,19 @@
+[package]
+name = "seiso-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Seiso CLI (Rust) — doctor, forge launcher"
+repository.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "seiso-rs"
+path = "src/main.rs"
+
+[dependencies]
+seiso-core = { workspace = true }
+seiso-sandbox = { workspace = true }
+anyhow = { workspace = true }
+clap = { workspace = true }
+tokio = { workspace = true }
