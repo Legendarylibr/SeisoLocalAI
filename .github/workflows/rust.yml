@@ -41,10 +41,17 @@ jobs:
       - name: Clippy
         run: cargo clippy --workspace --all-targets -- -D warnings
 
-      - name: Test
-        run: cargo test --workspace
+      - name: Test (unit + e2e)
+        run: cargo test --workspace -- --nocapture
+        env:
+          RUST_BACKTRACE: "1"
 
       - name: Python worker smoke
         run: |
           echo '{"v":1,"op":"train.start","job_id":"ci","config":{"smoke_only":true},"paths":{}}' \
             | PYTHONPATH=python python3 -m seiso_ml_worker
+          echo '{"v":1,"op":"export.start","job_id":"ci-exp","config":{"smoke_only":true},"paths":{"data_dir":"/tmp/seiso-ci-export"}}' \
+            | PYTHONPATH=python python3 -m seiso_ml_worker
+
+      - name: Shell E2E against seiso-forge binary
+        run: bash scripts/e2e_rust_forge.sh

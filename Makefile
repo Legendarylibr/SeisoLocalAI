@@ -60,3 +60,6 @@ cargo-fmt:
 
 cargo-clippy:
 	cargo clippy --workspace --all-targets -- -D warnings
+
+cargo-e2e:
+	bash scripts/e2e_rust_forge.sh
