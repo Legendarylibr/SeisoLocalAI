@@ -51,14 +51,25 @@ def hardware_summary() -> str:
     return " · ".join(bits)
 
 
-def render_sidebar(page: str, *, focus: str = "main", nav_index: int | None = None) -> Text:
+def render_sidebar(
+    page: str,
+    *,
+    focus: str = "main",
+    nav_index: int | None = None,
+    auth_gate: bool = False,
+    npub_short: str = "",
+) -> Text:
     if nav_index is None:
         nav_index = index_of_page(page)
     nav_index = clamp_index(nav_index, len(sidebar_items()))
     out = Text()
     out.append("SEISO", style=f"bold {ACCENT}")
     out.append("  local ai\n", style=MUTED)
-    out.append("no browser\n\n", style=f"italic {MUTED}")
+    if auth_gate:
+        out.append("\nSign in to continue.\n\n", style=SECONDARY)
+        out.append("One local account.\nSame key as Forge.", style=MUTED)
+        return out
+    out.append("\n")
     cursor = 0
     for group in NAV_GROUPS:
         out.append(f"{str(group['label']).upper()}\n", style=f"bold {MUTED}")
@@ -80,7 +91,9 @@ def render_sidebar(page: str, *, focus: str = "main", nav_index: int | None = No
         "▸ Settings\n" if settings_pointed else "  Settings\n",
         style=f"bold {ACCENT}" if settings_pointed else MUTED,
     )
-    out.append("Offline · local-first", style=MUTED)
+    if npub_short:
+        out.append(f"\n{npub_short}\n", style=MUTED)
+    out.append("local-first", style=MUTED)
     return out
 
 
@@ -95,7 +108,6 @@ def render_dashboard(
 ) -> Group:
     hw = hardware_summary()
     lines = Text()
-    lines.append("Dashboard\n", style="bold")
     lines.append("Everything stays on this machine unless you publish it.\n\n", style=SECONDARY)
     lines.append(f"{hw}\n\n", style=ACCENT)
     main_index = clamp_index(main_index, len(DASHBOARD_GOALS))
@@ -195,7 +207,7 @@ def render_hub(
     action = "open or download"
     if combined and 1 <= selected <= len(combined):
         action = "open" if combined[selected - 1][1].path is not None else "download"
-    foot.append(f"\n↑↓ scroll   Enter {action}   /search qwen   /refresh", style=MUTED)
+    foot.append(f"\n↑↓ scroll   Enter {action}   type to search   /refresh", style=MUTED)
     return Group(header, table, foot)
 
 
@@ -211,20 +223,22 @@ def render_chat(
     status: str,
 ) -> Group:
     body = Text()
-    body.append("How can I help you today?\n" if not messages else "", style="bold")
-    if not messages:
+    visible = [item for item in messages if item.get("role") != "system"]
+    hidden = max(0, len(visible) - 16)
+    body.append("How can I help you today?\n" if not visible else "", style="bold")
+    if not visible:
         body.append("Start a new chat — conversation stays on this machine.\n\n", style=SECONDARY)
-        body.append(f"Loaded target  {model_label}\n", style=ACCENT)
-        body.append(f"Engine         {backend or 'auto'}\n", style=MUTED)
-        body.append("Weights load on the first message.\n", style=MUTED)
+        body.append(f"Model    {model_label}\n", style=ACCENT)
+        body.append(f"Engine   {backend or 'auto'}\n", style=MUTED)
+        body.append("Type below to send. Weights load on the first message.\n", style=MUTED)
     else:
-        for item in messages[-16:]:
+        if hidden:
+            body.append(f"↑ {hidden} earlier messages\n\n", style=MUTED)
+        for item in visible[-16:]:
             role = item.get("role", "")
             content = item.get("content", "")
             if role == "user":
                 body.append("You\n", style=f"bold {ACCENT}")
-            elif role == "system":
-                continue
             else:
                 body.append("Seiso\n", style=f"bold {WARM}")
             body.append(content.rstrip() + "\n\n", style="white")
@@ -350,7 +364,8 @@ def render_settings(
     if storage_mode:
         out.append(f"Storage          {storage_mode}\n", style=SECONDARY)
     if npub:
-        out.append(f"Public ID        {npub}\n", style=ACCENT)
+        out.append("Public ID\n", style=MUTED)
+        out.append(f"  {npub}\n", style=ACCENT)
     if nostr:
         saved = "yes" if nostr.get("key_saved") else "no"
         match = nostr.get("identity_match")
@@ -489,16 +504,34 @@ def render_auth(
     return out
 
 
-def _help_line(*, focus: str) -> Text:
+def _help_line(*, focus: str, page: str = "") -> Text:
     side_style = ACCENT if focus == "nav" else MUTED
     page_style = ACCENT if focus == "main" else MUTED
+    extra = "   type to chat or /command   Ctrl+C quit"
+    if page == "hub":
+        extra = "   type to search   Ctrl+C quit"
+    elif page == "auth":
+        extra = "   paste a recovery key   Ctrl+C quit"
+    elif page == "chat":
+        extra = "   type to chat   Ctrl+C quit"
     return Text.assemble(
         ("↑↓ scroll   ", MUTED),
         ("← sidebar", side_style),
         ("   ", MUTED),
         ("page →", page_style),
-        ("   Enter select   type to chat or /command   Ctrl+C quit", MUTED),
+        ("   Enter select", MUTED),
+        (extra, MUTED),
     )
+
+
+def input_chrome(page: str, *, secret: bool) -> tuple[str, str]:
+    if secret or page == "auth":
+        return "Key", "paste recovery key"
+    if page == "hub":
+        return "Find", "type to search   Enter selects ▸"
+    if page == "chat":
+        return "You", "type a message"
+    return "You", "scroll or type"
 
 
 def _mask_secret(text: str) -> str:
@@ -507,12 +540,13 @@ def _mask_secret(text: str) -> str:
     return "•" * min(len(text), 64)
 
 
-def _compose_line(*, compose: str, hint: str, secret: bool = False) -> Text:
+def _compose_line(*, compose: str, hint: str, secret: bool = False, page: str = "") -> Text:
+    label, fallback = input_chrome(page, secret=secret)
     label_style = ACCENT if compose else MUTED
     shown = _mask_secret(compose) if secret and compose else compose
     if compose:
-        return Text.assemble(("You  ", label_style), (shown, "white"), ("█", ACCENT))
-    return Text.assemble(("You  ", MUTED), (hint or "scroll or type", MUTED))
+        return Text.assemble((f"{label}  ", label_style), (shown, "white"), ("█", ACCENT))
+    return Text.assemble((f"{label}  ", MUTED), (hint or fallback, MUTED))
 
 
 def list_window(console: Console, reserved: int = 18) -> int:
@@ -554,6 +588,8 @@ def draw_frame(
     auth_nsec: str = "",
     secret_input: bool = False,
     needs_onboarding: bool = True,
+    npub_full: str = "",
+    signed_in: bool = False,
 ) -> None:
     local_hub = local_hub or []
     remote_hub = remote_hub or []
@@ -603,7 +639,7 @@ def draw_frame(
             status,
             focus=focus,
             main_index=main_index,
-            npub=npub,
+            npub=npub_full or npub,
             storage_mode=storage_mode,
             nostr=nostr,
             choices=choices,
@@ -623,7 +659,7 @@ def draw_frame(
             phase=auth_phase,
             storage=storage_mode or "persistent",
             nsec=auth_nsec,
-            npub=npub,
+            npub=npub_full or npub,
             status=status,
             focus=focus,
             main_index=main_index,
@@ -644,24 +680,34 @@ def draw_frame(
     else:
         title, subtitle, main = page.title(), "Lite", Text(page)
 
+    auth_gate = page == "auth"
+    side_border = ACCENT if focus == "nav" or auth_gate else "grey37"
+    main_border = ACCENT if focus == "main" else "grey37"
     sidebar = Panel(
-        render_sidebar(page, focus=focus, nav_index=nav_index),
-        border_style=ACCENT,
+        render_sidebar(
+            page,
+            focus=focus,
+            nav_index=nav_index,
+            auth_gate=auth_gate,
+            npub_short=npub if signed_in else "",
+        ),
+        border_style=side_border,
         padding=(0, 1),
         width=24,
     )
-    ident = f"  ·  {npub}" if npub and page != "auth" else ""
+    ident = f"  ·  {npub}" if npub and not auth_gate else ""
+    model_bit = f"  ·  {model_label}" if model_label and model_label != "none" else ""
     header = Text.assemble(
         (title, "bold"),
-        (f"  ·  {subtitle}  ·  {model_label}  ·  {hardware_summary()}{ident}", MUTED),
+        (f"  ·  {subtitle}{model_bit}{ident}", MUTED),
     )
-    main_panel = Panel(main, title=header, border_style="grey37", padding=(1, 2))
+    main_panel = Panel(main, title=header, border_style=main_border, padding=(1, 2))
     layout = Table.grid(expand=True, padding=0)
     layout.add_column(width=26)
     layout.add_column(ratio=1)
     layout.add_row(sidebar, main_panel)
     console.clear()
     console.print(layout)
-    console.print(_help_line(focus=focus))
+    console.print(_help_line(focus=focus, page=page))
     if show_input:
-        console.print(_compose_line(compose=compose, hint=hint, secret=secret_input))
+        console.print(_compose_line(compose=compose, hint=hint, secret=secret_input, page=page))

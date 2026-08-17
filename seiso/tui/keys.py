@@ -5,7 +5,7 @@ from __future__ import annotations
 import select
 import sys
 from dataclasses import dataclass
-from typing import TextIO
+from typing import IO, TextIO
 
 _ESC_TIMEOUT_S = 0.05
 
@@ -208,9 +208,12 @@ class KeyReader:
             import msvcrt
         except ImportError:
             return Key("eof")
-        ch = msvcrt.getwch()
+        getwch = getattr(msvcrt, "getwch", None)
+        if getwch is None:
+            return Key("eof")
+        ch = getwch()
         if ch in {"\x00", "\xe0"}:
-            code = ord(msvcrt.getwch())
+            code = ord(getwch())
             return Key(_WIN_SPECIAL.get(code, "none"))
         if ch in {"\r", "\n"}:
             return Key("enter")
@@ -249,7 +252,7 @@ class KeyReader:
         return keys[0] if keys else Key("none")
 
     def _read_posix_chunk(self, fd: int) -> bytes:
-        buf = self.stream.buffer if hasattr(self.stream, "buffer") else None
+        buf: IO[bytes] | None = getattr(self.stream, "buffer", None)
         first = buf.read(1) if buf is not None else self.stream.read(1).encode("utf-8")
         if not first:
             return b""
@@ -260,7 +263,7 @@ class KeyReader:
         extra = self._drain(fd, buf, timeout=0.0)
         return first + extra
 
-    def _drain(self, fd: int, buf: object | None, timeout: float) -> bytes:
+    def _drain(self, fd: int, buf: IO[bytes] | None, timeout: float) -> bytes:
         try:
             ready, _, _ = select.select([fd], [], [], timeout)
         except (OSError, ValueError):
@@ -275,7 +278,7 @@ class KeyReader:
                 break
             if not more_ready:
                 break
-            piece = buf.read(1) if buf is not None else self.stream.read(1).encode("utf-8")  # type: ignore[union-attr]
+            piece = buf.read(1) if buf is not None else self.stream.read(1).encode("utf-8")
             if not piece:
                 break
             chunks.extend(piece)

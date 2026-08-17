@@ -50,6 +50,13 @@ def sidebar_items() -> list[NavItem]:
     return items
 
 
+def default_main_index(page: str, auth_phase: str = "welcome") -> int:
+    """First highlight: Create account on onboarding, otherwise the top row."""
+    if page == "auth" and auth_phase == "welcome":
+        return 2
+    return 0
+
+
 def index_of_page(page: str) -> int:
     for index, item in enumerate(sidebar_items()):
         if item.id == page:
@@ -240,7 +247,7 @@ def enter_hint(
         item = items[clamp_index(nav_index, len(items))]
         return f"Enter opens {item.label}"
     if page == "chat":
-        return "type a message   /hub to pick a model"
+        return "type a message   ← Hub to switch models"
     if not choices:
         if page in STUDIO_PAGES:
             return "type /run configs/example_lora.yaml"

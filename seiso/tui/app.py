@@ -8,6 +8,7 @@ from pathlib import Path
 import typer
 from rich.console import Console
 
+from forge.config import StorageMode
 from seiso.tui.auth import (
     BACKUP_FILENAME,
     AuthError,
@@ -22,6 +23,7 @@ from seiso.tui.browse import (
     Choice,
     apply_browse_key,
     clamp_index,
+    default_main_index,
     enter_hint,
     index_of_page,
     knowledge_names,
@@ -92,7 +94,9 @@ def run_tui(
     auth_phase = (
         "ready" if account is not None else ("welcome" if auth_snap.needs_onboarding else "login")
     )
-    storage_choice = auth_snap.storage_mode if auth_snap.storage_mode_configured else "persistent"
+    storage_choice: StorageMode = (
+        auth_snap.storage_mode if auth_snap.storage_mode_configured else "persistent"
+    )
     pending_nsec = ""
     pending_npub = auth_snap.owner_npub or ""
     pass1 = ""
@@ -110,7 +114,7 @@ def run_tui(
     backend = _backend_for(current) if current else "auto"
     focus = "main"
     nav_index = index_of_page(page)
-    main_index = 0
+    main_index = default_main_index(page, auth_phase)
     compose = ""
     knowledge = knowledge_names(data_dir)
     scripted = keys is not None
@@ -193,7 +197,13 @@ def run_tui(
             hint=hint(),
             knowledge=knowledge,
             show_input=live,
-            npub=(account.npub if account and auth_phase == "ready" else pending_npub),
+            npub=(
+                account.short_npub
+                if account and auth_phase == "ready"
+                else (account.npub if account else pending_npub)
+            ),
+            npub_full=(account.npub if account else pending_npub),
+            signed_in=bool(account) and auth_phase == "ready",
             storage_mode=storage_choice,
             nostr=nostr_info,
             choices=choices() if page in {"auth", "settings", "integrations"} else None,
@@ -340,7 +350,7 @@ def run_tui(
 
     def run_action(action: str) -> None:
         nonlocal storage_choice, auth_phase, status, pass1, import_blob, pending_nsec, pending_npub
-        nonlocal account, page, compose
+        nonlocal account, page, compose, main_index, focus
         if action == "storage_persistent":
             storage_choice = "persistent"
             status = "Workspace will persist on this machine."
@@ -385,6 +395,8 @@ def run_tui(
             auth_phase = "login"
             page = "auth"
             pending_nsec = ""
+            main_index = default_main_index(page, auth_phase)
+            focus = "main"
             nostr_info_clear()
             status = "Signed out. Paste your recovery key to continue."
         elif action == "keygen":
@@ -481,12 +493,15 @@ def run_tui(
 
     def reset_to_onboarding() -> None:
         nonlocal account, auth_phase, page, pending_nsec, pending_npub, storage_choice, status
+        nonlocal main_index, focus
         account = None
         auth_phase = "welcome"
         page = "auth"
         pending_nsec = ""
         pending_npub = ""
         storage_choice = "persistent"
+        main_index = default_main_index(page, auth_phase)
+        focus = "main"
         nostr_info_clear()
         status = "Local account cleared. Create a new one or restore a key."
 
@@ -496,10 +511,10 @@ def run_tui(
             if gated():
                 status = "Sign in first."
                 return
-            items = sidebar_items()
-            if not items:
+            nav_items = sidebar_items()
+            if not nav_items:
                 return
-            goto_page(items[clamp_index(nav_index, len(items))].id)
+            goto_page(nav_items[clamp_index(nav_index, len(nav_items))].id)
             return
         items = choices()
         if not items:
@@ -588,15 +603,31 @@ def run_tui(
         if account is not None and (looks_like_nsec(stripped) or looks_like_ncryptsec(stripped)):
             apply_recovery_key(stripped)
             return True
-        if page == "hub" and stripped.isdigit():
-            hub_selected = int(stripped)
-            main_index = max(0, hub_selected - 1)
-            activate_hub(hub_selected)
-            return True
+        if stripped.isdigit() and page != "chat":
+            picked = int(stripped)
+            items = choices()
+            if 1 <= picked <= len(items):
+                main_index = picked - 1
+                if page == "hub":
+                    hub_selected = picked
+                    activate_hub(picked)
+                else:
+                    activate()
+                return True
 
         cmd = parse_slash(line)
         if cmd is None:
             if not stripped:
+                return True
+            if page == "hub":
+                hub_query = stripped
+                focus = "main"
+                nav_index_sync()
+                main_index = 0
+                hub_selected = 1
+                status = f"Searching Hugging Face for {hub_query}…"
+                paint()
+                refresh_hub()
                 return True
             if page != "chat":
                 page = "chat"
@@ -778,6 +809,9 @@ def run_tui(
                 page_step=list_window(console),
             )
             clamp_cursors()
+            return True
+        if key.name == "char" and key.char == "?":
+            handle_line("/help")
             return True
         if key.name == "char":
             compose = key.char

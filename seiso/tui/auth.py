@@ -61,7 +61,7 @@ class AuthUser:
 @dataclass(frozen=True, slots=True)
 class AuthStatus:
     needs_onboarding: bool
-    storage_mode: str
+    storage_mode: StorageMode
     storage_mode_configured: bool
     owner_npub: str | None
     session_valid: bool
@@ -231,12 +231,10 @@ class TuiAuth:
 
     def _clear_session(self, settings: ForgeSettings | None = None) -> None:
         path = session_path(self.data_dir)
-        token = ""
-        if path.is_file():
-            token = path.read_text(encoding="utf-8").strip()
-            path.unlink(missing_ok=True)
-        if token and settings is not None:
-            revoke_access_token(token, settings)
+        raw = path.read_text(encoding="utf-8").strip() if path.is_file() else None
+        path.unlink(missing_ok=True)
+        if raw and settings is not None:
+            revoke_access_token(raw, settings)
 
     def read_session_token(self) -> str | None:
         path = session_path(self.data_dir)

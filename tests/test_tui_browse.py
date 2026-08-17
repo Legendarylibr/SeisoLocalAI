@@ -8,6 +8,7 @@ from pathlib import Path
 from seiso.tui.browse import (
     apply_browse_key,
     clamp_index,
+    default_main_index,
     enter_hint,
     index_of_page,
     move_index,
@@ -62,6 +63,12 @@ def test_parse_keys_mouse_wheel() -> None:
     assert parse_keys(b"\x1b[<64;8;4M")[0].name == "up"
     assert parse_keys(b"\x1b[<65;8;4M")[0].name == "down"
     assert parse_keys(b"\x1b[<0;8;4m")[0].name == "none"
+
+
+def test_default_main_index_points_at_create_account() -> None:
+    assert default_main_index("auth", "welcome") == 2
+    assert default_main_index("auth", "login") == 0
+    assert default_main_index("hub") == 0
 
 
 def test_sidebar_includes_forge_pages_plus_settings() -> None:
@@ -220,6 +227,9 @@ def test_frame_shows_scroll_enter_help_and_cursor(tmp_path: Path) -> None:
     assert "Enter select" in text
     assert "Enter downloads Qwen/Qwen3-4B-GGUF" in text
     assert "Qwen/Qwen3-4B-GGUF" in text
+    assert "Find" in text
+    assert "type to search" in text
+    assert "no browser" not in text.lower()
 
 
 def test_dashboard_and_studio_mark_selected_row(tmp_path: Path) -> None:

@@ -234,9 +234,7 @@ def test_scripted_tui_create_confirm_then_restore(tmp_path: Path, no_hub) -> Non
         console=_console(),
         repo_root=tmp_path,
         keys=[
-            Key("down"),
-            Key("down"),
-            Key("enter"),  # Create account
+            Key("enter"),  # Create account (default highlight)
             Key("enter"),  # I saved my recovery key
             *_chars("/quit"),
         ],
@@ -257,6 +255,29 @@ def test_scripted_tui_create_confirm_then_restore(tmp_path: Path, no_hub) -> Non
         keys=[*_chars("/quit")],
     )
     assert TuiAuth(tmp_path).restore_session() is not None
+
+
+def test_scripted_hub_plain_text_searches(tmp_path: Path, monkeypatch) -> None:
+    store = TuiAuth(tmp_path)
+    store.register(generate=True, storage_mode="persistent")
+    queries: list[str] = []
+
+    def capture(query: str, **_kwargs):
+        queries.append(query)
+        return [], [], None
+
+    monkeypatch.setattr("seiso.tui.app.search_hub", capture)
+    run_tui(
+        data_dir=tmp_path,
+        console=_console(),
+        repo_root=tmp_path,
+        keys=[
+            *_chars("/hub"),
+            *_chars("qwen"),
+            *_chars("/quit"),
+        ],
+    )
+    assert "qwen" in queries
 
 
 def test_scripted_tui_login_after_logout(tmp_path: Path, no_hub) -> None:
