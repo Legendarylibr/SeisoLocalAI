@@ -120,10 +120,11 @@ Before loading a larger model, use **Free memory** in Chat or Model Hub to unloa
 
 Default path (`start` / `seiso tui`) is the terminal UI:
 
-1. Hub lists **local GGUFs** and **live Hugging Face** results
-2. `/search qwen` then `/download N` (or `/open N` if already on disk)
-3. Type a message in Chat — weights load on the first send
-4. `/unload` frees RAM/VRAM without deleting downloads
+1. Create a local account (**Enter** on Create account) or restore a recovery key — same `nsec` / `npub` as Forge
+2. Hub lists **local GGUFs** and **live Hugging Face** results
+3. `↑`/`↓` to a model, **Enter** to open it (already on disk) or download it (`/search qwen` still works)
+4. Type a message in Chat — weights load on the first send
+5. `/unload` (or Settings → Enter) frees RAM/VRAM without deleting downloads
 
 `seiso forge` remains the optional HTTP API / React app (`SEISO_UI=forge start`).
 

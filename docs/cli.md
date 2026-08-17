@@ -125,7 +125,11 @@ seiso tui --list          # local GGUF inventory, smallest first
 seiso tui --model 1       # pick by index / path / name substring
 ```
 
-Hub: `/search qwen`, `/download N`, `/open N`. Chat loads weights on the first message; `/unload` frees RAM/VRAM. Studio pages (`/train`, `/compress`, …) show the CLI and accept `/run configs/example_lora.yaml`. Optional web API: `SEISO_UI=forge start` or `seiso forge`.
+**Move with the keyboard, then press Enter.** `↑`/`↓` (or the mouse wheel) scroll the highlighted `▸` row. `←`/`→` or Tab switch the sidebar and the page. Enter opens the highlighted item (a page, a local model, a Hub download, or a studio config). Type to chat, or start a `/command`.
+
+Same **Nostr account** as Forge: first launch creates a recovery key (`nsec`) or restores one; later sessions unlock from the saved session (24h, same JWT secret as the web UI) or by pasting the key / NIP-49 backup. Settings can rotate, import, sign out, or start a new session (`RESET`). Integrations toggles auto-attest and relays (`/relays wss://…`).
+
+Hub: `/search qwen`, or scroll to a row and press Enter to open (on disk) or download. Chat loads weights on the first message; `/unload` frees RAM/VRAM. Studio pages (`/train`, `/compress`, …) show the CLI — scroll a config and press Enter, or `/run configs/example_lora.yaml`. Optional web API: `SEISO_UI=forge start` or `seiso forge`.
 
 ## `seiso export`
 

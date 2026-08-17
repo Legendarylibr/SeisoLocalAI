@@ -133,7 +133,7 @@ The UI speaks in everyday terms; crypto is unchanged (open Nostr key formats). Y
 | Ephemeral DB | In-memory SQLite (`SEISO_DB_EPHEMERAL`); signing keys are **not** written under `nostr_keys/` |
 | Settings key rotate | Import/keygen updates the account public ID (`npub`), attest key, and Compat owner binding together (keygen returns `nsec` once; Compat key rotates) |
 
-There is no password path. Generated secrets are shown once in the browser; an encrypted signing key is kept under `{SEISO_DATA_DIR}/nostr_keys/` for provenance attest (skipped in ephemeral mode). Non-browser clients that need a Bearer JWT can send `X-Seiso-Return-Token: 1` on login/register. See also [provenance-nostr.md](provenance-nostr.md).
+There is no password path. Generated secrets are shown once in the browser; an encrypted signing key is kept under `{SEISO_DATA_DIR}/nostr_keys/` for provenance attest (skipped in ephemeral mode). Non-browser clients that need a Bearer JWT can send `X-Seiso-Return-Token: 1` on login/register. The default **TUI** (`seiso tui`) uses the same owner, keys, storage-mode marker, and reset/wipe rules; it stores a 24h session in `{SEISO_DATA_DIR}/.tui_session` (mode `0600`) instead of a cookie. See also [provenance-nostr.md](provenance-nostr.md).
 
 ### Auth crypto (what is / is not guaranteed)
 
