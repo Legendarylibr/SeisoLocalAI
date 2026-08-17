@@ -150,7 +150,19 @@ def test_start_defaults_to_tui() -> None:
     start = (Path(__file__).resolve().parents[1] / "scripts/start.sh").read_text(encoding="utf-8")
     assert "SEISO_UI:-tui" in start or "SEISO_UI:-tui" in start.replace('"', "")
     assert 'exec "$seiso_bin" tui' in start
+    assert "/dev/tty" in start
     assert "seiso tui" in start or "tui" in start
+
+
+def test_install_complete_announces_tui_not_forge_url() -> None:
+    root = Path(__file__).resolve().parents[1]
+    outro = (root / "scripts/install_tui.py").read_text(encoding="utf-8")
+    install = (root / "scripts/install.sh").read_text(encoding="utf-8")
+    assert "TUI starting" in outro
+    assert "Open Forge:" not in outro
+    assert "open {args.url}" not in outro
+    assert "TUI starting" in install or "Start the TUI" in install
+    assert "seiso_forge_url" not in install.split("install_tui_outro")[1]
 
 
 def test_tui_command_registered() -> None:

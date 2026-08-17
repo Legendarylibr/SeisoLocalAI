@@ -301,8 +301,17 @@ main() {
     return 0
   fi
 
-  log "Starting Seiso TUI (no browser). SEISO_UI=forge start  for the optional web API."
-  exec "$seiso_bin" tui
+  log "TUI starting"
+  # curl | bash leaves stdin as a closed pipe. Attach the interactive TUI
+  # to the real terminal so it does not EOF/abort right after install.
+  if [[ -t 0 ]]; then
+    exec "$seiso_bin" tui
+  fi
+  if [[ -r /dev/tty && -w /dev/tty ]]; then
+    exec "$seiso_bin" tui </dev/tty >/dev/tty 2>&1
+  fi
+  log "Install complete. Start the TUI from a terminal: seiso tui"
+  return 0
 }
 
 main "$@"
