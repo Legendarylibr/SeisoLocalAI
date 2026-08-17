@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -9,6 +10,11 @@ from seiso.io.files import iter_matching_files
 
 _SCAN_ROOTS = ("models", "exports", "hf_cache")
 _SKIP_NAME_MARKERS = ("mmproj", ".incomplete")
+# Hugging Face cache blobs are named by digest (sha256 hex, optional prefix).
+_DIGEST_NAME = re.compile(
+    r"^(?:sha256[-_])?[0-9a-f]{64}(?:\.gguf)?$|^[0-9a-f]{40}(?:\.gguf)?$",
+    re.IGNORECASE,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -39,7 +45,85 @@ def format_size(size_bytes: int) -> str:
 
 def _should_skip(path: Path) -> bool:
     name = path.name.lower()
-    return any(marker in name for marker in _SKIP_NAME_MARKERS)
+    if any(marker in name for marker in _SKIP_NAME_MARKERS):
+        return True
+    # Content-addressed HF blobs have no filename — use snapshot/inventory links.
+    return any(part == "blobs" for part in path.parts)
+
+
+def looks_like_digest_name(name: str) -> bool:
+    """True when *name* is a SHA-256 / git digest, not a model filename."""
+    return bool(_DIGEST_NAME.fullmatch(Path(name).name))
+
+
+def _repo_id_from_path(path: Path) -> str | None:
+    for part in path.parts:
+        if part.startswith("models--"):
+            return part.removeprefix("models--").replace("--", "/") or None
+        if (
+            "--" in part
+            and part not in {"hf_cache", "hf_home"}
+            and not looks_like_digest_name(part)
+        ):
+            # Inventory dirs look like ``Qwen--Qwen3-4B``.
+            owner, _, name = part.partition("--")
+            if owner and name and "/" not in part:
+                return f"{owner}/{name.replace('--', '/')}"
+    return None
+
+
+def _snapshot_gguf_name(path: Path) -> str | None:
+    parts = path.parts
+    for index, part in enumerate(parts):
+        if part != "snapshots" or index + 2 >= len(parts):
+            continue
+        name = parts[-1]
+        if name.lower().endswith(".gguf") and not looks_like_digest_name(name):
+            return name
+    return None
+
+
+def local_model_label(*paths: Path) -> str:
+    """Human-readable GGUF label. Never a raw Hugging Face blob SHA-256."""
+    gguf_names: list[str] = []
+    repos: list[str] = []
+    fallback = "model"
+    for path in paths:
+        fallback = path.name or fallback
+        name = path.name
+        if name.lower().endswith(".gguf") and not looks_like_digest_name(name):
+            gguf_names.append(name)
+        snap = _snapshot_gguf_name(path)
+        if snap:
+            gguf_names.append(snap)
+        repo = _repo_id_from_path(path)
+        if repo:
+            repos.append(repo)
+    if gguf_names:
+        return gguf_names[0]
+    if repos:
+        return repos[0]
+    return fallback
+
+
+def _prefer_local_model(existing: LocalModel | None, candidate: LocalModel) -> LocalModel:
+    if existing is None:
+        return candidate
+    existing_hash = looks_like_digest_name(existing.label)
+    candidate_hash = looks_like_digest_name(candidate.label)
+    if existing_hash and not candidate_hash:
+        return candidate
+    if candidate_hash and not existing_hash:
+        return existing
+    existing_named = existing.path.suffix.lower() == ".gguf" and not looks_like_digest_name(
+        existing.path.name
+    )
+    candidate_named = candidate.path.suffix.lower() == ".gguf" and not looks_like_digest_name(
+        candidate.path.name
+    )
+    if candidate_named and not existing_named:
+        return candidate
+    return existing
 
 
 def _file_key(path: Path) -> tuple[int, int] | str:
@@ -62,16 +146,21 @@ def discover_local_gguf(data_dir: Path) -> list[LocalModel]:
                 continue
             try:
                 resolved = path.resolve()
+                if resolved.is_dir():
+                    continue
                 size = resolved.stat().st_size
             except OSError:
                 continue
             if size <= 0:
                 continue
-            found[_file_key(resolved)] = LocalModel(
-                path=resolved,
+            named = path if not looks_like_digest_name(path.name) else resolved
+            candidate = LocalModel(
+                path=named,
                 size_bytes=size,
-                label=resolved.name,
+                label=local_model_label(path, resolved),
             )
+            key = _file_key(resolved)
+            found[key] = _prefer_local_model(found.get(key), candidate)
     return sorted(found.values(), key=lambda item: (item.size_bytes, item.label.lower()))
 
 
@@ -102,7 +191,14 @@ def resolve_model_choice(
             size = resolved.stat().st_size
         except OSError as exc:
             return None, f"Cannot read {candidate}: {exc}"
-        return LocalModel(path=resolved, size_bytes=size, label=resolved.name), None
+        return (
+            LocalModel(
+                path=candidate if not looks_like_digest_name(candidate.name) else resolved,
+                size_bytes=size,
+                label=local_model_label(candidate, resolved),
+            ),
+            None,
+        )
 
     if raw.isdigit():
         index = int(raw)

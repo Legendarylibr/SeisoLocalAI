@@ -6,7 +6,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
-from seiso.tui.offline import discover_local_gguf, format_size
+from seiso.tui.offline import (
+    discover_local_gguf,
+    format_size,
+    local_model_label,
+    looks_like_digest_name,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -185,10 +190,13 @@ def download_hub_repo(repo_id: str, *, data_dir: Path) -> HubRow:
         ggufs = sorted(path.glob("*.gguf"))
         path = ggufs[0] if ggufs else path
     size = format_size(path.stat().st_size) if path.is_file() else "downloaded"
+    title = local_model_label(path) if path.name else repo_id
+    if looks_like_digest_name(title):
+        title = repo_id
     return HubRow(
         key=str(path),
         source="local",
-        title=path.name if path.name else repo_id,
+        title=title or repo_id,
         repo_id=repo_id,
         path=path if path.exists() else None,
         size_label=size,
