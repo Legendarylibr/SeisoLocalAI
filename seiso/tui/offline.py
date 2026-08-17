@@ -255,6 +255,9 @@ def parse_slash(line: str) -> SlashCommand | None:
         "r": "refresh",
         "run": "run",
         "open": "open",
+        "logout": "logout",
+        "signout": "logout",
+        "relays": "relays",
     }
     kind = aliases.get(verb)
     if kind is None:

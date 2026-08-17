@@ -114,9 +114,9 @@ STUDIO_PAGES: dict[str, dict[str, str]] = {
     "integrations": {
         "group": "Platform",
         "title": "Integrations",
-        "subtitle": "Route to OpenAI, Anthropic, or a local chat server.",
-        "command": "Use full Forge (/integrations) or seiso forge + Settings.",
-        "note": "This lite UI is local-only on purpose.",
+        "subtitle": "Nostr provenance — same owner as Forge.",
+        "command": "/relays wss://relay.example.com",
+        "note": "Auto-attest and key rotate live here. External LLM providers stay in full Forge.",
     },
 }
 

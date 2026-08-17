@@ -378,7 +378,7 @@ Forge details: **[docs/forge.md](docs/forge.md)**
 | `seiso slime` | Single-process slime GRPO post-train (also `seiso train -c … method: slime`) |
 | `seiso nemo-rl` | Launch external [NVIDIA NeMo RL](https://github.com/NVIDIA-NeMo/RL) (`method: nemo_rl`; requires `SEISO_NEMO_RL_ROOT`) |
 | `seiso chat` | Terminal chat with local models |
-| `seiso tui` | Lightweight offline terminal UI that mimics Forge (no browser) |
+| `seiso tui` | Lightweight offline terminal UI that mimics Forge (arrow keys + Enter; no browser) |
 | `seiso export` | Export merged / GGUF / LoRA + Hub push |
 | `seiso compress run` | LLM compression pipeline |
 | `seiso compress manifest-verify` | Verify hash-chained run manifest |

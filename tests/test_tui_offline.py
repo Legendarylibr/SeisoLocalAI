@@ -156,6 +156,9 @@ def test_parse_slash_aliases() -> None:
     assert parse_slash("/search qwen 7b").kind == "search"
     assert parse_slash("/search qwen 7b").arg == "qwen 7b"
     assert parse_slash("/download 3").kind == "download"
+    assert parse_slash("/logout").kind == "logout"
+    assert parse_slash("/relays wss://example.com").kind == "relays"
+    assert parse_slash("/relays wss://example.com").arg == "wss://example.com"
     assert parse_slash("/wat").kind == "unknown"
 
 
@@ -275,6 +278,8 @@ def test_terminal_frame_renders(tmp_path: Path) -> None:
     assert "SEISO" in text
     assert "Chat" in text
     assert "How can I help you today?" in text
+    assert "↑↓ scroll" in text
+    assert "Enter select" in text
     assert "chat" in nav_page_ids()
 
 

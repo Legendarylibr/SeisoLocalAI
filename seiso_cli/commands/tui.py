@@ -25,7 +25,11 @@ def tui(
     list_models: bool = typer.Option(False, "--list", help="Print local GGUF files and exit"),
     data_dir: str = typer.Option("", "--data-dir", help="Override SEISO_DATA_DIR"),
 ) -> None:
-    """Local offline UI that mimics Forge in the terminal (no browser)."""
+    """Local offline UI that mimics Forge in the terminal (no browser).
+
+    Arrow keys scroll, Tab or ←→ switch sidebar/page, Enter selects.
+    Same Nostr account as the web UI (recovery key + persisted session).
+    """
     from pathlib import Path
 
     from seiso.security import resolve_data_dir
