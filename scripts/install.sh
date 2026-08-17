@@ -300,7 +300,7 @@ main() {
 
   if [[ "$SEISO_START" == "1" ]]; then
     export SEISO_INSTALL_JUST_RAN=1
-    export SEISO_OPEN_BROWSER=1
+    export SEISO_UI="${SEISO_UI:-tui}"
     exec "$root/scripts/start.sh"
   fi
 

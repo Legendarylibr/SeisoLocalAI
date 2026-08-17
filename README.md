@@ -38,7 +38,7 @@ Seiso combines a **web workspace (Forge)** and a **Python core (CLI + library)**
 
 | Workflow | Forge UI | CLI |
 |----------|----------|-----|
-| Download & chat with open models | Model Hub, Chat | `seiso chat` |
+| Download & chat with open models | Model Hub, Chat | `seiso chat` / `seiso tui` |
 | QLoRA / LoRA / full fine-tune | Training Studio | `seiso train` |
 | Single-GPU slime post-training | CLI | `seiso train --config configs/example_training_slime.yaml` |
 | Multi-GPU slime (vLLM rollouts) | CLI | `scripts/run_slime_vllm_ddp.sh 2 configs/example_training_slime_vllm.yaml` |
@@ -129,7 +129,7 @@ What the installer does:
 2. Creates `.venv` and installs platform extras (CUDA on Linux + NVIDIA, MLX on macOS, GGUF support)
 3. Copies `.env.example` → `.env` if missing
 4. Builds `forge-ui/dist`
-5. Runs `seiso forge` and opens the browser
+5. Runs `seiso tui` (terminal UI; no browser)
 
 On native Linux + NVIDIA, the `linux-nvidia` profile installs **Ollama**
 (Ollama-first isolated GGUF chat), seeds sidecar `.env` defaults, and verifies
@@ -378,6 +378,7 @@ Forge details: **[docs/forge.md](docs/forge.md)**
 | `seiso slime` | Single-process slime GRPO post-train (also `seiso train -c … method: slime`) |
 | `seiso nemo-rl` | Launch external [NVIDIA NeMo RL](https://github.com/NVIDIA-NeMo/RL) (`method: nemo_rl`; requires `SEISO_NEMO_RL_ROOT`) |
 | `seiso chat` | Terminal chat with local models |
+| `seiso tui` | Lightweight offline terminal UI that mimics Forge (no browser) |
 | `seiso export` | Export merged / GGUF / LoRA + Hub push |
 | `seiso compress run` | LLM compression pipeline |
 | `seiso compress manifest-verify` | Verify hash-chained run manifest |

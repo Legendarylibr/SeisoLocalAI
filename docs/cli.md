@@ -17,9 +17,9 @@ Helper scripts (repo `scripts/`, not on `PATH`):
 
 | Command / script | Purpose |
 |------------------|---------|
-| `start` | Install or launch Forge — on `PATH` via `~/.local/bin` after install |
+| `start` | Install or launch the Seiso TUI — on `PATH` via `~/.local/bin` after install |
 | `./scripts/install.sh` | Lower-level installer (system deps, venv, pip extras, UI build) |
-| `./scripts/start.sh` | Lower-level launcher (`seiso forge --open`; used by `start`) |
+| `./scripts/start.sh` | Lower-level launcher (`seiso tui`; `SEISO_UI=forge` for the web API) |
 | `./scripts/doctor.sh` | Diagnose install, HF, GPU stack (runs automatically on install/start failure) |
 | `./scripts/precheck.sh` | Fast local CI gate (`make precheck`) |
 | `./scripts/install_flash_attn.sh` | Optional Flash Attention (Linux NVIDIA) |
@@ -32,7 +32,7 @@ Launch the Forge web server (API + built UI).
 
 ```bash
 seiso forge
-seiso forge --open             # open browser when /health is ready (default via start.sh)
+seiso forge --open             # open browser when /health is ready (opt-in; start defaults to TUI)
 seiso forge --reload          # auto-reload Python on code changes
 seiso forge --port 8766       # custom port
 ```
@@ -114,6 +114,18 @@ Terminal chat with a local model.
 seiso chat --model meta-llama/Llama-3.2-3B-Instruct --prompt "Hello"
 seiso chat --model /path/to/model.gguf   # interactive mode (omit --prompt)
 ```
+
+## `seiso tui`
+
+Default **workspace UI**. Copies the Forge sidebar, Chat, Hub, Dashboard, and studio pages — no browser. Hub searches Hugging Face live (not only files already on disk). `start` launches this.
+
+```bash
+seiso tui                 # terminal UI (also what `start` runs)
+seiso tui --list          # local GGUF inventory, smallest first
+seiso tui --model 1       # pick by index / path / name substring
+```
+
+Hub: `/search qwen`, `/download N`, `/open N`. Chat loads weights on the first message; `/unload` frees RAM/VRAM. Studio pages (`/train`, `/compress`, …) show the CLI and accept `/run configs/example_lora.yaml`. Optional web API: `SEISO_UI=forge start` or `seiso forge`.
 
 ## `seiso export`
 

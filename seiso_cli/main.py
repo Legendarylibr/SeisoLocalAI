@@ -17,6 +17,7 @@ from seiso_cli.commands.pipelines import compress_app, distill_rl_app
 from seiso_cli.commands.provenance import provenance_app
 from seiso_cli.commands.slime import slime
 from seiso_cli.commands.train import train
+from seiso_cli.commands.tui import tui
 
 bootstrap_runtime()
 
@@ -32,6 +33,7 @@ app.command()(train)
 app.command(name="slime")(slime)
 app.command(name="nemo-rl")(nemo_rl)
 app.command()(chat)
+app.command()(tui)
 app.command(name="export")(export_cmd)
 app.command(name="inference")(inference_cmd)
 app.command(name="bench-inference")(bench_inference_cmd)

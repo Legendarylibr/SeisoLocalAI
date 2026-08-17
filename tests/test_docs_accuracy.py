@@ -139,6 +139,17 @@ def test_repository_layout_snippet_matches_core_packages():
     assert (REPO_ROOT / "seiso/training/practices.py").is_file()
 
 
+def test_cli_docs_cover_tui_command():
+    cli_doc = _read("docs/cli.md")
+    readme = _read("README.md")
+    assert "seiso tui" in cli_doc
+    assert "seiso tui" in readme
+    from seiso_cli.main import app
+
+    names = {cmd.name or getattr(cmd.callback, "__name__", "") for cmd in app.registered_commands}
+    assert "tui" in names
+
+
 def test_cli_docs_cover_experiment_command():
     """Experiment CLI stub points researchers to Adaptive-RL-Quantization."""
     cli_doc = _read("docs/cli.md")
