@@ -113,10 +113,9 @@ install_tui_enabled() {
 }
 
 install_tui_outro() {
-  local root="$1" forge_url
+  local root="$1"
   install_tui_enabled "$root" || return 0
-  forge_url="$(seiso_forge_url)"
-  python3 "$root/scripts/install_tui.py" outro --url "$forge_url"
+  python3 "$root/scripts/install_tui.py" outro
 }
 
 run_with_install_tui() {
@@ -304,13 +303,8 @@ main() {
     exec "$root/scripts/start.sh"
   fi
 
-  local forge_url
-  forge_url="$(seiso_forge_url)"
-  if install_tui_enabled "$root"; then
-    printf '\n%s\nDoctor: %s/scripts/doctor.sh\n\n' "$forge_url" "$root"
-  else
-    printf '\nStart Forge: start\n'
-    printf 'Doctor: %s/scripts/doctor.sh\n\n' "$root"
+  if [[ "$SEISO_START" != "1" ]]; then
+    printf '\nInstall complete.\nStart the TUI: start\nDoctor: %s/scripts/doctor.sh\n\n' "$root"
   fi
 }
 

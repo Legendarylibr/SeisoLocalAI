@@ -2,9 +2,22 @@
 
 from __future__ import annotations
 
+import sys
+
 import typer
 
 from seiso_cli.console import console
+
+
+def _reattach_controlling_tty() -> None:
+    """Recover a real terminal after ``curl | bash`` (stdin is a pipe)."""
+    if sys.stdin.isatty():
+        return
+    try:
+        tty = open("/dev/tty")  # noqa: SIM115
+    except OSError:
+        return
+    sys.stdin = tty
 
 
 def tui(
@@ -34,6 +47,7 @@ def tui(
         console.print(f"[red]{error}[/]")
         raise typer.Exit(1)
 
+    _reattach_controlling_tty()
     run_tui(
         data_dir=root,
         initial_model=str(selected.path) if selected else "",
