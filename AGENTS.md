@@ -10,9 +10,10 @@ Short guide for humans and coding agents. Deep detail lives in the `docs/` tree 
 4. **[docs/ANALYSIS.md](docs/ANALYSIS.md)** — Current architecture overview, feature map, code health, security notes, WIP items, and recommendations (this analysis).
 
 Key commands:
-- `start` or `SEISO_START=0 start` (from repo root or on PATH).
+- `start` or `SEISO_START=0 start` (from repo root or on PATH). Default start is `seiso tui`.
 - `seiso doctor [--network]`
-- `seiso forge` (then open browser)
+- `seiso tui` (default UI — Forge-shaped terminal, live Hugging Face Hub)
+- `seiso forge` (optional web API; `SEISO_UI=forge start`)
 - `seiso train --config configs/example_lora.yaml`
 - `seiso provenance attest|verify` (Nostr digest attestation; default on, kill with `SEISO_ALLOW_NOSTR=0` — see [docs/provenance-nostr.md](docs/provenance-nostr.md))
 - `make ci-fast` (or `python3 scripts/run_ci_local.py --fast`)

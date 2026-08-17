@@ -19,7 +19,7 @@ This guide walks you from a fresh machine to your first chat, training run, and 
 
 ### Linux, macOS, and WSL2 (fastest)
 
-One command installs dependencies (including native Linux build tools), builds the UI, and **starts Forge** (browser opens automatically):
+One command installs dependencies (including native Linux build tools), builds optional extras, and **starts the Seiso TUI** (no browser):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
@@ -118,9 +118,14 @@ Before loading a larger model, use **Free memory** in Chat or Model Hub to unloa
 
 ## Step 4 — Chat with a local model
 
-1. Open **Chat** (`/chat`)
-2. Select a downloaded model or a GGUF backend
-3. Send a message — responses stream in real time
+Default path (`start` / `seiso tui`) is the terminal UI:
+
+1. Hub lists **local GGUFs** and **live Hugging Face** results
+2. `/search qwen` then `/download N` (or `/open N` if already on disk)
+3. Type a message in Chat — weights load on the first send
+4. `/unload` frees RAM/VRAM without deleting downloads
+
+`seiso forge` remains the optional HTTP API / React app (`SEISO_UI=forge start`).
 
 **Backend auto-selection:**
 
