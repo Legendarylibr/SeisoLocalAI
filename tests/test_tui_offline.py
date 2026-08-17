@@ -148,9 +148,9 @@ def test_lite_web_ui_removed() -> None:
 
 def test_start_defaults_to_tui() -> None:
     start = (Path(__file__).resolve().parents[1] / "scripts/start.sh").read_text(encoding="utf-8")
-    assert 'SEISO_UI:-tui' in start or 'SEISO_UI:-tui' in start.replace('"', "")
+    assert "SEISO_UI:-tui" in start or "SEISO_UI:-tui" in start.replace('"', "")
     assert 'exec "$seiso_bin" tui' in start
-    assert "seiso tui" in start or 'tui' in start
+    assert "seiso tui" in start or "tui" in start
 
 
 def test_tui_command_registered() -> None:

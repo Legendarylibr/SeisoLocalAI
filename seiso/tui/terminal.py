@@ -92,7 +92,9 @@ def render_dashboard(
     lines.append(f"Data dir  {data_dir}\n", style=MUTED)
     if status:
         lines.append(f"\n{status}\n", style=WARM)
-    lines.append("\n/hub to browse Hugging Face   /chat to talk   /train for CLI studio", style=MUTED)
+    lines.append(
+        "\n/hub to browse Hugging Face   /chat to talk   /train for CLI studio", style=MUTED
+    )
     return Group(lines)
 
 
@@ -166,10 +168,6 @@ def _indexed(local: list[HubRow], remote: list[HubRow]) -> list[tuple[int, HubRo
     return list(enumerate([*local, *remote], start=1))
 
 
-def combined_rows(local: list[HubRow], remote: list[HubRow]) -> list[HubRow]:
-    return [row for _, row in _indexed(local, remote)]
-
-
 def render_chat(
     messages: list[dict[str, str]],
     *,
@@ -236,7 +234,9 @@ def render_knowledge(data_dir: str, status: str) -> Text:
             out.append("  (empty)\n", style=MUTED)
     else:
         out.append("  No knowledge/ directory yet.\n", style=MUTED)
-    out.append("\nFull ingest/retrieve UI remains in Forge if you need the graph studio.\n", style=MUTED)
+    out.append(
+        "\nFull ingest/retrieve UI remains in Forge if you need the graph studio.\n", style=MUTED
+    )
     if status:
         out.append(f"\n{status}\n", style=WARM)
     return out
@@ -279,9 +279,7 @@ def draw_frame(
     main: RenderableType
     if page == "dashboard":
         title, subtitle = "Dashboard", "Overview"
-        main = render_dashboard(
-            models, data_dir=data_dir, hub_count=len(remote_hub), status=status
-        )
+        main = render_dashboard(models, data_dir=data_dir, hub_count=len(remote_hub), status=status)
     elif page == "hub":
         title, subtitle = "Hub", "Models"
         main = render_hub(

@@ -99,9 +99,10 @@ def run_tui(
         )
 
     def row_at(index: int) -> HubRow | None:
-        rows = combined_rows(local_hub, remote_hub)
+        rows: list[HubRow] = combined_rows(local_hub, remote_hub)
         if 1 <= index <= len(rows):
-            return rows[index - 1]
+            chosen: HubRow = rows[index - 1]
+            return chosen
         return None
 
     def adopt_local(path: Path, label: str) -> None:
@@ -128,13 +129,16 @@ def run_tui(
             stripped = line.strip()
             if page == "hub" and stripped.isdigit():
                 hub_selected = int(stripped)
-                picked = row_at(hub_selected)
-                if picked is None:
+                selected_row = row_at(hub_selected)
+                if selected_row is None:
                     status = f"No row #{hub_selected}"
-                elif picked.path is not None:
-                    adopt_local(picked.path, picked.title)
+                elif selected_row.path is not None:
+                    adopt_local(selected_row.path, selected_row.title)
                 else:
-                    status = f"Selected {picked.repo_id} — /download {hub_selected} or /open {hub_selected}"
+                    status = (
+                        f"Selected {selected_row.repo_id} — "
+                        f"/download {hub_selected} or /open {hub_selected}"
+                    )
                 continue
 
             cmd = parse_slash(line)
@@ -213,11 +217,11 @@ def run_tui(
                 else:
                     status = f"{target.repo_id} is not local yet — /download {cmd.arg}"
             elif cmd.kind == "use":
-                picked, err = resolve_model_choice(cmd.arg, models)
-                if err or picked is None:
+                local_pick, err = resolve_model_choice(cmd.arg, models)
+                if err or local_pick is None:
                     status = err or "No model"
                 else:
-                    adopt_local(picked.path, picked.label)
+                    adopt_local(local_pick.path, local_pick.label)
                     release_offline_weights()
             elif cmd.kind == "unload":
                 release_offline_weights()

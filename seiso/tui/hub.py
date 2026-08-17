@@ -62,8 +62,9 @@ def _catalog_row(entry: dict[str, Any], *, local_names: set[str]) -> HubRow:
     name = str(entry.get("name") or repo.split("/")[-1] or repo)
     ready = name.lower() in local_names or repo.lower() in local_names
     downloads = entry.get("downloads") if isinstance(entry.get("downloads"), int) else None
-    tags = entry.get("tags") if isinstance(entry.get("tags"), list) else []
-    tag_s = " · ".join(str(t) for t in tags[:3])
+    raw_tags = entry.get("tags")
+    tags: list[str] = [str(t) for t in raw_tags[:3]] if isinstance(raw_tags, list) else []
+    tag_s = " · ".join(tags)
     gguf = entry.get("gguf_repo")
     subtitle_bits = [repo]
     if gguf and gguf != repo:
@@ -198,6 +199,10 @@ def download_hub_repo(repo_id: str, *, data_dir: Path) -> HubRow:
         status="ready",
         subtitle=str(path),
     )
+
+
+def combined_rows(local: list[HubRow], remote: list[HubRow]) -> list[HubRow]:
+    return [*local, *remote]
 
 
 def format_downloads(n: int | None) -> str:

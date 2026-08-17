@@ -25,4 +25,6 @@ def run_cli_job(spec: str, *, cwd: Path) -> str:
         return "seiso CLI not on PATH. Activate the venv."
     except OSError as exc:
         return f"Could not start `{' '.join(cmd)}`: {exc}"
-    return f"Started `{' '.join(cmd)}` in the background. Artifacts land under outputs/ or ~/.seiso/."
+    return (
+        f"Started `{' '.join(cmd)}` in the background. Artifacts land under outputs/ or ~/.seiso/."
+    )
