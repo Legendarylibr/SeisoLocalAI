@@ -9,6 +9,8 @@ from seiso.tui.hub import search_hub
 from seiso.tui.offline import (
     discover_local_gguf,
     format_size,
+    local_model_label,
+    looks_like_digest_name,
     parse_slash,
     pick_default_model,
     resolve_model_choice,
@@ -34,6 +36,85 @@ def test_discover_skips_mmproj_and_sorts_smallest_first(tmp_path: Path) -> None:
     assert [item.label for item in found] == ["tiny.gguf", "mid.gguf", "big.gguf"]
     assert pick_default_model(found) is not None
     assert pick_default_model(found).label == "tiny.gguf"
+
+
+def test_discover_shows_model_name_not_hf_blob_hash(tmp_path: Path) -> None:
+    digest = "7f99c1aeefbcf991f04f67104e3d6f7b899e95170359ce081b0618d4f11878f5"
+    repo = tmp_path / "hf_cache" / "models--Qwen--Qwen3-4B-GGUF"
+    blob = repo / "blobs" / digest
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(b"0" * 200)
+    snapshot = (
+        repo / "snapshots" / "bc640142c66e1fdd12af0bd68f40445458f3869b" / "Qwen3-4B-Q5_0.gguf"
+    )
+    snapshot.parent.mkdir(parents=True)
+    snapshot.symlink_to(blob)
+    inventory = tmp_path / "models" / "user" / "Qwen--Qwen3-4B" / "Qwen3-4B-Q5_0.gguf"
+    inventory.parent.mkdir(parents=True)
+    inventory.symlink_to(snapshot)
+
+    found = discover_local_gguf(tmp_path)
+
+    assert len(found) == 1
+    assert found[0].label == "Qwen3-4B-Q5_0.gguf"
+    assert digest not in found[0].label
+    assert found[0].path.name == "Qwen3-4B-Q5_0.gguf"
+    assert looks_like_digest_name(digest)
+    assert not looks_like_digest_name("Qwen3-4B-Q5_0.gguf")
+
+
+def test_discover_snapshot_only_uses_gguf_filename(tmp_path: Path) -> None:
+    digest = "c034cdfb0ad5b3edc5cf4ac07bff3b1b214aa541e633b37191c19c3a7b119727"
+    repo = tmp_path / "hf_cache" / "models--Qwen--Qwen3-8B-GGUF"
+    blob = repo / "blobs" / digest
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(b"0" * 150)
+    snapshot = (
+        repo / "snapshots" / "7c41481f57cb95916b40956ab2f0b139b296d974" / "Qwen3-8B-Q5_0.gguf"
+    )
+    snapshot.parent.mkdir(parents=True)
+    snapshot.symlink_to(blob)
+
+    found = discover_local_gguf(tmp_path)
+
+    assert [item.label for item in found] == ["Qwen3-8B-Q5_0.gguf"]
+    assert digest not in str(found[0].path)
+
+
+def test_search_hub_local_title_is_model_name_not_hash(tmp_path: Path) -> None:
+    digest = "7f99c1aeefbcf991f04f67104e3d6f7b899e95170359ce081b0618d4f11878f5"
+    repo = tmp_path / "hf_cache" / "models--Qwen--Qwen3-4B-GGUF"
+    blob = repo / "blobs" / digest
+    blob.parent.mkdir(parents=True)
+    blob.write_bytes(b"0" * 200)
+    snapshot = (
+        repo / "snapshots" / "bc640142c66e1fdd12af0bd68f40445458f3869b" / "Qwen3-4B-Q5_0.gguf"
+    )
+    snapshot.parent.mkdir(parents=True)
+    snapshot.symlink_to(blob)
+
+    local, _remote, error = search_hub(
+        "",
+        data_dir=tmp_path,
+        catalog_search=lambda *_a, **_k: type("R", (), {"models": []})(),
+        gguf_search=lambda **_k: [],
+    )
+    assert error is None
+    assert [row.title for row in local] == ["Qwen3-4B-Q5_0.gguf"]
+    assert digest not in local[0].title
+
+
+def test_local_model_label_from_blob_and_snapshot_paths() -> None:
+    digest = "8d0eb319f05cdd6ce88e308cbcdfa9a8c1f7e99416cc7d34b80f158a7f514411"
+    blob = Path("/data/hf_cache/models--MaziyarPanahi--Qwen3-4B-Instruct-2507-GGUF/blobs/" + digest)
+    snapshot = Path(
+        "/data/hf_cache/models--MaziyarPanahi--Qwen3-4B-Instruct-2507-GGUF/"
+        "snapshots/aec29f0e8c31130ba811bec2c774c2ef44888f55/"
+        "Qwen3-4B-Instruct-2507.Q2_K.gguf"
+    )
+    assert local_model_label(blob) == "MaziyarPanahi/Qwen3-4B-Instruct-2507-GGUF"
+    assert local_model_label(blob, snapshot) == "Qwen3-4B-Instruct-2507.Q2_K.gguf"
+    assert looks_like_digest_name(f"sha256-{digest}")
 
 
 def test_discover_dedups_hardlinks(tmp_path: Path) -> None:
