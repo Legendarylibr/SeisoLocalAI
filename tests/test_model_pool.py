@@ -20,6 +20,14 @@ from seiso.inference.model_pool import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _clear_llama_env(monkeypatch):
+    """Isolate SEISO_LLAMA_* so leaked setdefault from other tests cannot force CPU."""
+    for key in list(os.environ):
+        if key.startswith("SEISO_LLAMA_"):
+            monkeypatch.delenv(key, raising=False)
+
+
 def test_pool_singleton():
     a = ModelPool.get()
     b = ModelPool.get()
