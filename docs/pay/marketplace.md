@@ -2,7 +2,9 @@
 
 > **Not functional yet — do not use.** This surface is scaffolding / docs only. Do not run it for production work or real funds. Live **Ark**, **L402**, and **x402 EVM** settlement are not wired; faucet/sim only for local smoke tests.
 
-Remote **finetune / RL / inference** priced in sats. Self-hosted Seiso stays **free** and never pays a protocol fee.
+Remote **finetune / RL / inference** priced in sats (and converted to USDC / ETH per request). Self-hosted Seiso stays **free** and never pays a protocol fee.
+
+**Per-request debit** (x402 USDC, ETH via `SeisoPayRouter`, L402, Ark/HTLC): [per-request.md](per-request.md).
 
 Requires explicit `SEISO_ALLOW_PAY=1`. Leave unset for normal local Forge/CLI use.
 

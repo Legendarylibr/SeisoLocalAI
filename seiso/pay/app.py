@@ -45,13 +45,18 @@ from seiso.pay.x402 import (
     x402_sim_enabled,
 )
 
+try:
+    from starlette.requests import Request as ASGIRequest
+except ImportError:  # pragma: no cover
+    ASGIRequest = object  # type: ignore[misc,assignment]
+
 
 def build_app():
     """Construct the marketplace ASGI app (requires fastapi extra)."""
     require_pay_allowed()
     try:
         import httpx
-        from fastapi import Depends, FastAPI, Header, HTTPException, Request
+        from fastapi import Depends, FastAPI, Header, HTTPException
         from fastapi.responses import JSONResponse, StreamingResponse
     except ImportError as exc:
         raise RuntimeError(
@@ -79,8 +84,22 @@ def build_app():
         except KeyError as exc:
             raise HTTPException(401, "Invalid pay token") from exc
 
+    def _optional_session(
+        authorization: str | None = Header(default=None),
+    ) -> dict[str, Any] | None:
+        if not authorization or not authorization.lower().startswith("bearer "):
+            return None
+        token = authorization.split(" ", 1)[1].strip()
+        if token.startswith("seiso_pay_"):
+            try:
+                return resolve_session_by_token(token)
+            except KeyError as exc:
+                raise HTTPException(401, "Invalid pay token") from exc
+        return None
+
     # Pre-bind Depends so defaults are not a call expression (ruff B008).
     _bearer_dep = Depends(_bearer_session)
+    _optional_session_dep = Depends(_optional_session)
 
     @app.get("/health")
     def health() -> dict[str, Any]:
@@ -115,6 +134,7 @@ def build_app():
                 "fund_l402_complete": "/pay/v1/sessions/fund/l402/complete",
                 "fund_x402": "/pay/v1/sessions/fund/x402",
                 "fund_x402_complete": "/pay/v1/sessions/fund/x402/complete",
+                "per_request": "/pay/v1/requests",
                 "quotes": "/pay/v1/quotes",
                 "jobs": "/pay/v1/jobs",
                 "models": "/v1/models",
@@ -122,6 +142,8 @@ def build_app():
             },
             "l402_sim": l402_sim_enabled(),
             "x402_sim": x402_sim_enabled(),
+            "per_request": True,
+            "assets": ["sats", "usdc", "eth"],
             "forge_proxied": forge_base_url(),
         }
 
@@ -332,11 +354,17 @@ def build_app():
             raise HTTPException(404, "job not found")
         return {"job": cancel_job(job_id)}
 
-    async def _proxy_chat(request: Request, session: dict) -> Any:
-        if session.get("status") != "active":
-            raise HTTPException(402, "session not funded/active")
-        if "inference" not in set(session.get("scopes") or []):
-            raise HTTPException(403, "scope inference required")
+    async def _proxy_chat(
+        request: ASGIRequest,
+        session: dict | None,
+        *,
+        already_paid: bool = False,
+    ) -> Any:
+        if not already_paid:
+            if not session or session.get("status") != "active":
+                raise HTTPException(402, "session not funded/active")
+            if "inference" not in set(session.get("scopes") or []):
+                raise HTTPException(403, "scope inference required")
         body = await request.json()
         messages = body.get("messages") or []
         prompt_est = estimate_tokens_from_messages(messages)
@@ -346,7 +374,9 @@ def build_app():
         from seiso.pay.pricing import quote_inference_tokens
 
         pre = quote_inference_tokens(prompt_est, completion_est, flat_call=False)
-        if int(session.get("balance_sats") or 0) < int(pre["total_sats"]):
+        if not already_paid and int((session or {}).get("balance_sats") or 0) < int(
+            pre["total_sats"]
+        ):
             raise HTTPException(402, "insufficient balance for inference")
 
         key = (os.environ.get("SEISO_INFERENCE_API_KEY") or "").strip()
@@ -383,13 +413,13 @@ def build_app():
                     async for chunk in upstream.aiter_bytes():
                         yield chunk
                     await upstream.aclose()
-                    # Debit the same completion estimate used at preflight.
-                    debit_inference(
-                        str(session["session_id"]),
-                        prompt_tokens=prompt_est,
-                        completion_tokens=completion_est,
-                        flat_call=False,
-                    )
+                    if not already_paid and session:
+                        debit_inference(
+                            str(session["session_id"]),
+                            prompt_tokens=prompt_est,
+                            completion_tokens=completion_est,
+                            flat_call=False,
+                        )
 
                 return StreamingResponse(gen(), media_type="text/event-stream")
 
@@ -407,6 +437,9 @@ def build_app():
             prompt_toks = int(
                 usage.get("prompt_tokens") or usage.get("prompt_token_estimate") or prompt_est
             )
+            if already_paid:
+                data["seiso_pay"] = {"per_request": True, "prepaid_session": False}
+                return JSONResponse(data)
             try:
                 meter = debit_inference(
                     str(session["session_id"]),
@@ -436,9 +469,124 @@ def build_app():
             )
             return JSONResponse(resp.json(), status_code=resp.status_code)
 
+    @app.post("/pay/v1/requests")
+    def create_pay_request(body: dict[str, Any] | None = None) -> JSONResponse:
+        from seiso.pay.per_request import mint_request_quote, per_request_enabled
+
+        if not per_request_enabled():
+            raise HTTPException(503, "SEISO_PAY_PER_REQUEST=0")
+        body = body or {}
+        messages = body.get("messages") or []
+        if messages:
+            prompt_est = estimate_tokens_from_messages(messages)
+        else:
+            prompt_est = int(body.get("prompt_tokens") or 0)
+        completion_est = max(1, int(body.get("max_tokens") or body.get("completion_tokens") or 64))
+        try:
+            challenge = mint_request_quote(
+                prompt_tokens=prompt_est,
+                completion_tokens=completion_est,
+                flat_call=bool(body.get("flat_call")),
+            )
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        headers = {
+            "WWW-Authenticate": str(challenge["www_authenticate"]),
+            "PAYMENT-REQUIRED": str(challenge["payment_required_header"]),
+        }
+        return JSONResponse(challenge, status_code=402, headers=headers)
+
+    @app.get("/pay/v1/requests/{request_id}")
+    def get_pay_request(request_id: str) -> dict[str, Any]:
+        from seiso.pay.per_request import load_request
+
+        try:
+            rec = load_request(request_id)
+        except KeyError as exc:
+            raise HTTPException(404, "request not found") from exc
+        return {
+            "request_id": rec["request_id"],
+            "status": rec["status"],
+            "fx": rec.get("fx"),
+            "paid_via": rec.get("paid_via"),
+        }
+
+    @app.post("/pay/v1/requests/{request_id}/complete")
+    def complete_pay_request(request_id: str, body: dict[str, Any] | None = None) -> dict[str, Any]:
+        from seiso.pay.per_request import (
+            complete_eth_request,
+            complete_l402_request,
+            complete_sim,
+            complete_x402_request,
+            sim_receipt,
+        )
+
+        body = body or {}
+        via = str(body.get("via") or "x402").strip().lower()
+        receipt = body.get("receipt")
+        try:
+            if via == "x402":
+                rec = complete_x402_request(
+                    request_id,
+                    payment_signature=body.get("payment_signature"),
+                    receipt=receipt,
+                )
+            elif via == "eth":
+                rec = complete_eth_request(request_id, receipt=receipt)
+            elif via == "l402":
+                rec = complete_l402_request(request_id, receipt=receipt)
+            elif via == "ark":
+                proof = receipt or sim_receipt(request_id, via="ark")
+                rec = complete_sim(request_id, via="ark", receipt=str(proof))
+            else:
+                raise HTTPException(400, f"unknown via {via}")
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(401, str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return {
+            "request_id": rec["request_id"],
+            "status": rec["status"],
+            "paid_via": rec["paid_via"],
+        }
+
     @app.post("/v1/chat/completions")
-    async def chat_completions(request: Request, session: dict[str, Any] = _bearer_dep) -> Any:
-        return await _proxy_chat(request, session)
+    async def chat_completions(
+        request: ASGIRequest,
+        session: dict[str, Any] | None = _optional_session_dep,
+    ) -> Any:
+        from seiso.pay.per_request import per_request_enabled, request_paid
+
+        rid = (request.headers.get("x-seiso-request-id") or "").strip()
+        if rid and request_paid(rid):
+            return await _proxy_chat(request, session, already_paid=True)
+        if session and session.get("status") == "active":
+            return await _proxy_chat(request, session, already_paid=False)
+        if per_request_enabled():
+            body = await request.json()
+            messages = body.get("messages") or []
+            prompt_est = estimate_tokens_from_messages(messages)
+            completion_est = max(1, int(body.get("max_tokens") or 64))
+            from seiso.pay.per_request import mint_request_quote
+
+            try:
+                challenge = mint_request_quote(
+                    prompt_tokens=prompt_est,
+                    completion_tokens=completion_est,
+                )
+            except RuntimeError as exc:
+                raise HTTPException(402, str(exc)) from exc
+            return JSONResponse(
+                challenge,
+                status_code=402,
+                headers={
+                    "WWW-Authenticate": str(challenge["www_authenticate"]),
+                    "PAYMENT-REQUIRED": str(challenge["payment_required_header"]),
+                },
+            )
+        raise HTTPException(401, "Bearer seiso_pay_* token or per-request payment required")
 
     return app
 

@@ -713,7 +713,7 @@ Self-hosted Forge/CLI remain **free** and unchanged unless you opt in. Two optio
 | Mode | Flag | Settlement | Protocol fee | Docs |
 |------|------|------------|--------------|------|
 | **Self-hosted** (default) | — | None | None | this README |
-| **Sats marketplace** | `SEISO_ALLOW_PAY=1` | Opt-in **Ark** + **L402** + **x402 EVM** (**not functional — do not use yet**; faucet/sim only) | Default **5%** on top of compute | [pay/marketplace.md](docs/pay/marketplace.md) |
+| **Sats marketplace** | `SEISO_ALLOW_PAY=1` | Opt-in **Ark** + **L402** + **x402 USDC** + **ETH** per request (**not functional for live funds**; faucet/sim + contracts in `contracts/`) | Default **5%** on top of compute | [pay/marketplace.md](docs/pay/marketplace.md) · [per-request](docs/pay/per-request.md) |
 | **Buzz mesh** (experimental secondary) | `SEISO_ALLOW_MESH=1` | Reciprocal peers; `SEISO_MESH_TOKEN` out-of-band | **None** | [training/mesh.md](docs/training/mesh.md) |
 
 ```bash

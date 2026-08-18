@@ -159,6 +159,7 @@ When this machine cannot (or should not) run the job, the OS can buy **inference
 - Default **5%** protocol fee on top of operator price; localhost is never billed
 - Experimental **Buzz mesh** for trusted peers with **no** protocol fee ([docs/training/mesh.md](docs/training/mesh.md))
 - Catalog type `Listing` + `quote_listing` (`seiso/pay/catalog.py`) — inference / finetune / slime / distill_rl / nemo_rl; **no Seiso token**; loopback listings are 0 sats
+- Per-request debit: x402 USDC, ETH (`SeisoPayRouter` + `SeisoPriceOracle`), L402, Ark/HTLC ([per-request.md](docs/pay/per-request.md))
 
 **Next**
 

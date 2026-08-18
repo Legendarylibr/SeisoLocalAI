@@ -45,6 +45,7 @@ Where Seiso is going (local agentic OS, harness, model-aware routing, BTC/crypto
 | Read kernel shape / intensity estimates | [training/kernel-shape.md](training/kernel-shape.md) · `seiso-bench-kernels --roofline-only` |
 | Train on multiple GPUs | [training/multi-gpu.md](training/multi-gpu.md) |
 | Opt-in sats marketplace (**not functional — do not use yet**) | [pay/marketplace.md](pay/marketplace.md) |
+| Per-request x402 / ETH / L402 / Ark | [pay/per-request.md](pay/per-request.md) · [contracts](../contracts/README.md) |
 | Experimental Buzz mesh training (secondary / opt-in) | [training/mesh.md](training/mesh.md) |
 | Deploy with HTTPS | [deployment/reverse-proxy.md](deployment/reverse-proxy.md) |
 | Fix a problem | [troubleshooting.md](troubleshooting.md) |
