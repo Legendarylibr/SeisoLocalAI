@@ -23,4 +23,4 @@ Thanks for helping improve Seiso.
 
 ## Documentation
 
-Start at [docs/README.md](docs/README.md) or [docs/getting-started.md](docs/getting-started.md).
+Start at [docs/README.md](docs/README.md) or [docs/getting-started.md](docs/getting-started.md). Destination and phased work: [ROADMAP.md](ROADMAP.md).

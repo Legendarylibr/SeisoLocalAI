@@ -8,13 +8,14 @@ Going to work on a self hosted mirror then merge large changes (maybe waiting ti
 
 **Repository:** [github.com/Legendarylibr/SeisoLocalAI](https://github.com/Legendarylibr/SeisoLocalAI)  
 **License:** [GPL-3.0](LICENSE) · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)  
-**Docs:** [docs/README.md](docs/README.md)
+**Docs:** [docs/README.md](docs/README.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md)
 
 ---
 
 ## Table of contents
 
 - [What Seiso does](#what-seiso-does)
+- [Roadmap](#roadmap)
 - [Quick start](#quick-start)
 - [Forge UI walkthrough](#forge-ui-walkthrough)
 - [CLI reference](#cli)
@@ -66,6 +67,14 @@ Two surfaces share the same core:
 | **Seiso Core** | `seiso/` + `seiso_cli/` | Training, inference, export, compression library + CLI |
 
 Runs on **Windows**, **Linux**, **WSL2**, and **macOS**. See [docs/platforms/](docs/README.md#platform-guides) for per-OS guides.
+
+---
+
+## Roadmap
+
+The goal is a **local agentic operating system**: a harness on your machine, **model-aware routing** (local models plus an optional external router), and an opt-in **marketplace** for distributed inference and training paid in Bitcoin / Lightning / crypto. Self-hosted stays free. There is no Seiso token.
+
+Full write-up: **[ROADMAP.md](ROADMAP.md)**.
 
 ---
 
@@ -671,6 +680,7 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 
 | Topic | Guide |
 |-------|-------|
+| **Roadmap (agentic OS, harness, routing, marketplace)** | [ROADMAP.md](ROADMAP.md) |
 | **Getting started (full walkthrough)** | [docs/getting-started.md](docs/getting-started.md) |
 | Install & extras | [docs/install.md](docs/install.md) |
 | Documentation hub | [docs/README.md](docs/README.md) |
