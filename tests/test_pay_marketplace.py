@@ -477,6 +477,27 @@ def test_buyer_config_must_be_under_configs(pay_env: Path) -> None:
         _sandbox_config_path("../secrets.yaml")
 
 
+def test_decide_compute_fee_matches_quote_job(pay_env: Path) -> None:
+    from seiso.agent.kernel import ComputeTarget, decide_compute
+    from seiso.agent.surface import TrainingSurface
+    from seiso.pay.pricing import quote_job
+
+    quote = quote_job("finetune", preset="smoke")
+    decision = decide_compute(
+        local_healthy=False,
+        allow_mesh=False,
+        allow_pay=True,
+        buzz_agent=False,
+        pay_url="https://pay.example.com",
+        quote=quote,
+        job_kind="finetune",
+        surface=TrainingSurface.AGENT,
+    )
+    assert decision.target is ComputeTarget.PAY
+    assert decision.fee_sats == quote["total_sats"]
+    assert decision.fee_sats == quote["compute_sats"] + quote["protocol_fee_sats"]
+
+
 def test_relative_artifact_name_rejects_traversal() -> None:
     from seiso.security import assert_relative_artifact_name
 

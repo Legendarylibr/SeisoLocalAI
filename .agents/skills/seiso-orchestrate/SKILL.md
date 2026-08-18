@@ -122,12 +122,19 @@ buzz messages send --channel "$CHANNEL" --content "Starting doctor + Forge healt
 
 ### Compute decision (do not charge local)
 
+Call `decide_compute` (`seiso.agent.kernel`) or `seiso agent decide` instead of
+re-implementing this. Order is **local → mesh → pay → ask_human**.
+
 ```
 local Forge/CLI healthy? → self-hosted (free, 0% fee)
-else SEISO_PAY_URL set? → marketplace quote → fund → job|/v1 (sats + protocol fee)
 else mesh peers enough + SEISO_ALLOW_MESH + Buzz agent? → seiso mesh (experimental, no fee)
+else SEISO_PAY_URL set + SEISO_ALLOW_PAY + allow_paid? → marketplace quote → fund → job|/v1
 else → ask human
 ```
+
+Never point `SEISO_PAY_URL` at localhost — `decide_compute` refuses loopback pay.
+`seiso route` / `select_route` pick the local model (or a localhost external router).
+`seiso agent plan --dry-run` prints a `run_harness` plan without starting jobs.
 
 | Goal | Command / API |
 |------|----------------|

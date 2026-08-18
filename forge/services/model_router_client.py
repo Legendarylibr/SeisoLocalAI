@@ -6,28 +6,23 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from typing import Any
-from urllib.parse import urlparse
 
 import httpx
 
 from forge.config import ForgeSettings
+from seiso.routing.external import validate_router_url
+
+# Keep the id here so Forge inference does not import seiso.routing.select
+# (and therefore seiso.agent) at module load.
+ROUTER_MODEL_ID = "__seiso_router__"
 
 logger = logging.getLogger(__name__)
-
-ROUTER_MODEL_ID = "__seiso_router__"
 
 _router_client: httpx.AsyncClient | None = None
 
 
 def _validate_router_url(url: str) -> str:
-    parsed = urlparse(url.strip())
-    if parsed.scheme not in ("http", "https") or not parsed.netloc:
-        raise ValueError("model_router_url must be a valid http(s) URL")
-    host = (parsed.hostname or "").lower()
-    # Local-first: loopback only. .internal hosts are not accepted (SSRF risk).
-    if host not in {"127.0.0.1", "localhost", "::1"}:
-        raise ValueError("model_router_url must point to localhost for local-first routing")
-    return url.rstrip("/")
+    return validate_router_url(url)
 
 
 def _router_http_client() -> httpx.AsyncClient:

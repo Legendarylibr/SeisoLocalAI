@@ -328,7 +328,33 @@ seiso mesh worker --plan "$JOB_ID" --rank 0 -c configs/smoke_train_gpu.yaml --dr
 seiso mesh worker --plan "$JOB_ID" --rank 1 -c configs/smoke_train_gpu.yaml --launch --confirm-launch
 ```
 
-## `seiso agent` (Buzz-facing signed status)
+## `seiso route`
+
+Model-aware picker. Prints a `RouteDecision` JSON from local inventory (no GPU).
+
+```bash
+seiso route --task chat --context 8192 --vram-mb 8192 \
+  --inventory-json '[{"model_id":"qwen-7b","backend":"llamacpp","role":"chat","context_tokens":8192,"vram_mb":5000,"downloaded":true,"params_b":7}]'
+# Optional localhost external router when nothing local fits:
+seiso route --task chat --external --router-url http://127.0.0.1:8780 --inventory-json '[]'
+```
+
+See [ROADMAP.md](../ROADMAP.md) pillar 3.
+
+## `seiso agent` (decide / plan / Buzz-facing signed status)
+
+```bash
+# Where should this job run? (local → mesh → pay → ask_human)
+seiso agent decide --job finetune --local-healthy
+seiso agent decide --job slime --no-local-healthy --mesh-peers --route-class local_then_mesh
+
+# One-step harness plan (default --dry-run: no jobs)
+seiso agent plan --dry-run --task chat --goal "smoke chat"
+```
+
+Prefer these over ad-hoc scripts; they call `decide_compute` and `run_harness`.
+
+## `seiso agent status` (Buzz-facing signed status)
 
 Generic agent milestones use the same **relay only with signing** policy as mesh:
 
