@@ -258,6 +258,10 @@ def parse_slash(line: str) -> SlashCommand | None:
         "logout": "logout",
         "signout": "logout",
         "relays": "relays",
+        "harness": "harness",
+        "subagents": "subagents",
+        "swarm": "swarm",
+        "agent": "agent",
     }
     kind = aliases.get(verb)
     if kind is None:

@@ -25,6 +25,7 @@ Where Seiso is going (local agentic OS, harness, model-aware routing, BTC/crypto
 | Install on Linux or macOS in one command | [install.md](install.md#linux--macos--one-command-recommended) |
 | Install on Windows or AMD ROCm | [platforms/windows.md](platforms/windows.md) · [platforms/linux-amd-rocm.md](platforms/linux-amd-rocm.md) |
 | Launch the terminal UI | `start` or `seiso tui` → [cli.md](cli.md#seiso-tui) |
+| Configure Pi / OMP / Hermes / Cline / OpenClaw in the TUI | [tui-harnesses.md](tui-harnesses.md) · `seiso agent harnesses` |
 | First-run Nostr auth (npub / nsec) | [getting-started.md § Onboarding](getting-started.md#step-2--onboarding) · [forge.md § Auth](forge.md#auth-nostr) |
 | Diagnose install / HF / GPU | `seiso doctor` or `./scripts/doctor.sh` → [cli.md](cli.md) |
 | Chat with a local model | [getting-started.md § Step 4](getting-started.md#step-4--chat-with-a-local-model) · `seiso tui` |

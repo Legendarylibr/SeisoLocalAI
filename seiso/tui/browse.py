@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from seiso.agent.adapters.types import HARNESS_LABELS, DetectedHarness
+from seiso.agent.swarm.types import SUBAGENT_ROLES, AgentSettings
 from seiso.tui.hub import HubRow, combined_rows
 from seiso.tui.pages import DASHBOARD_GOALS, NAV_GROUPS, STUDIO_PAGES
 
@@ -93,6 +95,124 @@ def goal_page(goal: dict[str, str]) -> str:
     return ident or "dashboard"
 
 
+def harness_settings_choices(
+    settings: AgentSettings,
+    *,
+    model_labels: list[str] | None = None,
+) -> list[Choice]:
+    models = model_labels or []
+    rows = [
+        Choice(
+            kind="action",
+            label=f"Agent harness    {HARNESS_LABELS.get(settings.harness, settings.harness)}",
+            action="cycle_harness",
+            detail="Cycle Pi / OMP / Hermes / Cline / OpenClaw",
+        ),
+        Choice(
+            kind="action",
+            label=f"Model source     {settings.model_source}",
+            action="cycle_source",
+            detail="Auto / Ollama / Smart Router / Forge",
+        ),
+        Choice(
+            kind="action",
+            label=f"Seiso subagents  {'on' if settings.seiso_subagents else 'off'}",
+            action="toggle_subagents",
+            detail="Off = worker only, no extra model loads",
+        ),
+    ]
+    if settings.seiso_subagents:
+        rows.append(
+            Choice(
+                kind="action",
+                label=f"Swarm preset     {settings.preset}",
+                action="cycle_preset",
+                detail="single / pair / plan_act_verify",
+            )
+        )
+    rows.append(
+        Choice(
+            kind="action",
+            label=f"Route class      {settings.route_class}",
+            action="cycle_route",
+            detail="never_leave / local_then_mesh / allow_paid",
+        )
+    )
+    if settings.seiso_subagents:
+        for role in SUBAGENT_ROLES:
+            spec = settings.subagents[role]
+            state = "on" if spec.enabled else "off"
+            rows.append(
+                Choice(
+                    kind="action",
+                    label=f"{role:16} {state}  model {spec.model_id}",
+                    action=f"toggle_role_{role}",
+                    detail="Enter to enable or disable this Seiso subagent",
+                )
+            )
+            if spec.enabled:
+                rows.append(
+                    Choice(
+                        kind="action",
+                        label=f"  {role} model   {spec.model_id}",
+                        action=f"cycle_model_{role}",
+                        detail="Cycle Auto" + (f" / {', '.join(models[:4])}" if models else ""),
+                    )
+                )
+                if role in {"completion", "correctness", "planner", "synthesizer"}:
+                    rows.append(
+                        Choice(
+                            kind="action",
+                            label=f"  {role} LLM     {'on' if spec.allow_llm else 'off'}",
+                            action=f"toggle_llm_{role}",
+                            detail="LLM judge/generate — off stays checks-only",
+                        )
+                    )
+                preview = spec.system_prompt.replace("\n", " ")[:48] or "(built-in default)"
+                rows.append(
+                    Choice(
+                        kind="action",
+                        label=f"  {role} prompt  {preview}",
+                        action=f"prompt_{role}",
+                        detail="Type instructions in the compose bar, then Enter",
+                    )
+                )
+    return rows
+
+
+def integrations_harness_choices(detected: list[DetectedHarness] | None = None) -> list[Choice]:
+    rows: list[Choice] = [
+        Choice(
+            kind="action",
+            label="Refresh harness detect",
+            action="refresh_harnesses",
+            detail="Re-scan PATH for Pi, OMP, Hermes, Cline, OpenClaw",
+        ),
+        Choice(
+            kind="action",
+            label="Dry-run swarm",
+            action="swarm_dry_run",
+            detail="Plan + routes only — type a goal first",
+        ),
+        Choice(
+            kind="action",
+            label="Run swarm",
+            action="swarm_run",
+            detail="Headless worker + enabled Seiso subagents (confirm)",
+        ),
+    ]
+    for item in detected or []:
+        mark = "installed" if item.installed else (item.hint or "not installed")
+        rows.append(
+            Choice(
+                kind="info",
+                label=f"{item.label:10} {mark}",
+                detail=item.binary or item.home or "",
+            )
+        )
+    return rows
+
+
 def page_choices(
     page: str,
     *,
@@ -102,6 +222,9 @@ def page_choices(
     knowledge: list[str] | None = None,
     auth_phase: str = "welcome",
     storage_mode: str = "persistent",
+    agent_settings: AgentSettings | None = None,
+    harness_detect: list[DetectedHarness] | None = None,
+    model_labels: list[str] | None = None,
 ) -> list[Choice]:
     local_hub = local_hub or []
     remote_hub = remote_hub or []
@@ -162,7 +285,7 @@ def page_choices(
                 action="import_key",
                 detail="Paste nsec or ncryptsec + passphrase",
             ),
-        ]
+        ] + integrations_harness_choices(harness_detect)
     if page in STUDIO_PAGES:
         return [Choice(kind="run", label=name, config=name, page=page) for name in configs]
     if page == "settings":
@@ -197,7 +320,10 @@ def page_choices(
                 action="reset",
                 detail="Clears the local account. Type RESET to confirm.",
             ),
-        ]
+        ] + harness_settings_choices(
+            agent_settings or AgentSettings(),
+            model_labels=model_labels,
+        )
     if page == "auth":
         return auth_choices(auth_phase, storage_mode)
     return []
