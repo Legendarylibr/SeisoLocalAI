@@ -82,9 +82,7 @@ def mint_request_quote(
     flat_call: bool = False,
 ) -> dict[str, Any]:
     """Build a per-request quote + 402 payment options."""
-    token_quote = quote_inference_tokens(
-        prompt_tokens, completion_tokens, flat_call=flat_call
-    )
+    token_quote = quote_inference_tokens(prompt_tokens, completion_tokens, flat_call=flat_call)
     prices = prices or load_prices()
     fx = quote_fx(
         int(token_quote["compute_sats"]),
@@ -195,8 +193,7 @@ def mint_request_quote(
         "payment_required": required,
         "payment_required_header": header,
         "www_authenticate": (
-            f'X402 scheme="{DEFAULT_SCHEME}", ETH wei={fx.wei}, '
-            f"L402 sats={fx.total_sats}"
+            f'X402 scheme="{DEFAULT_SCHEME}", ETH wei={fx.wei}, L402 sats={fx.total_sats}'
         ),
         "deadline": deadline,
         "do_not_use_live_rails": True,
@@ -316,10 +313,7 @@ def complete_l402_request(
     data_dir: Path | None = None,
 ) -> dict[str, Any]:
     if not l402_sim_enabled():
-        raise RuntimeError(
-            "Live L402 per-request settle is not wired. "
-            "Set SEISO_PAY_L402_SIM=1."
-        )
+        raise RuntimeError("Live L402 per-request settle is not wired. Set SEISO_PAY_L402_SIM=1.")
     rec = load_request(request_id, data_dir)
     if rec.get("status") == "paid":
         return rec

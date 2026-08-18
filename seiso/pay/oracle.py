@@ -87,8 +87,7 @@ def _from_http() -> OraclePrices | None:
         return None
     if not _oracle_url_allowed(url):
         raise RuntimeError(
-            "SEISO_PAY_ORACLE_URL host not allowlisted "
-            "(loopback or SEISO_PAY_ORACLE_ALLOW_HOSTS)"
+            "SEISO_PAY_ORACLE_URL host not allowlisted (loopback or SEISO_PAY_ORACLE_ALLOW_HOSTS)"
         )
     import httpx
 
