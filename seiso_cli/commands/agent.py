@@ -54,3 +54,77 @@ def agent_status(
         console.print(f"[red]{exc}[/]")
         raise typer.Exit(1) from exc
     _print_json(out)
+
+
+@agent_app.command("decide")
+def agent_decide(
+    job: Annotated[
+        str, typer.Option(help="Job / task kind, e.g. finetune|chat|slime")
+    ] = "finetune",
+    local_healthy: Annotated[
+        bool, typer.Option("--local-healthy/--no-local-healthy", help="Local Forge/CLI healthy")
+    ] = True,
+    mesh_peers: Annotated[bool, typer.Option("--mesh-peers/--no-mesh-peers")] = False,
+    pay_url: Annotated[str | None, typer.Option("--pay-url")] = None,
+    route_class: Annotated[str, typer.Option("--route-class")] = "allow_paid",
+    surface: Annotated[str | None, typer.Option(help="frontend|agent")] = None,
+) -> None:
+    """Print a ComputeDecision JSON (local → mesh → pay → ask_human)."""
+    from seiso.agent.kernel import decide_compute
+
+    decision = decide_compute(
+        local_healthy=local_healthy,
+        mesh_peers_ok=mesh_peers,
+        pay_url=pay_url,
+        route_class=route_class,
+        job_kind=job,
+        surface=surface,
+    )
+    _print_json(decision.as_dict())
+
+
+@agent_app.command("plan")
+def agent_plan(
+    task: Annotated[str, typer.Option(help="Single-step task kind")] = "chat",
+    goal: Annotated[str, typer.Option(help="Plan goal")] = "dry-run",
+    dry_run: Annotated[bool, typer.Option("--dry-run/--run")] = True,
+    local_healthy: Annotated[bool, typer.Option("--local-healthy/--no-local-healthy")] = True,
+    route_class: Annotated[str, typer.Option("--route-class")] = "allow_paid",
+    confirm: Annotated[bool, typer.Option("--confirm/--no-confirm")] = False,
+    context: Annotated[int, typer.Option(help="Required context tokens")] = 2048,
+    vram_mb: Annotated[int, typer.Option("--vram-mb")] = 8192,
+) -> None:
+    """Build a one-step harness plan. Default is --dry-run (no jobs)."""
+    from seiso.agent.harness import HarnessContext, run_harness
+    from seiso.agent.tasks import Plan, Step, parse_task_kind
+    from seiso.routing.types import Candidate
+
+    kind = parse_task_kind(task)
+    plan = Plan(
+        id="cli-plan",
+        goal=goal,
+        route_class=route_class,
+        steps=(Step(id="step-1", kind=kind, action="run", required_context=context),),
+    )
+    inventory = (
+        Candidate(
+            model_id="local-default",
+            backend="llamacpp",
+            role="chat" if kind.value not in {"code", "embed", "draft", "target"} else kind.value,
+            context_tokens=max(context, 2048),
+            vram_mb=4096,
+            downloaded=True,
+            params_b=7.0,
+        ),
+    )
+    result = run_harness(
+        plan,
+        HarnessContext(
+            local_healthy=local_healthy,
+            inventory=inventory,
+            available_vram_mb=vram_mb,
+            confirm=confirm,
+            dry_run=dry_run,
+        ),
+    )
+    _print_json({"plan": plan.as_dict(), "result": result.as_dict()})

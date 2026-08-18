@@ -15,6 +15,7 @@ from seiso_cli.commands.nemo_rl import nemo_rl
 from seiso_cli.commands.pay import pay_app
 from seiso_cli.commands.pipelines import compress_app, distill_rl_app
 from seiso_cli.commands.provenance import provenance_app
+from seiso_cli.commands.route import route
 from seiso_cli.commands.slime import slime
 from seiso_cli.commands.train import train
 from seiso_cli.commands.tui import tui
@@ -37,6 +38,7 @@ app.command()(tui)
 app.command(name="export")(export_cmd)
 app.command(name="inference")(inference_cmd)
 app.command(name="bench-inference")(bench_inference_cmd)
+app.command(name="route")(route)
 
 app.add_typer(compress_app, name="compress")
 app.add_typer(distill_rl_app, name="distill-rl")

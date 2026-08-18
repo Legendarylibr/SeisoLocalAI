@@ -74,6 +74,7 @@ Seiso already owns the machine-local control plane: jobs, SSE logs, memory guard
 - Isolated GGUF chat sidecar on Linux NVIDIA (Ollama first, llama-swap fallback)
 - Job runners for train / slime / NeMo RL / export / compress / distill-RL / knowledge
 - Compat `/v1` so external agents can talk to local models
+- Compute kernel: `decide_compute` (`seiso/agent/kernel.py`) — local → mesh → pay → `ask_human`
 
 **Next**
 
@@ -101,10 +102,11 @@ The harness is how an agent *drives* the OS: observe, plan, call Seiso, verify, 
 - `seiso agent status` receipts; Buzz is optional (mesh signing still needs a Buzz `nsec`)
 - Opt-in chat tool loop (`forge/tools/agent_loop.py`): search, sandboxed `execute_code`, artifacts
 - Agents prefer CLI over Forge HTTP; `--launch` on mesh is human-gated
+- In-tree harness: `run_harness` (`seiso/agent/harness.py`) — plan → decide → `select_route` → act → verify → receipt
+- CLI: `seiso agent decide`, `seiso agent plan --dry-run`
 
 **Next**
 
-- In-tree harness loop that does not depend on a particular IDE: plan → doctor → route → job → attest
 - Structured tool schema for train / export / compress / pay / mesh (JSON, not prompt-only)
 - Evaluation harness: replay a plan against smoke configs and score artifacts
 - Memory for the agent (job history, preferred models, last good presets) stored under `SEISO_DATA_DIR`
@@ -127,19 +129,18 @@ Routing is **model-aware**: pick a backend and a checkpoint from the task, conte
 - Context-window and memory-aware load clamps
 - Chat **Smart Router (auto-route)** when `SEISO_MODEL_ROUTER_ENABLED=true` points at a localhost router such as [SeisoModelRouter](https://github.com/Legendarylibr/SeisoModelRouter) (`/v1/chat/completions`)
 - Provider integrations (OpenAI, Anthropic, vLLM) with SSRF hardening — optional, not the default path
+- Local picker: `select_route` (`seiso/routing/select.py`) — VRAM / context / role, step-down, localhost-only external router
+- CLI: `seiso route --task chat`
 
 **Next**
 
-- A local routing table: task type → candidate models (code vs chat vs embed vs draft/target)
-- Hardware-aware choice: if the 70B does not fit, fall down to a Q4 local specialist instead of failing
-- Router and local pool as one picker: harness asks “who should answer this?” and gets `{backend, model, reason}`
-- Speculative / draft-target pairs chosen from what is already downloaded
+- Wire `select_route` into Forge Chat / Compat `/v1` so the UI uses the same picker
+- Live inventory from `SEISO_DATA_DIR` / Hub cache (CLI still takes `--inventory-json`)
 
 **Later**
 
 - Hybrid turns: cheap local model for tools and classification; external router only for the hard generation step
 - Marketplace quotes as just another route cost (sats / token, latency, attested GPU)
-- Policy: “never leave the machine”, “local then mesh”, or “allow paid remote” as OS-level route classes
 
 External routers stay **replaceable**. SeisoModelRouter is the reference; any localhost OpenAI-compatible router is fine.
 
@@ -157,6 +158,7 @@ When this machine cannot (or should not) run the job, the OS can buy **inference
 - Faucet / simulated ledger only; live Ark and live Lightning are **not wired**
 - Default **5%** protocol fee on top of operator price; localhost is never billed
 - Experimental **Buzz mesh** for trusted peers with **no** protocol fee ([docs/training/mesh.md](docs/training/mesh.md))
+- Catalog type `Listing` + `quote_listing` (`seiso/pay/catalog.py`) — inference / finetune / slime / distill_rl / nemo_rl; **no Seiso token**; loopback listings are 0 sats
 
 **Next**
 
