@@ -2,7 +2,7 @@
 
 **North star:** Seiso becomes a **local agentic operating system** — a harness on your machine that plans and runs work, routes each step to the right model (local first, external router when useful), and can optionally buy or sell **distributed inference and training** for **Bitcoin / Lightning / other crypto** payments.
 
-This is the destination, not a promise of dates. Self-hosted Forge and the CLI stay **free**. There is **no Seiso token**. Marketplace and mesh remain **opt-in**.
+This is the destination, not a promise of dates. Self-hosted Forge and the CLI stay **free**. There is **no Seiso token (may revise this)**. Marketplace and mesh remain **opt-in**.
 
 | Today | Destination |
 |-------|-------------|
