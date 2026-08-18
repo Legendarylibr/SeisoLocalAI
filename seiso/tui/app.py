@@ -116,6 +116,8 @@ def run_tui(
     nav_index = index_of_page(page)
     main_index = default_main_index(page, auth_phase)
     compose = ""
+    compose_cursor = 0
+    chat_offset = 0
     knowledge = knowledge_names(data_dir)
     scripted = keys is not None
     key_iter = iter(keys or ())
@@ -194,6 +196,8 @@ def run_tui(
             nav_index=nav_index,
             main_index=main_index,
             compose=compose,
+            compose_cursor=compose_cursor,
+            chat_offset=chat_offset,
             hint=hint(),
             knowledge=knowledge,
             show_input=live,
@@ -225,11 +229,12 @@ def run_tui(
 
     def adopt_local(path: Path, label: str) -> None:
         nonlocal current, current_label, backend, page, status, messages, focus
-        nonlocal nav_index, main_index
+        nonlocal nav_index, main_index, chat_offset
         current = str(path)
         current_label = label
         backend = _backend_for(current)
         messages = []
+        chat_offset = 0
         page = "chat"
         focus = "main"
         nav_index = index_of_page(page)
@@ -592,7 +597,7 @@ def run_tui(
 
     def handle_line(line: str) -> bool:
         """Return False to quit."""
-        nonlocal page, status, hub_query, hub_selected, main_index, focus
+        nonlocal page, status, hub_query, hub_selected, main_index, focus, chat_offset
         stripped = line.strip()
         if gated() and not stripped.startswith("/"):
             if not stripped:
@@ -637,6 +642,7 @@ def run_tui(
                 status = "Pick a local model from Hub first (↑↓ then Enter)."
                 return True
             messages.append({"role": "user", "content": line})
+            chat_offset = 0
             status = "Generating…"
             paint()
             try:
@@ -662,6 +668,7 @@ def run_tui(
             )
         elif cmd.kind == "clear":
             messages.clear()
+            chat_offset = 0
             status = "Chat cleared."
         elif cmd.kind == "models":
             goto_page("hub")
@@ -744,16 +751,32 @@ def run_tui(
         nav_index = index_of_page(page)
 
     def edit_compose(key: Key) -> None:
-        nonlocal compose, auth_phase, page
+        nonlocal compose, compose_cursor, auth_phase, page
         if key.name == "backspace":
-            compose = compose[:-1]
+            if compose_cursor > 0:
+                compose = compose[: compose_cursor - 1] + compose[compose_cursor:]
+                compose_cursor -= 1
+        elif key.name == "delete":
+            compose = compose[:compose_cursor] + compose[compose_cursor + 1 :]
         elif key.name == "ctrl-u":
-            compose = ""
+            compose = compose[compose_cursor:]
+            compose_cursor = 0
         elif key.name == "ctrl-w":
-            compose = compose.rstrip()
-            compose = compose[: compose.rfind(" ") + 1] if " " in compose else ""
+            head = compose[:compose_cursor].rstrip()
+            cut = head.rfind(" ") + 1 if " " in head else 0
+            compose = compose[:cut] + compose[compose_cursor:]
+            compose_cursor = cut
+        elif key.name == "left":
+            compose_cursor = max(0, compose_cursor - 1)
+        elif key.name == "right":
+            compose_cursor = min(len(compose), compose_cursor + 1)
+        elif key.name == "home":
+            compose_cursor = 0
+        elif key.name == "end":
+            compose_cursor = len(compose)
         elif key.name == "esc":
             compose = ""
+            compose_cursor = 0
             if auth_phase in {"encrypt_pass", "encrypt_confirm"}:
                 auth_phase = "reveal"
             elif auth_phase == "import_pass":
@@ -764,24 +787,80 @@ def run_tui(
                 auth_phase = "ready"
                 page = "settings"
         elif key.name == "char":
-            compose += key.char
+            compose = compose[:compose_cursor] + key.char + compose[compose_cursor:]
+            compose_cursor += len(key.char)
+
+    def _scroll_chat(delta: int) -> bool:
+        nonlocal chat_offset
+        visible = [item for item in messages if item.get("role") != "system"]
+        if not visible:
+            return False
+        chat_offset = max(0, min(chat_offset + delta, max(0, len(visible) - 1)))
+        return True
+
+    def apply_click(key: Key) -> None:
+        nonlocal focus
+        # Left ~26 cols is the sidebar; the rest is the page. Wheel already
+        # arrives as up/down — this is only a button press.
+        if key.x and key.x <= 26:
+            focus = "nav"
+        elif key.x:
+            focus = "main"
+
+    def browse(name: str) -> None:
+        nonlocal focus, nav_index, main_index
+        if page == "chat" and name in {"up", "down", "pageup", "pagedown"}:
+            step = 1 if name in {"up", "down"} else max(4, list_window(console) // 2)
+            if name in {"up", "pageup"}:
+                if _scroll_chat(step):
+                    return
+            elif _scroll_chat(-step):
+                return
+        focus, nav_index, main_index = apply_browse_key(
+            name,
+            focus=focus,
+            nav_index=nav_index,
+            main_index=main_index,
+            nav_count=len(sidebar_items()),
+            main_count=len(choices()),
+            page_step=list_window(console),
+        )
+        clamp_cursors()
 
     def handle_key(key: Key) -> bool:
-        nonlocal compose, focus, nav_index, main_index
+        nonlocal compose, compose_cursor, focus, nav_index, main_index, chat_offset
         if key.name in {"ctrl-c", "ctrl-d", "eof"}:
             return False
-        if key.name == "none":
+        if key.name in {"none", "resize", "ctrl-l", "paste-start", "paste-end"}:
+            return True
+        if key.name == "click":
+            apply_click(key)
             return True
         if compose:
             if key.name == "enter":
                 line = compose
                 compose = ""
+                compose_cursor = 0
                 if not line.strip():
                     activate()
                     return True
                 return handle_line(line)
-            if key.name in {"backspace", "ctrl-u", "ctrl-w", "esc", "char"}:
+            if key.name in {
+                "backspace",
+                "delete",
+                "ctrl-u",
+                "ctrl-w",
+                "esc",
+                "char",
+                "left",
+                "right",
+                "home",
+                "end",
+            }:
                 edit_compose(key)
+                return True
+            if key.name in {"up", "down", "tab", "pageup", "pagedown"}:
+                browse(key.name)
                 return True
             return True
         if key.name == "enter":
@@ -799,22 +878,14 @@ def run_tui(
             "end",
             "esc",
         }:
-            focus, nav_index, main_index = apply_browse_key(
-                key.name,
-                focus=focus,
-                nav_index=nav_index,
-                main_index=main_index,
-                nav_count=len(sidebar_items()),
-                main_count=len(choices()),
-                page_step=list_window(console),
-            )
-            clamp_cursors()
+            browse(key.name)
             return True
         if key.name == "char" and key.char == "?":
             handle_line("/help")
             return True
         if key.name == "char":
             compose = key.char
+            compose_cursor = len(compose)
             return True
         return True
 

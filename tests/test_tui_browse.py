@@ -18,7 +18,7 @@ from seiso.tui.browse import (
     visible_window,
 )
 from seiso.tui.hub import HubRow
-from seiso.tui.keys import Key, parse_keys
+from seiso.tui.keys import Key, parse_keys, parse_keys_incremental
 from seiso.tui.pages import DASHBOARD_GOALS, NAV_GROUPS
 
 
@@ -62,7 +62,40 @@ def test_parse_keys_application_cursor_and_pages() -> None:
 def test_parse_keys_mouse_wheel() -> None:
     assert parse_keys(b"\x1b[<64;8;4M")[0].name == "up"
     assert parse_keys(b"\x1b[<65;8;4M")[0].name == "down"
-    assert parse_keys(b"\x1b[<0;8;4m")[0].name == "none"
+    assert parse_keys(b"\x1b[<0;8;4m") == []
+    click = parse_keys(b"\x1b[<0;8;4M")
+    assert click == [Key("click", x=8, y=4)]
+
+
+def test_parse_keys_incomplete_mouse_does_not_type_digits() -> None:
+    """Split wheel reports used to leak '64' / '65' into the compose box."""
+    for chunk in (b"\x1b[<64;", b"\x1b[<65;12;8", b"\x1b[M", b"\x1b[64;8;4"):
+        keys = parse_keys(chunk)
+        assert all(k.name != "char" for k in keys), (chunk, keys)
+        assert not any(k.char.isdigit() for k in keys if k.name == "char")
+    held, rest = parse_keys_incremental(b"\x1b[<64;18;6")
+    assert held == []
+    assert rest.startswith(b"\x1b[<")
+    continued, rest = parse_keys_incremental(rest + b"M")
+    assert [k.name for k in continued] == ["up"]
+    assert rest == b""
+
+
+def test_parse_keys_x10_and_urxvt_wheel() -> None:
+    # X10: ESC [ M + (32+btn) + (32+x) + (32+y)
+    x10_up = bytes([0x1B, 0x5B, 0x4D, 32 + 64, 32 + 8, 32 + 4])
+    x10_down = bytes([0x1B, 0x5B, 0x4D, 32 + 65, 32 + 8, 32 + 4])
+    assert parse_keys(x10_up)[0].name == "up"
+    assert parse_keys(x10_down)[0].name == "down"
+    assert parse_keys(b"\x1b[64;8;4M")[0].name == "up"
+    assert parse_keys(b"\x1b[65;8;4M")[0].name == "down"
+
+
+def test_parse_keys_wheel_burst_stays_motion() -> None:
+    burst = b"".join(b"\x1b[<64;10;5M" for _ in range(8)) + b"\x1b[<65;10;5M"
+    names = [k.name for k in parse_keys(burst)]
+    assert names == ["up"] * 8 + ["down"]
+    assert "char" not in names
 
 
 def test_default_main_index_points_at_create_account() -> None:
@@ -359,3 +392,97 @@ def test_hub_table_windows_long_lists(tmp_path: Path) -> None:
     assert "more" in text
     assert "18/23" in text or "18" in text
     assert "org/model-14" in text or "model-14" in text
+
+
+def test_chat_offset_and_compose_caret() -> None:
+    from rich.console import Console
+
+    from seiso.tui.terminal import draw_frame, render_chat
+
+    messages = []
+    for i in range(20):
+        role = "user" if i % 2 == 0 else "assistant"
+        prefix = "msg" if role == "user" else "reply"
+        messages.append({"role": role, "content": f"{prefix}-{i}"})
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=True, width=100, height=24, color_system=None)
+    console.print(
+        render_chat(messages, model_label="tiny", backend="auto", status="", offset=4, window=6)
+    )
+    text = buf.getvalue()
+    assert "earlier" in text
+    assert "newer" in text
+    assert "msg-0" not in text
+
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=True, width=100, height=24, color_system=None)
+    draw_frame(
+        console,
+        page="chat",
+        models=[],
+        messages=[],
+        model_label="tiny.gguf",
+        data_dir=".",
+        status="",
+        compose="hello",
+        compose_cursor=2,
+        hint="type a message",
+    )
+    text = buf.getvalue()
+    assert "You" in text
+    assert "he" in text
+    assert "wheel moves" in text
+
+
+def test_frame_fits_small_tty_without_overflow(tmp_path: Path) -> None:
+    """74×23 is a typical attached pane — the frame must stay inside it."""
+    from rich.console import Console
+
+    from seiso.tui.browse import auth_choices
+    from seiso.tui.offline import discover_local_gguf
+    from seiso.tui.terminal import draw_frame
+
+    models = discover_local_gguf(tmp_path)
+    local = [_row(title="tiny.gguf", source="local", path=tmp_path / "t.gguf", status="ready")]
+    remote = [_row(title=f"org/model-{i}") for i in range(12)]
+
+    def _paint(page: str, **kwargs) -> str:
+        buf = StringIO()
+        console = Console(file=buf, force_terminal=True, width=74, height=23, color_system=None)
+        draw_frame(
+            console,
+            page=page,
+            models=models,
+            messages=[],
+            model_label="tiny.gguf",
+            data_dir=str(tmp_path),
+            status="",
+            show_input=True,
+            **kwargs,
+        )
+        return buf.getvalue()
+
+    for text in (
+        _paint(
+            "auth",
+            auth_phase="login",
+            choices=auth_choices("login"),
+            needs_onboarding=False,
+            hint="Enter — Sign in",
+        ),
+        _paint(
+            "hub",
+            local_hub=local,
+            remote_hub=remote,
+            hub_selected=2,
+            focus="main",
+            main_index=1,
+            hint="Enter downloads org/model-0",
+        ),
+        _paint("dashboard", focus="main", main_index=0, hint="Enter opens Chat"),
+        _paint("chat", backend="llama.cpp", hint="type a message"),
+    ):
+        lines = text.splitlines()
+        assert len(lines) <= 23, f"{len(lines)} lines on a 23-row tty"
+        assert "SEISO" in text
+        assert "↑↓ scroll" in text
