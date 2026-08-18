@@ -125,7 +125,7 @@ seiso tui --list          # local GGUF inventory, smallest first
 seiso tui --model 1       # pick by index / path / name substring
 ```
 
-**Move with the keyboard, then press Enter.** `↑`/`↓` (or the mouse wheel) scroll the highlighted `▸` row. `←`/`→` or Tab switch the sidebar and the page. Enter opens the highlighted item (a page, a local model, a Hub download, or a studio config). Type to chat, or start a `/command`.
+**Move with the keyboard, then press Enter.** `↑`/`↓` or the mouse wheel scroll the highlighted `▸` row — the wheel never types into the box. `←`/`→` or Tab switch the sidebar and the page. Enter opens the highlighted item (a page, a local model, a Hub download, or a studio config). Type to chat, or start a `/command`. While typing, `←`/`→` move the caret; the wheel still scrolls the list.
 
 Same **Nostr account** as Forge: first launch creates a recovery key (`nsec`) or restores one; later sessions unlock from the saved session (24h, same JWT secret as the web UI) or by pasting the key / NIP-49 backup. Settings can rotate, import, sign out, or start a new session (`RESET`). Integrations toggles auto-attest and relays (`/relays wss://…`).
 

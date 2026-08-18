@@ -247,7 +247,7 @@ def enter_hint(
         item = items[clamp_index(nav_index, len(items))]
         return f"Enter opens {item.label}"
     if page == "chat":
-        return "type a message   ← Hub to switch models"
+        return "type a message   ↑↓ history   ← Hub to switch models"
     if not choices:
         if page in STUDIO_PAGES:
             return "type /run configs/example_lora.yaml"
