@@ -440,6 +440,8 @@ def build_app():
             if already_paid:
                 data["seiso_pay"] = {"per_request": True, "prepaid_session": False}
                 return JSONResponse(data)
+            if not session:
+                raise HTTPException(402, "session not funded/active")
             try:
                 meter = debit_inference(
                     str(session["session_id"]),
