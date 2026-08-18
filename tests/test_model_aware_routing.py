@@ -206,6 +206,23 @@ def test_ipv6_localhost_validate() -> None:
 
 
 @pytest.mark.parametrize(
+    "url,ok",
+    [
+        ("127.0.0.1:8787", True),
+        ("localhost", True),
+        ("localhost:8787", True),
+        ("[::1]:8780", True),
+        ("http://127.0.0.1:8787", True),
+        ("http://127.0.0.9:9", True),
+        ("example.com:8787", False),
+        ("192.168.1.1:80", False),
+    ],
+)
+def test_is_loopback_url_scheme_optional(url: str, ok: bool) -> None:
+    assert is_loopback_url(url) is ok
+
+
+@pytest.mark.parametrize(
     "host,ok",
     [
         ("127.0.0.1", True),

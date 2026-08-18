@@ -27,6 +27,22 @@ def is_loopback_host(host: str | None) -> bool:
     return _host_is_loopback(host)
 
 
+def _hostport_without_scheme(raw: str) -> str:
+    """Extract host from a scheme-less token.
+
+    ``urlparse("127.0.0.1:8787")`` treats the IPv4 address as a scheme, so
+    callers must not feed bare ``host:port`` values through ``urlparse``.
+    """
+    host = raw.split("/", 1)[0]
+    if host.startswith("["):
+        end = host.find("]")
+        return host[1:end] if end != -1 else host[1:]
+    # IPv4 or hostname with optional :port. Leave IPv6 (multiple colons) intact.
+    if host.count(":") == 1:
+        return host.split(":", 1)[0]
+    return host
+
+
 def is_loopback_url(url: str | None) -> bool:
     """True when *url* points at this machine (loopback).
 
@@ -36,15 +52,12 @@ def is_loopback_url(url: str | None) -> bool:
     raw = (url or "").strip()
     if not raw:
         return False
+    if "://" not in raw:
+        return is_loopback_host(_hostport_without_scheme(raw))
     parsed = urlparse(raw)
-    if parsed.scheme and parsed.hostname:
+    if parsed.hostname:
         return is_loopback_host(parsed.hostname)
-    if parsed.scheme and not parsed.hostname:
-        return False
-    # No scheme: treat the whole token or host:port as a hostname.
-    host = raw.split("/", 1)[0]
-    host = host.split(":", 1)[0]
-    return is_loopback_host(host)
+    return False
 
 
 def validate_router_url(url: str) -> str:

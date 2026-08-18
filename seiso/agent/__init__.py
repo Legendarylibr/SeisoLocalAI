@@ -9,7 +9,7 @@ Heavy kernel / harness / routing symbols are loaded lazily so
 
 from __future__ import annotations
 
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from seiso.agent.nostr_identity import get_buzz_keypair, require_buzz_nsec
 from seiso.agent.receipts import agent_receipt, buzz_compatible_receipt, channel_safe_plan_view
@@ -24,6 +24,17 @@ from seiso.agent.surface import (
     require_buzz_agent,
     resolve_training_surface,
 )
+
+if TYPE_CHECKING:
+    from seiso.agent.harness import (
+        MAX_HARNESS_STEPS,
+        HarnessContext,
+        HarnessResult,
+        run_harness,
+    )
+    from seiso.agent.kernel import ComputeDecision, ComputeTarget, decide_compute
+    from seiso.agent.policy import RouteClass, parse_route_class
+    from seiso.agent.tasks import Plan, Step, StepResult, TaskKind
 
 __all__ = [
     "ComputeDecision",

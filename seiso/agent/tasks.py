@@ -60,7 +60,7 @@ def job_kind_for_task(kind: TaskKind | str) -> str:
     parsed = parse_task_kind(kind)
     if parsed in {TaskKind.CHAT, TaskKind.CODE, TaskKind.EMBED, TaskKind.DRAFT, TaskKind.TARGET}:
         return TaskKind.INFERENCE.value
-    return parsed.value
+    return str(parsed.value)
 
 
 @dataclass(frozen=True, slots=True)
