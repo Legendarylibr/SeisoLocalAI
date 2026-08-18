@@ -78,6 +78,13 @@ def pay_session(
             help="Fund via L402 sim (SEISO_PAY_L402_SIM=1 or faucet)",
         ),
     ] = False,
+    x402: Annotated[
+        bool,
+        typer.Option(
+            "--x402",
+            help="Fund via x402 EVM sim (SEISO_PAY_X402_SIM=1 or faucet)",
+        ),
+    ] = False,
     json_out: Annotated[bool, typer.Option("--json")] = True,
 ) -> None:
     """Create / status / fund marketplace sessions."""
@@ -92,13 +99,33 @@ def pay_session(
         public_session_view,
         resolve_session_by_token,
     )
+    from seiso.pay.x402 import (
+        complete_fund as complete_x402_fund,
+    )
+    from seiso.pay.x402 import (
+        mint_fund_challenge as mint_x402_challenge,
+    )
+    from seiso.pay.x402 import (
+        x402_sim_enabled,
+    )
 
     act = action.strip().lower()
     if act == "create":
         created = create_session(scopes=[s.strip() for s in scopes.split(",")])
         tok = created["token"]
         sid = created["session_id"]
-        if sats > 0 and l402:
+        if sats > 0 and x402:
+            if not x402_sim_enabled():
+                console.print(
+                    "[red]SEISO_PAY_X402_SIM=1 (or SEISO_PAY_FAUCET=1) required "
+                    "for x402 EVM sim funding[/]"
+                )
+                raise typer.Exit(1)
+            challenge = mint_x402_challenge(session_id=sid, amount_sats=sats)
+            complete_x402_fund(
+                payment_signature=str(challenge["sim_payment_signature"]),
+            )
+        elif sats > 0 and l402:
             if not l402_sim_enabled():
                 console.print(
                     "[red]SEISO_PAY_L402_SIM=1 (or SEISO_PAY_FAUCET=1) required "
@@ -145,6 +172,24 @@ def pay_session(
         if sats <= 0:
             console.print("[red]--sats required[/]")
             raise typer.Exit(1)
+        if x402:
+            if not x402_sim_enabled():
+                console.print(
+                    "[red]SEISO_PAY_X402_SIM=1 (or SEISO_PAY_FAUCET=1) required "
+                    "for x402 EVM sim. Live USDC / facilitator is not wired.[/]"
+                )
+                _print_json(funding_instructions(session, sats))
+                raise typer.Exit(2)
+            try:
+                challenge = mint_x402_challenge(session_id=session, amount_sats=sats)
+                result = complete_x402_fund(
+                    payment_signature=str(challenge["sim_payment_signature"]),
+                )
+            except Exception as exc:
+                console.print(f"[red]{exc}[/]")
+                raise typer.Exit(1) from exc
+            _print_json(result)
+            return
         if l402:
             if not l402_sim_enabled():
                 console.print(
@@ -168,6 +213,7 @@ def pay_session(
             console.print(
                 "[yellow]Ark funding: use funding.ark_address from session create. "
                 "For L402 sim: --l402 with SEISO_PAY_L402_SIM=1. "
+                "For x402 EVM sim: --x402 with SEISO_PAY_X402_SIM=1. "
                 "For faucet: --faucet with SEISO_PAY_FAUCET=1.[/]"
             )
             _print_json(funding_instructions(session, sats))

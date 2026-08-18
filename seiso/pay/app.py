@@ -32,6 +32,18 @@ from seiso.pay.store import (
     public_session_view,
     resolve_session_by_token,
 )
+from seiso.pay.x402 import (
+    REFERENCE_URL as X402_REFERENCE_URL,
+)
+from seiso.pay.x402 import (
+    complete_fund as complete_x402_fund,
+)
+from seiso.pay.x402 import (
+    mint_fund_challenge as mint_x402_challenge,
+)
+from seiso.pay.x402 import (
+    x402_sim_enabled,
+)
 
 
 def build_app():
@@ -90,21 +102,26 @@ def build_app():
             "job_types": sorted(JOB_TYPES - {"inference"}),
             "payment_methods": payment_methods(),
             "payment_methods_note": (
-                "Live Ark and live Lightning L402 are not functional yet — "
-                "do not use for real funds. "
-                "Faucet and SEISO_PAY_L402_SIM credit sessions for smoke tests. "
-                f"L402: {REFERENCE_URL}"
+                "Live Ark, live Lightning L402, and live x402 EVM are not "
+                "functional yet — do not use for real funds. "
+                "Faucet, SEISO_PAY_L402_SIM, and SEISO_PAY_X402_SIM credit "
+                "sessions for smoke tests. "
+                f"L402: {REFERENCE_URL} "
+                f"x402: {X402_REFERENCE_URL}"
             ),
             "endpoints": {
                 "sessions": "/pay/v1/sessions",
                 "fund_l402": "/pay/v1/sessions/fund/l402",
                 "fund_l402_complete": "/pay/v1/sessions/fund/l402/complete",
+                "fund_x402": "/pay/v1/sessions/fund/x402",
+                "fund_x402_complete": "/pay/v1/sessions/fund/x402/complete",
                 "quotes": "/pay/v1/quotes",
                 "jobs": "/pay/v1/jobs",
                 "models": "/v1/models",
                 "chat": "/v1/chat/completions",
             },
             "l402_sim": l402_sim_enabled(),
+            "x402_sim": x402_sim_enabled(),
             "forge_proxied": forge_base_url(),
         }
 
@@ -182,6 +199,61 @@ def build_app():
                 auth = str(body["authorization"])
         try:
             result = complete_fund(authorization=auth)
+        except RuntimeError as exc:
+            raise HTTPException(409, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(401, str(exc)) from exc
+        except KeyError as exc:
+            raise HTTPException(404, str(exc)) from exc
+        return result
+
+    @app.post("/pay/v1/sessions/fund/x402")
+    def fund_x402_challenge(
+        body: dict[str, Any] | None = None,
+        session: dict[str, Any] = _bearer_dep,
+    ) -> JSONResponse:
+        """Mint an x402 EVM challenge for session top-up (sim until live USDC wired)."""
+        body = body or {}
+        session_id = str(session["session_id"])
+        body_sid = str(body.get("session_id") or "").strip()
+        if body_sid and body_sid != session_id:
+            raise HTTPException(403, "session_id does not match Bearer session")
+        amount = int(body.get("sats") or body.get("amount_sats") or 0)
+        if amount <= 0:
+            raise HTTPException(400, "sats / amount_sats must be > 0")
+        try:
+            challenge = mint_x402_challenge(
+                session_id=session_id,
+                amount_sats=amount,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(503, str(exc)) from exc
+        except ValueError as exc:
+            raise HTTPException(400, str(exc)) from exc
+        headers = {
+            "WWW-Authenticate": str(challenge["www_authenticate"]),
+            "PAYMENT-REQUIRED": str(challenge["payment_required_header"]),
+        }
+        return JSONResponse(challenge, status_code=402, headers=headers)
+
+    @app.post("/pay/v1/sessions/fund/x402/complete")
+    async def fund_x402_complete(
+        body: dict[str, Any] | None = None,
+        payment_signature: str | None = Header(default=None, alias="PAYMENT-SIGNATURE"),
+    ) -> dict[str, Any]:
+        """Exchange PAYMENT-SIGNATURE for session credit (+ Bearer path unchanged)."""
+        body = body or {}
+        sig = payment_signature
+        payload = None
+        if not sig:
+            if isinstance(body.get("payment_signature"), str):
+                sig = str(body["payment_signature"])
+            elif isinstance(body.get("sim_payment_signature"), str):
+                sig = str(body["sim_payment_signature"])
+            elif isinstance(body.get("payload"), dict):
+                payload = body["payload"]
+        try:
+            result = complete_x402_fund(payment_signature=sig, payload=payload)
         except RuntimeError as exc:
             raise HTTPException(409, str(exc)) from exc
         except ValueError as exc:

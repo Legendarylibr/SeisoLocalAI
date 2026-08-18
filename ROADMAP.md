@@ -154,7 +154,7 @@ When this machine cannot (or should not) run the job, the OS can buy **inference
 
 - Opt-in sidecar `seiso pay` ([docs/pay/marketplace.md](docs/pay/marketplace.md))
 - Job types in the quote API: inference, finetune, RL / slime
-- Designed rails: **Ark** (operator + protocol treasury split) and **L402** (Lightning HTTP 402)
+- Designed rails: **Ark** (operator + protocol treasury split), **L402** (Lightning HTTP 402), and **x402** (EVM HTTP 402 / USDC)
 - Faucet / simulated ledger only; live Ark and live Lightning are **not wired**
 - Default **5%** protocol fee on top of operator price; localhost is never billed
 - Experimental **Buzz mesh** for trusted peers with **no** protocol fee ([docs/training/mesh.md](docs/training/mesh.md))
@@ -163,6 +163,7 @@ When this machine cannot (or should not) run the job, the OS can buy **inference
 **Next**
 
 - Live Lightning L402 (real invoices + preimage) for prepaid sessions
+- Live x402 EVM (USDC `exact` + facilitator) for prepaid sessions
 - Live Ark (or equivalent BTC rail) pay-in and fee split, fail-closed without treasury
 - Operator catalog: models offered, GPU class, queue, advertised $/sat rates
 - Buyer flow from the harness: quote → fund → run `/v1` or `seiso pay job` → receipt

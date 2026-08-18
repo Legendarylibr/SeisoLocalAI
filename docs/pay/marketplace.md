@@ -1,6 +1,6 @@
 # Seiso sats marketplace (opt-in)
 
-> **Not functional yet — do not use.** This surface is scaffolding / docs only. Do not run it for production work or real funds. Live **Ark** and **L402** settlement are not wired; faucet/sim only for local smoke tests.
+> **Not functional yet — do not use.** This surface is scaffolding / docs only. Do not run it for production work or real funds. Live **Ark**, **L402**, and **x402 EVM** settlement are not wired; faucet/sim only for local smoke tests.
 
 Remote **finetune / RL / inference** priced in sats. Self-hosted Seiso stays **free** and never pays a protocol fee.
 
@@ -22,9 +22,10 @@ Marketplace funding is designed to support multiple sats rails. **None of the li
 |--------|---------------------------|--------------|
 | **Ark** | Buyer pays into operator Ark address; fee split to operator + protocol treasury | **Not functional** — Bark/Second client not bundled; faucet/sim only |
 | **L402** ([Lightning HTTP 402](https://lightningfaucet.com/learn/l402-payments-explained/)) | Server returns `HTTP 402` + `WWW-Authenticate: L402` with a BOLT-11 invoice and macaroon; client pays Lightning, retries with `Authorization: L402 <macaroon>:<preimage>` → session credit | **Sim ready** with `SEISO_PAY_L402_SIM=1` (or faucet); **live LN not wired** — do not use for real funds |
+| **x402** ([HTTP-native EVM](https://x402.org/)) | Server returns `HTTP 402` + `PAYMENT-REQUIRED` (`exact` scheme, USDC on an EVM CAIP-2 network). Buyer retries with `PAYMENT-SIGNATURE` (EIP-3009-shaped payload) → session credit | **Sim ready** with `SEISO_PAY_X402_SIM=1` (or faucet); **live USDC / facilitator not wired** — do not use for real funds |
 | **Dev faucet** | `SEISO_PAY_FAUCET=1` credits a session without chain IO | Smoke tests **only** — never on a public market |
 
-Discovery advertises these under `payment_methods` in `GET /.well-known/seiso-pay.json` and on session `funding` payloads. Hide L402 from discovery with `SEISO_PAY_L402=0` (Ark still listed).
+Discovery advertises these under `payment_methods` in `GET /.well-known/seiso-pay.json` and on session `funding` payloads. Hide L402 with `SEISO_PAY_L402=0` or x402 with `SEISO_PAY_X402=0` (Ark still listed).
 
 L402 fits agent/API buyers especially well: no accounts, machine-readable 402 challenge, sat-denominated per session or (later) per request. See the [L402 payments explained](https://lightningfaucet.com/learn/l402-payments-explained/) reference for the wire format.
 
@@ -38,6 +39,10 @@ export SEISO_PROTOCOL_FEE_BPS=500                  # 5%
 # export SEISO_PAY_FAUCET=1                        # DEV ONLY — never on a public market
 # export SEISO_PAY_L402=0                          # optional: hide L402 from discovery
 # export SEISO_PAY_L402_SIM=1                      # sim L402 fund/exchange (also on with faucet)
+# export SEISO_PAY_X402=0                          # optional: hide x402 from discovery
+# export SEISO_PAY_X402_SIM=1                      # sim x402 EVM fund/exchange (also on with faucet)
+# export SEISO_OPERATOR_EVM=0x…                    # x402 payTo (USDC receive)
+# export SEISO_PAY_X402_NETWORK=eip155:84532       # Base Sepolia default
 source .venv/bin/activate
 seiso forge --no-open &                            # localhost :8765
 seiso pay serve --host 127.0.0.1 --port 8787       # sidecar; put TLS in front for public
@@ -124,6 +129,32 @@ Client flow (sim today; live LN later):
 4. CLI: `seiso pay session fund --session ID --sats N --l402` (auto mint+complete in sim).
 
 Reference: [L402 payments explained](https://lightningfaucet.com/learn/l402-payments-explained/) (Lightning Faucet).
+
+## Opt-in x402 EVM settlement
+
+**x402** ([x402.org](https://x402.org/)) funds the same prepaid marketplace sessions using the HTTP 402 + `PAYMENT-REQUIRED` / `PAYMENT-SIGNATURE` handshake. The advertised scheme is **`exact`** on an EVM CAIP-2 network (default **Base Sepolia** `eip155:84532`, USDC).
+
+> **Live EVM / facilitator is not functional yet — do not use for real funds.** Challenge minting against a real USDC transfer or x402 facilitator is not bundled. **Simulated** fund/exchange works with `SEISO_PAY_X402_SIM=1` (also enabled when `SEISO_PAY_FAUCET=1`).
+
+| Variable | Role |
+|----------|------|
+| `SEISO_PAY_X402` | Default `1` — advertise x402 in discovery/funding; set `0` to hide |
+| `SEISO_PAY_X402_SIM` | Enable simulated mint + signature verify (credits session balance) |
+| `SEISO_OPERATOR_EVM` | `payTo` address (0x…) for USDC receive |
+| `SEISO_PROTOCOL_TREASURY_EVM` | Optional protocol-fee EVM address (reserved) |
+| `SEISO_PAY_X402_NETWORK` | CAIP-2 network (default `eip155:84532`) |
+| `SEISO_PAY_X402_ASSET` | ERC-20 address override (default USDC for the network) |
+| `SEISO_PAY_X402_ATOMIC_PER_SAT` | Sim mapping sats → USDC atomic (default `1`; not a market FX) |
+| (future) x402 facilitator | Verify EIP-3009 `transferWithAuthorization` on-chain |
+
+Client flow (sim today; live EVM later):
+
+1. `POST /pay/v1/sessions/fund/x402` with `{session_id, sats}` → **HTTP 402** + `PAYMENT-REQUIRED` + `WWW-Authenticate: X402 …`.
+2. Sign an `exact` payment payload (EIP-3009-shaped). In sim, use `sim_payment_signature`.
+3. `POST /pay/v1/sessions/fund/x402/complete` with `PAYMENT-SIGNATURE: <payload>` → session credited; keep using `Bearer seiso_pay_*`.
+4. CLI: `seiso pay session fund --session ID --sats N --x402` (auto mint+complete in sim).
+
+Reference: [x402 seller quickstart](https://docs.x402.org/getting-started/quickstart-for-sellers).
 
 ## Job failure / cancel refunds
 

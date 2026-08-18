@@ -103,6 +103,7 @@ def test_rails_include_ark_and_l402() -> None:
     ids = {r["id"] for r in q["rails"]}
     assert "ark" in ids
     assert "l402" in ids
+    assert "x402" in ids
     ark = next(r for r in q["rails"] if r["id"] == "ark")
     assert ark["status"] == "not_functional"
 
@@ -135,8 +136,15 @@ def test_live_settle_true_only_when_wired(monkeypatch: pytest.MonkeyPatch) -> No
     monkeypatch.setenv("SEISO_PROTOCOL_TREASURY_ARK", "ark1treasury")
     assert live_settle_allowed(ark_live=True, faucet=False, treasury_set=True) is True
     assert live_settle_allowed(l402_live=True, faucet=False, treasury_set=True) is True
+    assert live_settle_allowed(x402_live=True, faucet=False, treasury_set=True) is True
     assert (
-        live_settle_allowed(ark_live=False, l402_live=False, faucet=False, treasury_set=True)
+        live_settle_allowed(
+            ark_live=False,
+            l402_live=False,
+            x402_live=False,
+            faucet=False,
+            treasury_set=True,
+        )
         is False
     )
 

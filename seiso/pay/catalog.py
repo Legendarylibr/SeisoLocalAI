@@ -60,6 +60,7 @@ def live_settle_allowed(
     *,
     ark_live: bool = False,
     l402_live: bool = False,
+    x402_live: bool = False,
     treasury_set: bool | None = None,
     faucet: bool | None = None,
 ) -> bool:
@@ -72,7 +73,7 @@ def live_settle_allowed(
         return False
     if not treasury_set:
         return False
-    return bool(ark_live or l402_live)
+    return bool(ark_live or l402_live or x402_live)
 
 
 def quote_listing(

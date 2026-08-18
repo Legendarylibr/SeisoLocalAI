@@ -79,11 +79,12 @@ def faucet_enabled() -> bool:
 def payment_methods() -> list[dict[str, str]]:
     """Advertised marketplace payment rails (discovery / docs).
 
-    Live Ark and live Lightning L402 are **not functional yet** — do not use
-    for real funds. Faucet and ``SEISO_PAY_L402_SIM`` credit sessions for smoke
-    tests only.
+    Live Ark, live Lightning L402, and live x402 EVM are **not functional
+    yet** — do not use for real funds. Faucet, ``SEISO_PAY_L402_SIM``, and
+    ``SEISO_PAY_X402_SIM`` credit sessions for smoke tests only.
     """
     from seiso.pay.l402 import l402_sim_enabled
+    from seiso.pay.x402 import x402_sim_enabled
 
     l402_status = "sim" if l402_sim_enabled() else "not_functional"
     l402_detail = (
@@ -95,6 +96,16 @@ def payment_methods() -> list[dict[str, str]]:
             "HTTP 402 + Lightning invoice + macaroon; live LN not wired — "
             "set SEISO_PAY_L402_SIM=1 for smoke tests; "
             "https://lightningfaucet.com/learn/l402-payments-explained/"
+        )
+    )
+    x402_status = "sim" if x402_sim_enabled() else "not_functional"
+    x402_detail = (
+        "Simulated x402 EVM fund/exchange (SEISO_PAY_X402_SIM or faucet); "
+        "live USDC / facilitator not wired — https://x402.org/"
+        if x402_sim_enabled()
+        else (
+            "HTTP 402 + PAYMENT-REQUIRED (EVM exact / USDC); live chain not "
+            "wired — set SEISO_PAY_X402_SIM=1 for smoke tests; https://x402.org/"
         )
     )
     methods: list[dict[str, str]] = [
@@ -110,11 +121,19 @@ def payment_methods() -> list[dict[str, str]]:
             "status": l402_status,
             "detail": l402_detail,
         },
+        {
+            "id": "x402",
+            "label": "x402 (EVM HTTP 402 / USDC)",
+            "status": x402_status,
+            "detail": x402_detail,
+        },
     ]
-    # Allow operators to hide L402 from discovery without removing Ark.
     raw = (os.environ.get("SEISO_PAY_L402") or "1").strip().lower()
     if raw in {"0", "false", "no", "off"}:
         methods = [m for m in methods if m["id"] != "l402"]
+    raw_x = (os.environ.get("SEISO_PAY_X402") or "1").strip().lower()
+    if raw_x in {"0", "false", "no", "off"}:
+        methods = [m for m in methods if m["id"] != "x402"]
     if faucet_enabled():
         methods.append(
             {

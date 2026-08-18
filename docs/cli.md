@@ -273,14 +273,17 @@ Remote sats marketplace for inference / finetune / RL. **Self-hosted stays free*
 do not enable this for local-only use. Requires `SEISO_ALLOW_PAY=1`.
 
 Settlement payment methods (all live rails **not functional yet — do not use**):
-**Ark** addresses (`SEISO_OPERATOR_ARK`, `SEISO_PROTOCOL_TREASURY_ARK`) and
+**Ark** addresses (`SEISO_OPERATOR_ARK`, `SEISO_PROTOCOL_TREASURY_ARK`),
 **L402** (Lightning HTTP 402 — see [marketplace.md](pay/marketplace.md) and
-[L402 explained](https://lightningfaucet.com/learn/l402-payments-explained/)).
+[L402 explained](https://lightningfaucet.com/learn/l402-payments-explained/)),
+and **x402** (EVM HTTP 402 / USDC — [x402.org](https://x402.org/)).
 Without a treasury Ark and without `SEISO_PAY_FAUCET=1`, paid settles fail closed.
 **Ark chain settlement is not functional currently** — `SEISO_ARK_BACKEND=bark|second`
 is reserved for a future client wire; leave unset or use faucet for smoke tests.
 **L402 is not functional for live Lightning** — use `SEISO_PAY_L402_SIM=1`
 (or faucet) for simulated fund/exchange; see marketplace docs.
+**x402 is not functional for live EVM** — use `SEISO_PAY_X402_SIM=1`
+(or faucet) for simulated `PAYMENT-REQUIRED` / `PAYMENT-SIGNATURE` fund/exchange.
 
 ```bash
 export SEISO_ALLOW_PAY=1
@@ -290,6 +293,7 @@ export SEISO_PAY_FAUCET=1   # dev only — never on a public market
 seiso pay quote --type finetune --preset smoke
 seiso pay session create --sats 20000 --scopes inference,finetune,rl
 # seiso pay session fund --session ID --sats 20000 --l402   # sim L402
+# seiso pay session fund --session ID --sats 20000 --x402   # sim x402 EVM
 seiso pay job start --type finetune --preset smoke --dry-run
 seiso pay serve --host 127.0.0.1 --port 8787   # operator sidecar
 ```
