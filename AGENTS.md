@@ -5,9 +5,10 @@ Short guide for humans and coding agents. Deep detail lives in the `docs/` tree 
 ## Read first
 
 1. **[README.md](README.md)** — What Seiso is, quick start (one-liner `start`), Forge UI at `http://127.0.0.1:8765`, CLI table, paths (`~/Seiso` vs `~/.seiso`), platform notes.
-2. **[docs/README.md](docs/README.md)** — Full doc index + learning paths (end-user vs CLI vs dev vs deployment).
-3. **[docs/CI_LOCAL.md](docs/CI_LOCAL.md)** + `make ci-fast` — Required quality gate before any PR or significant change. Uses baselines for lint/types.
-4. **[docs/ANALYSIS.md](docs/ANALYSIS.md)** — Current architecture overview, feature map, code health, security notes, WIP items, and recommendations (this analysis).
+2. **[ROADMAP.md](ROADMAP.md)** — Destination: local agentic OS, harness, model-aware routing, opt-in BTC/crypto marketplace.
+3. **[docs/README.md](docs/README.md)** — Full doc index + learning paths (end-user vs CLI vs dev vs deployment).
+4. **[docs/CI_LOCAL.md](docs/CI_LOCAL.md)** + `make ci-fast` — Required quality gate before any PR or significant change. Uses baselines for lint/types.
+5. **[docs/ANALYSIS.md](docs/ANALYSIS.md)** — Current architecture overview, feature map, code health, security notes, WIP items, and recommendations (this analysis).
 
 Key commands:
 - `start` or `SEISO_START=0 start` (from repo root or on PATH). Default start is `seiso tui`.

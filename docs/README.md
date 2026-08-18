@@ -13,12 +13,15 @@ Complete guide to installing, running, and extending **Seiso Local AI** — a fr
 
 Start with **[getting-started.md](getting-started.md)** — a step-by-step walkthrough from install → onboarding → download model → chat → train → export.
 
+Where Seiso is going (local agentic OS, harness, model-aware routing, BTC/crypto marketplace): **[ROADMAP.md](../ROADMAP.md)**.
+
 ---
 
 ## I want to…
 
 | Goal | Start here |
 |------|------------|
+| Read the product roadmap (agentic OS, harness, routing, marketplace) | [ROADMAP.md](../ROADMAP.md) |
 | Install on Linux or macOS in one command | [install.md](install.md#linux--macos--one-command-recommended) |
 | Install on Windows or AMD ROCm | [platforms/windows.md](platforms/windows.md) · [platforms/linux-amd-rocm.md](platforms/linux-amd-rocm.md) |
 | Launch the terminal UI | `start` or `seiso tui` → [cli.md](cli.md#seiso-tui) |
@@ -121,10 +124,11 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 > **Pay / live Ark / L402:** not functional yet — do not use for real funds.
 > **Mesh:** secondary opt-in Buzz-agent multi-node path (local Forge/CLI stays primary).
 
-1. [pay/marketplace.md](pay/marketplace.md) — sats marketplace, Ark + L402 payment methods, faucet vs real settles
-2. [training/mesh.md](training/mesh.md) — Buzz-coordinated shared / multi-node training (no fee)
-3. [cli.md § seiso pay / seiso mesh](cli.md#seiso-pay-opt-in-marketplace) — command cheat sheet
-4. [`.agents/skills/seiso-orchestrate/`](../.agents/skills/seiso-orchestrate/SKILL.md) — agent decision loop (local → mesh → pay)
+1. [ROADMAP.md](../ROADMAP.md) — why marketplace + harness + routing exist (destination OS)
+2. [pay/marketplace.md](pay/marketplace.md) — sats marketplace, Ark + L402 payment methods, faucet vs real settles
+3. [training/mesh.md](training/mesh.md) — Buzz-coordinated shared / multi-node training (no fee)
+4. [cli.md § seiso pay / seiso mesh](cli.md#seiso-pay-opt-in-marketplace) — command cheat sheet
+5. [`.agents/skills/seiso-orchestrate/`](../.agents/skills/seiso-orchestrate/SKILL.md) — agent decision loop (local → mesh → pay)
 
 ---
 
@@ -144,6 +148,7 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 
 | Task | Guide |
 |------|-------|
+| Product roadmap | [ROADMAP.md](../ROADMAP.md) |
 | Install & dependencies | [install.md](install.md) |
 | First-run walkthrough | [getting-started.md](getting-started.md) |
 | Forge UI & API | [forge.md](forge.md) |

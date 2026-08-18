@@ -25,6 +25,7 @@ def _read(path: str) -> str:
         "docs/forge.md",
         "docs/cli.md",
         "docs/README.md",
+        "ROADMAP.md",
         "configs/example_lora.yaml",
         "data/sample.jsonl",
         "AGENTS.md",
