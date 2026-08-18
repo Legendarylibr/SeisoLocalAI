@@ -266,7 +266,9 @@ def render_hub(
     header.append("Model Hub", style="bold")
     header.append(f"  {qlabel}\n", style=ACCENT)
     if not compact:
-        header.append("Live Hugging Face search — not just files already on disk.\n", style=SECONDARY)
+        header.append(
+            "Live Hugging Face search — not just files already on disk.\n", style=SECONDARY
+        )
 
     table = Table(
         box=None,
@@ -626,7 +628,10 @@ def render_auth(
         out.append("Type the same passphrase again, then Enter.\n", style=SECONDARY)
     elif phase == "import_pass":
         out.append("Backup passphrase\n", style="bold")
-        out.append("This looks like an encrypted backup. Type the passphrase, then Enter.\n", style=SECONDARY)
+        out.append(
+            "This looks like an encrypted backup. Type the passphrase, then Enter.\n",
+            style=SECONDARY,
+        )
     elif phase == "reset_confirm":
         out.append("Start a new session\n", style="bold")
         out.append(

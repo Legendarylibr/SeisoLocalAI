@@ -6,8 +6,10 @@ import os
 import select
 import sys
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import IO, TextIO
+from types import FrameType
+from typing import IO, Any, TextIO
 
 _ESC_TIMEOUT_S = 0.03
 _READ_CHUNK = 4096
@@ -39,15 +41,7 @@ _TERM_ENABLE = (
     "\x1b[?1007h"  # alternate-scroll: wheel → arrows if SGR is unavailable
     "\x1b[?2004h"  # bracketed paste
 )
-_TERM_DISABLE = (
-    "\x1b[?2004l"
-    "\x1b[?1007l"
-    "\x1b[?1006l"
-    "\x1b[?1000l"
-    "\x1b[?7h"
-    "\x1b[?25h"
-    "\x1b[?1049l"
-)
+_TERM_DISABLE = "\x1b[?2004l\x1b[?1007l\x1b[?1006l\x1b[?1000l\x1b[?7h\x1b[?25h\x1b[?1049l"
 
 
 @dataclass(frozen=True, slots=True)
@@ -301,7 +295,7 @@ class KeyReader:
         self._buf = b""
         self._queue: deque[Key] = deque()
         self._resized = False
-        self._prev_winch = None
+        self._prev_winch: Callable[[int, FrameType | None], Any] | int | None = None
 
     def enable(self) -> None:
         if self._armed or not stdin_is_interactive(self.stream):

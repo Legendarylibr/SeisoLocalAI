@@ -406,7 +406,9 @@ def test_chat_offset_and_compose_caret() -> None:
         messages.append({"role": role, "content": f"{prefix}-{i}"})
     buf = StringIO()
     console = Console(file=buf, force_terminal=True, width=100, height=24, color_system=None)
-    console.print(render_chat(messages, model_label="tiny", backend="auto", status="", offset=4, window=6))
+    console.print(
+        render_chat(messages, model_label="tiny", backend="auto", status="", offset=4, window=6)
+    )
     text = buf.getvalue()
     assert "earlier" in text
     assert "newer" in text
