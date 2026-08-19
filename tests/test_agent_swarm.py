@@ -127,9 +127,7 @@ def test_oom_preflight_skips_llm() -> None:
         return '{"ok": true, "reasons": ["nope"]}'
 
     settings = AgentSettings(seiso_subagents=True, preset="pair")
-    settings.subagents["completion"] = SubagentSpec(
-        role="completion", enabled=True, allow_llm=True
-    )
+    settings.subagents["completion"] = SubagentSpec(role="completion", enabled=True, allow_llm=True)
     result = run_swarm(
         "x",
         settings,
@@ -170,9 +168,7 @@ def test_planner_draft_is_prepended_to_worker_goal() -> None:
         return '{"steps": ["write tests"]}'
 
     settings = AgentSettings(seiso_subagents=True, preset="plan_act_verify")
-    settings.subagents["planner"] = SubagentSpec(
-        role="planner", enabled=True, allow_llm=True
-    )
+    settings.subagents["planner"] = SubagentSpec(role="planner", enabled=True, allow_llm=True)
     settings.subagents["completion"] = SubagentSpec(role="completion", enabled=False)
     settings.subagents["correctness"] = SubagentSpec(role="correctness", enabled=False)
     settings.subagents["synthesizer"] = SubagentSpec(role="synthesizer", enabled=False)

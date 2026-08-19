@@ -476,7 +476,9 @@ def run_tui(
         elif action.startswith("toggle_role_"):
             persist_agent(toggle_role(agent_settings, action[len("toggle_role_") :]), "Subagent")
         elif action.startswith("toggle_llm_"):
-            persist_agent(toggle_role_llm(agent_settings, action[len("toggle_llm_") :]), "Subagent LLM")
+            persist_agent(
+                toggle_role_llm(agent_settings, action[len("toggle_llm_") :]), "Subagent LLM"
+            )
         elif action.startswith("cycle_model_"):
             persist_agent(
                 cycle_role_model(
@@ -489,7 +491,9 @@ def run_tui(
         elif action.startswith("prompt_"):
             role = action[len("prompt_") :]
             if compose.strip():
-                persist_agent(set_role_prompt(agent_settings, role, compose.strip()), f"{role} prompt")
+                persist_agent(
+                    set_role_prompt(agent_settings, role, compose.strip()), f"{role} prompt"
+                )
                 compose = ""
             else:
                 status = f"Type {role} instructions, then Enter."

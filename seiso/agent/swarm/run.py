@@ -197,8 +197,10 @@ def run_swarm(
         if ctx.dry_run:
             return {"dry_run": True, "role": "synthesizer"}
         summary = f"harness={settings.harness} worker={last_worker.get('detail') or last_worker.get('status')}"
-        if payload.get("allow_llm") and judge is not None and check(
-            str(payload.get("model_id") or "auto")
+        if (
+            payload.get("allow_llm")
+            and judge is not None
+            and check(str(payload.get("model_id") or "auto"))
         ):
             extra = judge(
                 str(payload.get("system_prompt") or "Summarize the swarm result in two sentences."),

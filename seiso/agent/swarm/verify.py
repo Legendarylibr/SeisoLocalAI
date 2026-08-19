@@ -69,9 +69,7 @@ def compile_python_files(paths: list[Path]) -> tuple[bool, list[str]]:
 def collect_repo_signals(output: Mapping[str, Any], *, workdir: Path | None) -> dict[str, Any]:
     if workdir is None:
         return {"compile_ok": True, "checked_files": [], "compile_errors": []}
-    text = "\n".join(
-        str(output.get(key) or "") for key in ("stdout", "stderr", "detail", "goal")
-    )
+    text = "\n".join(str(output.get(key) or "") for key in ("stdout", "stderr", "detail", "goal"))
     files = extract_workdir_py_files(text, workdir)
     if not files:
         return {"compile_ok": True, "checked_files": [], "compile_errors": []}

@@ -18,9 +18,7 @@ def test_ollama_source_no_probe() -> None:
 def test_router_never_leave(monkeypatch) -> None:
     monkeypatch.setenv("SEISO_MODEL_ROUTER_ENABLED", "true")
     monkeypatch.setenv("SEISO_MODEL_ROUTER_URL", "http://127.0.0.1:8780")
-    endpoint = resolve_endpoint(
-        source="router", route_class=RouteClass.NEVER_LEAVE, probe=False
-    )
+    endpoint = resolve_endpoint(source="router", route_class=RouteClass.NEVER_LEAVE, probe=False)
     assert endpoint.source == "none"
     assert endpoint.reason == "router_unavailable"
 

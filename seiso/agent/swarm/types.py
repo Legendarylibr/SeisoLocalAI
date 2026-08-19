@@ -82,7 +82,9 @@ class AgentSettings:
             if isinstance(spec, SubagentSpec) and spec.role in merged:
                 merged[spec.role] = spec
             elif isinstance(spec, Mapping) and key in merged:
-                merged[key] = SubagentSpec(role=key, **{k: v for k, v in spec.items() if k != "role"})
+                merged[key] = SubagentSpec(
+                    role=key, **{k: v for k, v in spec.items() if k != "role"}
+                )
         self.subagents = merged
         if self.seiso_subagents:
             self.activate_subagents()
@@ -165,6 +167,3 @@ class SwarmResult:
             "receipts": list(self.receipts),
             "verdicts": list(self.verdicts),
         }
-
-
-
