@@ -1,100 +1,186 @@
-# Agent and contributor orientation for SeisoLocalAI
+# Skills & Agents Reference — Seiso
 
-Short guide for humans and coding agents. Deep detail lives in the `docs/` tree (start with [docs/README.md](docs/README.md) and [docs/getting-started.md](docs/getting-started.md)).
+Consolidated inventory of skills and agent definitions available when working on the Seiso project (local-first AI platform for training, inference, quantization, compression, and publishing).
 
-## Read first
+---
 
-1. **[README.md](README.md)** — What Seiso is, quick start (one-liner `start`), Forge UI at `http://127.0.0.1:8765`, CLI table, paths (`~/Seiso` vs `~/.seiso`), platform notes.
-2. **[ROADMAP.md](ROADMAP.md)** — Destination: local agentic OS, harness, model-aware routing, opt-in BTC/crypto marketplace.
-3. **[docs/README.md](docs/README.md)** — Full doc index + learning paths (end-user vs CLI vs dev vs deployment).
-4. **[docs/CI_LOCAL.md](docs/CI_LOCAL.md)** + `make ci-fast` — Required quality gate before any PR or significant change. Uses baselines for lint/types.
-5. **[docs/ANALYSIS.md](docs/ANALYSIS.md)** — Current architecture overview, feature map, code health, security notes, WIP items, and recommendations (this analysis).
+## Hermes Skills
 
-Key commands:
-- `start` or `SEISO_START=0 start` (from repo root or on PATH). Default start is `seiso tui`.
-- `seiso doctor [--network]`
-- `seiso tui` (default UI — Forge-shaped terminal, live Hugging Face Hub)
-- `seiso forge` (optional web API; `SEISO_UI=forge start`)
-- `seiso train --config configs/example_lora.yaml`
-- `seiso provenance attest|verify` (Nostr digest attestation; default on, kill with `SEISO_ALLOW_NOSTR=0` — see [docs/provenance-nostr.md](docs/provenance-nostr.md))
-- `make ci-fast` (or `python3 scripts/run_ci_local.py --fast`)
+### Software Development
 
-## Rules of thumb
+| Skill | Purpose |
+|---|---|
+| Hermes Agent Skill Authoring | Author in-repo SKILL.md: frontmatter, validator, structure, writing quality. |
+| Node Inspect Debugger | Debug Node.js via `--inspect` + Chrome DevTools Protocol CLI. |
+| Plan | Write actionable markdown implementation plans to `.hermes/plans/`. |
+| Python Debugpy | Debug Python via `breakpoint()`+pdb or remote debugpy (DAP protocol). |
+| Requesting Code Review | Pre-commit verification: security scan, quality gates, independent reviewer. |
+| Simplify Code | Parallel 3-agent (reuse/quality/efficiency) cleanup of recent changes. |
+| Spike | Throwaway experiments to validate feasibility before committing. |
+| Systematic Debugging | 4-phase root-cause debugging: investigate, pattern analysis, hypothesis, fix. |
+| Test-Driven Development | Enforce RED-GREEN-REFACTOR cycle: tests before code, no exceptions. |
 
-- **Always activate the project venv** (`.venv/bin/activate` or let `start` manage) before running Python/CLI commands. The base system python will not have the right extras or pinned deps.
-- Prefer the documented entry points (`start`, `seiso`, `scripts/doctor.sh`) over raw `python ...`. They set up paths, HF cache, and runtime config.
-- For a CI-equivalent Python env: `python scripts/install_locked_deps.py --editable` (hashed `locks/python.lock`). Refresh with `python scripts/update_dep_locks.py` after pyproject changes.
-- **Smoke first**: Use `configs/*_smoke.*` presets for fast iteration. They exist precisely for CI + agent loops.
-- **Never delete** `~/.seiso` or its subdirs (user data, caches, checkpoints). Use `SEISO_DATA_DIR` overrides for throwaway experiments.
-- Memory-sensitive work: the platform applies guards (`seiso/memory/protection/`, `forge/services/memory_release.py`). Call `prepare_for_gpu_task` patterns when adding new heavy GPU jobs.
-- Kernels are **monkey-patched temporarily** — always ensure restore paths run (see `lifecycle.py`, trainer cleanup, memory release). Test both success and exception cases.
-- Forge jobs stream logs/metrics via orchestrators + SSE. When adding features, update the matching orchestrator + route + UI page together.
-- UI: after TS/JS changes run `cd forge-ui && npm run build` (or use `npm run dev` against a running `seiso forge`).
-- Before significant changes: `make ci-fast`. Full `make ci` for frontend or big refactors. Respect ruff/mypy baselines unless you intentionally refresh them.
+### GitHub
 
-## Security & privacy (critical)
+| Skill | Purpose |
+|---|---|
+| Codebase Inspection | Analyze repos: LOC, language breakdown, file counts, code-vs-comment ratios (pygount). |
+| GitHub Auth | Auth setup: HTTPS tokens, SSH keys, `gh` CLI login. Prerequisite for other GitHub skills. |
+| GitHub Code Review | Code review of diffs/commits — inline comments, formal submissions. |
+| GitHub Issues | Create, search, triage, label, assign, manage issues via `gh` or REST API. |
+| GitHub PR Workflow | Full PR lifecycle: branch, commit, open, monitor CI, auto-fix failures, merge. |
+| GitHub Repo Management | Clone, create, fork, configure repos; remotes, releases, secrets, branch protection. |
 
-- Default is localhost + encrypted fields + per-user sandboxing under `SEISO_DATA_DIR`.
-- All artifact paths must go through `seiso/security/*` helpers or `forge/services/user_paths.py` + `safe_join` / `assert_within`.
-- New remote provider or tool code must respect the existing URL policy, rate limiter, and CSRF checks.
-- Tokens (HF, etc.) are encrypted at rest in the DB. Prefer the existing `hf_auth` and token storage flows.
-- GPU / hardware info is intentionally bounded (see `nvidia_boundary` usage).
+### MLOps
 
-Do not relax sandbox or crypto defaults without a very strong documented reason and tests.
+#### Evaluation
 
-## Extending common areas (pointers)
+| Skill | Purpose |
+|---|---|
+| LM Evaluation Harness | Benchmark LLMs on 60+ academic benchmarks (MMLU, GSM8K, HumanEval) via lm-eval. |
+| Weights & Biases | ML experiment tracking, sweeps, model registry, artifact lineage, dashboards. |
 
-- **New training preset / recs**: `seiso/training/recommendations.py`, `seiso/training/dataset_analysis.py`, `seiso/training/practices.py`, `platform_caps.py`, example YAML in `configs/`. Update TrainPage + `docs/training/quickstart.md` if new knobs appear. Run `pytest tests/test_docs_accuracy.py`.
-- **Forge auth**: Single owner **npub**; **nsec** proves ownership. Browser sessions are HttpOnly cookies (Bearer JWT in JSON only with `X-Seiso-Return-Token: 1`). Compat `/v1` key is bound to that owner npub (`.inference_api_key` + `.inference_api_key.owner`). Onboarding: keygen → write down nsec → Continue (`forge/services/nostr_auth.py`, `AuthPage`). No password path.
-- **Nostr provenance**: Default path on (`SEISO_ALLOW_NOSTR=1`, public digests-only relays). Kill with `SEISO_ALLOW_NOSTR=0`. Auto-attest still opt-in (`SEISO_NOSTR_ATTEST`). Digests-only events via `seiso/research/nostr/`; keys under `nostr_keys/` (HF-token style). Training can seal `dataset_merkle_root` (corpus membership proofs; see `seiso/research/dataset_merkle.py`). Lean model + completeness proofs: `formal/seiso-provenance/` (`lake build`). Do not add DMs, agent tools, or always-on social clients without a new design review. See [docs/provenance-nostr.md](docs/provenance-nostr.md).
-- **New kernel op**: Add to `seiso/kernels/cuda/` + `cuda_ops.py` + dispatch + hooks + tests. Update low-VRAM profile logic.
-- **New pipeline stage (compress/distill/rl)**: Update the stage router / config builder + manifest + the corresponding orchestrator + page.
-- **NeMo RL** (`method: nemo_rl`): external launcher in `seiso/nemo_rl/` — requires `SEISO_NEMO_RL_ROOT` pointing at a [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL) checkout + `uv`. Do not vendor NeMo RL into this repo.
-- **New inference backend**: `seiso/inference/backends.py` + model pool + runner + UI picker.
-- **Export format**: `seiso/export/formats.py` + gguf helpers + profiles.
-- **API surface**: Add route in `forge/api/routes/`, register in `forge/main.py`, add typed client in `forge-ui/src/lib/api/`, add page or component.
-- **Tests**: Mirror file names under `tests/`. Use fixtures from `conftest.py`. Mark slow tests.
+#### Hub
 
-## Local dev loop (agent-friendly)
+| Skill | Purpose |
+|---|---|
+| Hugging Face Hub | Modern `hf` CLI: models, datasets, Spaces, repos, SQL queries. |
 
-```bash
-cd Seiso
-source .venv/bin/activate
-seiso doctor
-# UI dev
-cd forge-ui && npm run dev   # in second terminal (against running forge)
-# Run one smoke
-seiso train --config configs/smoke_train_cpu.yaml || true
-# Quality
-python3 scripts/run_ci_local.py --job lint --skip-install
-python3 scripts/run_ci_local.py --job test --skip-install -k "not slow"
-```
+#### Inference
 
-**Buzz agents:** orchestrate Seiso from a [Buzz](https://github.com/block/buzz) room with
-[`.agents/skills/seiso-orchestrate/SKILL.md`](.agents/skills/seiso-orchestrate/SKILL.md)
-(`buzz-cli` for channel receipts + `seiso` / Forge for local jobs). Copy that skill into a
-Buzz checkout under `.agents/skills/` (or `.goose/skills/`) when needed.
+| Skill | Purpose |
+|---|---|
+| llama.cpp | Local GGUF inference (CPU/GPU) + Hub discovery for quantized models. |
+| vLLM | High-throughput LLM serving, OpenAI API, quantization, tensor parallelism, monitoring. |
 
-See also `docs/troubleshooting.md`, `docs/install.md`, and `docs/forge.md` (for dev mode with hot reload).
+#### Models
 
-## Repository layout (abbrev.)
+| Skill | Purpose |
+|---|---|
+| AudioCraft | Meta AudioCraft: text-to-music (MusicGen) and text-to-sound (AudioGen). |
+| Segment Anything | Meta SAM: zero-shot image segmentation via points, boxes, or mask prompts. |
 
-```
-seiso/                 # core (runners, kernels, training, export, compress, rl, ...)
-seiso/pay/             # opt-in sats marketplace (sidecar; self-hosted stays free)
-seiso/mesh/            # experimental Buzz mesh coordination (opt-in; no protocol fee)
-seiso/slime/           # slime RL (HF / multi-GPU DDP / SGLang / vLLM rollouts)
-seiso/chat/            # shared chat prompts + output sanitize (CLI + Forge)
-seiso/slime_single_gpu/# compat shim → seiso.slime (do not add new code here)
-seiso_cli/main.py      # CLI (includes seiso pay / seiso mesh)
-forge/                 # FastAPI (orchestrators, routes, services, security, db)
-forge-ui/              # React sources + built dist/
-seiso/codellama_compress/    # bundled LLM compression (research)
-seiso/research/        # provenance / determinism helpers (+ optional Nostr attest under seiso/research/nostr/)
-configs/               # example + smoke YAML/JSON
-scripts/               # install, doctor, run_ci_local, ...
-tests/                 # broad pytest coverage
-docs/                  # user + dev guides
-```
+### Data Science
 
-Happy building. Keep it local, keep it safe, keep the memory guards happy.
+| Skill | Purpose |
+|---|---|
+| Jupyter Live Kernel | Iterative Python via live Jupyter kernel (hamelnb) — stateful REPL for data science exploration. |
+
+### Dogfood / QA
+
+| Skill | Purpose |
+|---|---|
+| Dogfood | Systematic exploratory QA testing of web apps: find bugs, collect evidence, structured reports. |
+
+### Research
+
+| Skill | Purpose |
+|---|---|
+| arXiv | Search arXiv papers + Semantic Scholar for citations/related work. |
+| Research Paper Writing | End-to-end ML paper pipeline: literature review, experiments, drafting, submission. |
+
+### Productivity
+
+| Skill | Purpose |
+|---|---|
+| Nano PDF | Edit PDF text/typos/titles via natural-language CLI instructions. |
+| OCR & Documents | Extract text from PDFs/scans (pymupdf lightweight, marker-pdf for OCR/equations). |
+
+### Autonomous AI Agents
+
+| Skill | Tool | Purpose |
+|---|---|---|
+| Claude Code | `claude` CLI | Delegate coding — one-shot (print mode) or interactive PTY/tmux sessions. |
+| Codex | `codex` CLI | Delegate coding to OpenAI Codex CLI. Git repo required. Exec, background tasks, PR reviews. |
+| Hermes Agent | `hermes` | Configure/extend/contribute to Hermes Agent: CLI, profiles, credentials, MCP, gateways, skills, cron. |
+| OpenCode | `opencode` CLI | Delegate coding — provider-agnostic. One-shot or interactive TUI. |
+
+### Computer Use
+
+| Skill | Tool | Purpose |
+|---|---|---|
+| Computer Use | `cua-driver` | Drive desktop in background: click, type, scroll. Cross-platform, no focus steal. |
+
+### Creative (Seiso-relevant subset)
+
+| Skill | Purpose |
+|---|---|
+| Sketch | Disposable HTML mockups — 2-3 design variants for side-by-side comparison (UI prototyping for Forge). |
+| Architecture Diagram | Dark-themed architecture/infra diagrams as standalone HTML + inline SVG. No external deps. |
+
+---
+
+## Codex System Skills
+
+Six built-in skills, each paired with an agent definition.
+
+| Skill | Agent | Purpose |
+|---|---|---|
+| Image Gen | `imagegen/agents/openai.yaml` | Generate/edit images via built-in tool + CLI fallback (gpt-image-1.5). Chroma-key removal, batch generation, prompt augmentation. |
+| OpenAI Docs | `openai-docs/agents/openai.yaml` | OpenAI API docs, model selection/migration, prompt-upgrade guidance. MCP server `openaiDeveloperDocs` (streamable HTTP). |
+| Plugin Creator | `plugin-creator/agents/openai.yaml` | Scaffold plugin directories with `plugin.json`, marketplace entries, cachebuster/reinstall flow, validation. |
+| Review Agent | `review-agent/agents/openai.yaml` | Read-only code review of diffs/commits — P0-P3 findings. Never modifies files. |
+| Skill Creator | `skill-creator/agents/openai.yaml` | Build modular SKILL.md folders with resources, progressive disclosure, naming conventions. 6-step process. |
+| Skill Installer | `skill-installer/agents/openai.yaml` | Install skills from curated list, experimental list, or any GitHub repo via download or git sparse-checkout. |
+
+---
+
+## Cursor Skills
+
+| Skill | Purpose |
+|---|---|
+| AI Redteam Ultra | Ethical adversarial red-team security audit of LLM/agent systems. 11-phase methodology covering prompt injection, RAG poisoning, trust boundaries, structural hardening. Reference files: analysis-phases, engagement-modes, exploit-chains, hardening-principles, recon-checklist, severity-rubric, target-profiles, threat-domains, trust-boundary-diagrams. |
+
+---
+
+## Repo-bundled Skills
+
+### Seiso Orchestrate (Buzz integration)
+
+`seiso-orchestrate` is a skill for orchestrating Seiso (Forge + CLI) from a Buzz agent room using `buzz-cli` for channel updates and Seiso for local train/compress/export/provenance jobs.
+
+- **Location:** `.agents/skills/seiso-orchestrate/` (SKILL.md + reference.md)
+- **Preconditions:** `BUZZ_PRIVATE_KEY` (agent nsec), `BUZZ_RELAY_URL`, Seiso install paths (`SEISO_INSTALL_DIR`, `SEISO_DATA_DIR`)
+- **Workflow:** Join/create Buzz channel → set topic → run Seiso CLI jobs → post receipts (commands, job IDs, manifest paths, Nostr `event_id`) back to channel
+- **Supported jobs:** `seiso train`, `seiso compress`, `seiso distill-rl`, `seiso rl-quant`, `seiso export`, `seiso provenance attest|verify`
+- **Safety:** Never post `nsec`, HF tokens, backup passphrases, or cookie headers to Buzz. Never automate Forge keygen. Default Forge bind is localhost.
+- **Decision guide:** Smoke configs for quick iteration, Forge UI when human is watching, CLI for agent loops
+- **Install into Buzz checkout:** `cp -R .agents/skills/seiso-orchestrate /path/to/buzz/.agents/skills/`
+
+Full orchestration loop and command cookbook in the reference doc.
+
+---
+
+## Seiso integration map
+
+| Skill | Seiso component |
+|---|---|
+| llama.cpp | GGUF inference backend, model loading profiles (`~/.seiso/cache/llama_load_profiles.json`) |
+| vLLM | High-throughput serving, slime RL rollouts |
+| Hugging Face Hub | Model downloads, dataset access, publishing (`~/.seiso/hf_cache/`) |
+| GitHub PR Workflow | CI/CD pipeline, PR lifecycle for contributions |
+| LM Evaluation Harness | Benchmarking trained models |
+| Weights & Biases | Experiment tracking for training runs |
+| Segment Anything | Image segmentation integration |
+| AudioCraft | Audio generation integration |
+| Computer Use | Desktop automation for Forge UI testing |
+| Sketch | UI prototyping for Forge |
+| Architecture Diagram | Infra documentation |
+
+### Documentation
+
+Key reference files in the Seiso docs tree:
+
+- `docs/README.md` — Full doc index + learning paths
+- `docs/getting-started.md` — Quickstart guide
+- `docs/install.md` — Installation reference
+- `docs/forge.md` — Forge dev mode with hot reload
+- `docs/ANALYSIS.md` — Architecture overview, feature map, code health
+- `docs/CI_LOCAL.md` — CI quality gate
+- `docs/provenance-nostr.md` — Nostr digest attestation system
+- `docs/compression.md` — LLM compression pipeline
+- `docs/cli.md` — CLI reference
+- `docs/troubleshooting.md` — Troubleshooting guide
+- `CONTRIBUTING.md` — Contribution guidelines
+- `SECURITY.md` — Security policy
+
