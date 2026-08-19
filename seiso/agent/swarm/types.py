@@ -118,7 +118,7 @@ class AgentSettings:
     def from_dict(cls, raw: Mapping[str, Any] | None) -> AgentSettings:
         data = dict(raw or {})
         subs = data.pop("subagents", None)
-        settings = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+        settings = cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})  # pylint: disable=no-member
         if isinstance(subs, Mapping):
             settings.subagents = default_subagents()
             for key, spec in subs.items():
