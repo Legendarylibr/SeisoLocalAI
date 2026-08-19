@@ -148,9 +148,7 @@ class NeMoRLConfig:
 
         overrides = raw.get("extra_overrides") or ()
         if isinstance(overrides, str):
-            overrides = tuple(
-                part.strip() for part in overrides.split(",") if part.strip()
-            )
+            overrides = tuple(part.strip() for part in overrides.split(",") if part.strip())
         else:
             overrides = tuple(str(x) for x in overrides)
 
@@ -158,29 +156,18 @@ class NeMoRLConfig:
             model_id=str(raw["model_id"]),
             output_dir=Path(raw.get("output_dir", "./outputs/nemo-rl")),
             recipe=recipe,
-            nemo_rl_root=(
-                Path(raw["nemo_rl_root"]) if raw.get("nemo_rl_root") else None
-            ),
+            nemo_rl_root=(Path(raw["nemo_rl_root"]) if raw.get("nemo_rl_root") else None),
             base_config=raw.get("base_config"),
             gpus_per_node=int(raw.get("gpus_per_node", 1) or 1),
             num_nodes=int(raw.get("num_nodes", 1) or 1),
-            max_steps=(
-                int(raw["max_steps"]) if raw.get("max_steps") is not None else None
-            ),
+            max_steps=(int(raw["max_steps"]) if raw.get("max_steps") is not None else None),
             learning_rate=(
-                float(raw["learning_rate"])
-                if raw.get("learning_rate") is not None
-                else None
+                float(raw["learning_rate"]) if raw.get("learning_rate") is not None else None
             ),
             rollouts_per_prompt=(
                 int(raw["rollouts_per_prompt"])
                 if raw.get("rollouts_per_prompt") is not None
-                else (
-                    4
-                    if recipe
-                    in {NeMoRLRecipe.GRPO, NeMoRLRecipe.SMOKE}
-                    else None
-                )
+                else (4 if recipe in {NeMoRLRecipe.GRPO, NeMoRLRecipe.SMOKE} else None)
             ),
             num_prompts_per_step=(
                 int(raw["num_prompts_per_step"])
@@ -192,9 +179,7 @@ class NeMoRLConfig:
             extra_overrides=overrides,
             uv_executable=raw.get("uv_executable"),
             dry_run=bool(raw.get("dry_run", False)),
-            sandbox_root=(
-                Path(raw["sandbox_root"]) if raw.get("sandbox_root") else None
-            ),
+            sandbox_root=(Path(raw["sandbox_root"]) if raw.get("sandbox_root") else None),
             extra=dict(raw.get("extra") or {}),
         )
         cfg.validate()

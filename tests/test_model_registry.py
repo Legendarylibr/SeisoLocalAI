@@ -10,16 +10,12 @@ from forge.services import model_registry
 
 
 @pytest.mark.asyncio
-async def test_register_model_path_skips_size_scan_for_existing_path(
-    monkeypatch, tmp_path
-):
+async def test_register_model_path_skips_size_scan_for_existing_path(monkeypatch, tmp_path):
     model_dir = tmp_path / "models" / "existing"
     model_dir.mkdir(parents=True)
     (model_dir / "model.safetensors").write_bytes(b"weights")
 
-    db = Database(
-        tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "forge.db", encryption_key=generate_encryption_key(), ephemeral=True)
     existing = await db.add_model(
         user_id="u1",
         name="existing",

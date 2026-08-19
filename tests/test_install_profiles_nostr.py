@@ -65,11 +65,11 @@ def test_install_profiles_all_include_forge():
     common = _common_sh()
     # Every named profile / auto OS path must pull [forge] so Nostr relay deps install.
     for needle in (
-        'printf \'%s\\n\' "forge,train,cuda,llamacpp"',
-        'printf \'%s\\n\' "forge,train,llamacpp"',
-        'printf \'%s\\n\' "forge,train,llamacpp,mlx"',
-        'printf \'%s\\n\' "forge,llamacpp,mlx"',
-        'printf \'%s\\n\' "forge,llamacpp"',
+        "printf '%s\\n' \"forge,train,cuda,llamacpp\"",
+        "printf '%s\\n' \"forge,train,llamacpp\"",
+        "printf '%s\\n' \"forge,train,llamacpp,mlx\"",
+        "printf '%s\\n' \"forge,llamacpp,mlx\"",
+        "printf '%s\\n' \"forge,llamacpp\"",
         'extras="forge,train,llamacpp,mlx"',
         'extras="forge,train,cuda,llamacpp"',
         'extras="forge,train,llamacpp"',
@@ -80,23 +80,162 @@ def test_install_profiles_all_include_forge():
     assert "npm ci" in common
 
 
+def test_pip_bootstrap_matches_pyproject_setuptools():
+    """Bootstrap must not pin setuptools below the build-system / [dev] floor."""
+    common = _common_sh()
+    assert "setuptools>=83" in common
+    assert "setuptools<82" not in common
+    pyproject = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert "setuptools>=83" in pyproject
+
+
+def test_system_deps_check_venv_and_compilers_not_only_cli_names():
+    """Minimal images often have python3/git/curl but lack venv or gcc."""
+    common = _common_sh()
+    assert "seiso_python_venv_ok" in common
+    assert "seiso_build_tools_ok" in common
+    assert "ensurepip" in common
+    assert "python3-venv" in common
+
+
+def test_start_command_registers_seiso_start():
+    common = _common_sh()
+    assert "seiso-start" in common
+    assert "seiso_link_start_command" in common
+
+
+def test_sidecar_hard_fail_is_opt_in_only():
+    sidecar = (ROOT / "scripts/lib/sidecar_install.sh").read_text(encoding="utf-8")
+    # Must not force hard-fail solely from install profile name.
+    assert "linux-nvidia|linux-nvidia-native) return 0" not in sidecar
+    assert "SEISO_REQUIRE_SIDECAR" in sidecar
+    # Seeded .env must not force REQUIRE=1 (breaks offline / no-sudo machines).
+    seed_block = sidecar.split("seiso_seed_sidecar_env")[1].split("seiso_sidecar_fallback")[0]
+    assert 'SEISO_REQUIRE_SIDECAR" "1"' not in seed_block
+    assert 'SEISO_REQUIRE_SIDECAR" "1"' not in seed_block.replace(" ", "")
+
+
 def test_named_install_profiles_documented_in_common():
     common = _common_sh()
     for profile in _NAMED_PROFILES:
         assert profile in common, f"profile {profile!r} missing from common.sh"
     # Profile help text lists the supported names for curl | bash users.
     assert "linux-nvidia, linux-cpu, linux-rocm, wsl-nvidia, macos, chat" in common
+    # macOS ships Bash 3.2 — avoid ${var,,} / ${var!r} in install helpers.
+    assert "seiso_tolower" in common
+    assert "${1,,}" not in common
+    assert "${SEISO_INSTALL_PROFILE,,}" not in common
+    assert "${SEISO_INSTALL_PROFILE!r}" not in common
 
 
-def test_ui_pkg_manager_prefers_bun_unless_npm_forced():
+def test_macos_install_profile_works_on_bash32(tmp_path):
+    """Documented SEISO_INSTALL_PROFILE=macos must work under macOS /bin/bash 3.2."""
+    import os
+    import shutil
+    import subprocess
+
+    bash = "/bin/bash" if os.path.isfile("/bin/bash") else shutil.which("bash")
+    assert bash, "bash required"
+    script = tmp_path / "probe.sh"
+    script.write_text(
+        "\n".join(
+            [
+                "set -euo pipefail",
+                f'source "{ROOT / "scripts/lib/common.sh"}"',
+                'test "$(seiso_tolower MacOS)" = "macos"',
+                'test "$(SEISO_INSTALL_PROFILE=macos seiso_detect_platform_extras)" = "forge,train,llamacpp,mlx"',
+                'test "$(SEISO_INSTALL_PROFILE=MacOS seiso_detect_platform_extras)" = "forge,train,llamacpp,mlx"',
+                'chat="$(seiso_install_profile_extras chat)"',
+                'case "$(uname -s)" in',
+                '  Darwin) test "$chat" = "forge,llamacpp,mlx" ;;',
+                '  *) test "$chat" = "forge,llamacpp" ;;',
+                "esac",
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run([bash, str(script)], check=True, cwd=str(ROOT))
+
+
+def test_ui_pkg_manager_linux_prefers_npm_macos_prefers_bun():
     common = _common_sh()
     assert "SEISO_USE_NPM" in common
+    assert "SEISO_USE_BUN" in common
     assert "seiso_ui_pkg_manager" in common
-    # Bun path uses frozen lockfile; npm fallback uses ci (package-lock.json).
+    assert "seiso_npm_usable" in common
+    assert "seiso_ui_npm_ci" in common
+    assert "seiso_ensure_npm_available" in common
+    # Linux prefers npm when Node 18+ exists; Bun remains default elsewhere / with SEISO_USE_BUN=1.
+    assert '$(uname -s)" == "Linux"' in common
+    # Bun path: frozen lockfile, unfrozen only on non-timeout failure, npm sticky fallback.
+    assert "seiso_run_with_timeout" in common
+    assert "SEISO_BUN_INSTALL_TIMEOUT_SEC" in common
+    assert "status" in common and "124" in common
+    assert "export SEISO_USE_NPM=1" in common
     assert re.search(
-        r'seiso_ui_install_deps\(\)[\s\S]*?bun install --frozen-lockfile[\s\S]*?npm ci',
+        r"seiso_ui_install_deps\(\)[\s\S]*?"
+        r"bun install --frozen-lockfile[\s\S]*?"
+        r"bun install[\s\S]*?"
+        r"seiso_ui_npm_ci",
         common,
     )
+    assert re.search(
+        r"seiso_ui_install_deps\(\)[\s\S]*?"
+        r"status\" -eq 124[\s\S]*?"
+        r"skipping unfrozen retry",
+        common,
+    )
+
+
+def test_python_modules_probe_uses_cuda_path_for_llama_cpp():
+    """Bare llama_cpp import fails without ensure_cuda_library_path on NVIDIA Linux."""
+    common = _common_sh()
+    assert "seiso_llamacpp_import_ok" in common
+    # Module probe must route llama_cpp through the CUDA-aware helper.
+    assert re.search(
+        r"seiso_python_modules_available\(\)[\s\S]*?"
+        r'\[\[ "\$module" == "llama_cpp" \]\][\s\S]*?'
+        r"seiso_llamacpp_import_ok",
+        common,
+    )
+
+
+def test_build_forge_ui_skips_when_dist_present():
+    common = _common_sh()
+    assert "seiso_forge_ui_dist_ready" in common
+    assert "SEISO_FORCE_UI" in common
+    assert re.search(
+        r"seiso_build_forge_ui\(\)[\s\S]*?"
+        r"seiso_forge_ui_dist_ready[\s\S]*?"
+        r"skipping rebuild",
+        common,
+    )
+
+
+def test_resolve_repo_walks_up_from_scripts_start(tmp_path):
+    """scripts/start.sh must resolve the clone root, not only $HOME/Seiso."""
+    import shutil
+    import subprocess
+
+    bash = shutil.which("bash")
+    assert bash
+    script = tmp_path / "probe.sh"
+    script.write_text(
+        "\n".join(
+            [
+                "set -euo pipefail",
+                f'source "{ROOT / "scripts/lib/common.sh"}"',
+                f'root="$(seiso_resolve_repo_for_start "{ROOT / "scripts/start.sh"}")"',
+                f'test "$root" = "{ROOT}"',
+                f'root2="$(seiso_resolve_repo_for_start "{ROOT / "start"}")"',
+                f'test "$root2" = "{ROOT}"',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    subprocess.run([bash, str(script)], check=True, cwd=str(ROOT))
 
 
 def test_ui_lockfiles_present_for_bun_and_npm_paths():

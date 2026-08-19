@@ -23,7 +23,6 @@ class BundledJobContract:
         "output_root",
         "run_dir",
         "model_dir",
-        "recommendation_path",
         "paper_bundle",
     )
     nested_artifact_keys: tuple[str, ...] = ("stage_results", "artifacts", "summary")
@@ -46,9 +45,7 @@ def _validate_artifact_value(
             raise PermissionError(f"Bundled artifact {key!r} is outside sandbox: {exc}") from exc
     elif isinstance(value, dict):
         for nested_key, nested_value in value.items():
-            _validate_artifact_value(
-                sandbox_root, user_id, f"{key}.{nested_key}", nested_value
-            )
+            _validate_artifact_value(sandbox_root, user_id, f"{key}.{nested_key}", nested_value)
     elif isinstance(value, list):
         for idx, item in enumerate(value):
             _validate_artifact_value(sandbox_root, user_id, f"{key}[{idx}]", item)

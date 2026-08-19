@@ -1,6 +1,6 @@
 [build-system]
 # setuptools>=83: CVE-2026-59890 (MANIFEST.in exclusion bypass via Unicode normalization).
-requires = ["setuptools>=83", "wheel", "pybind11>=2.13"]
+requires = ["setuptools>=83", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -70,14 +70,16 @@ forge = [
   "fastapi>=0.111",
   "uvicorn[standard]>=0.29",
   "python-multipart>=0.0.9",
-  "python-jose[cryptography]>=3.3",
-  # Transitive via python-jose → rsa; floor for REAL/OID DoS (CVE-2026-59885/59886).
-  "pyasn1>=0.6.4",
+  # HS256 session JWTs — PyJWT avoids python-jose's unfixed ecdsa (Minerva) transitive.
+  "PyJWT>=2.13",
+  # fsspec[http] pulls aiohttp; floor patches CVE-2026-59881 / 69243 / 69244.
+  "aiohttp>=3.14.3",
+  # No password auth (Nostr nsec→npub). bcrypt unused in code; drop on next full lock refresh.
   "bcrypt>=4.1",
   "email-validator>=2.1",
   "aiosqlite>=0.20",
   "sse-starlette>=2.1",
-  "cryptography>=42",
+  "cryptography>=50",
   # Nostr provenance relay I/O (default-on; BIP-340 signing is pure-Python in-tree).
   "websockets>=12",
 ]
@@ -103,7 +105,7 @@ data-designer = [
 # Forge auth (npub/nsec) needs no extra; provenance attest/verify uses websockets.
 nostr = [
   "websockets>=12",
-  "cryptography>=42",
+  "cryptography>=50",
 ]
 dev = [
   # Floor for MANIFEST.in exclusion bypass (CVE-2026-59890); also in [build-system].
@@ -111,7 +113,7 @@ dev = [
   "pytest>=8.2",
   "pytest-asyncio>=0.23",
   "pytest-xdist>=3.6",
-  "ruff>=0.4",
+  "ruff==0.16.3",
   "mypy==2.3.0",
   "types-PyYAML>=6.0",
   "pylint>=3.2",
@@ -137,10 +139,6 @@ Documentation = "https://github.com/Legendarylibr/SeisoLocalAI#readme"
 include = ["seiso*", "seiso_cli*", "forge*"]
 
 [tool.setuptools.package-data]
-"seiso.adaptive_quant.configs" = ["*.json"]
-"seiso.adaptive_quant.native" = ["*.cpp"]
-"seiso.adaptive_quant.prompts" = ["*.json"]
-"seiso.adaptive_quant.ui.static" = ["*.html", "*.css", "*.js"]
 "seiso.kernels.cuda" = ["*.cpp", "*.cu", "*.cuh"]
 "seiso.kernels.cuda.include" = ["*.cuh"]
 
@@ -207,8 +205,6 @@ ignored-modules = [
   "kernels",
   "psutil",
   "seiso.codellama_compress",
-  "adaptive_rl_quant",
-  "seiso.adaptive_quant",
   "sentence_transformers",
   "triton",
   "flash_attn",
@@ -222,15 +218,11 @@ ignored-modules = [
 
 [tool.pip-audit]
 ignore-vulns = [
-  # Historical pip advisory noise still referenced by some audit DBs.
+  # Historical torch advisory DB noise (CVE-2025-3000 / jit.script); floor is torch>=2.13.
   "PYSEC-2025-194",
-  # llama-cpp-python depends on diskcache, but Seiso attaches LlamaRAMCache
-  # instead of diskcache's pickle-backed persistent cache. No fixed diskcache
-  # release is advertised by pip-audit for this CVE yet.
+  # Optional [llamacpp] pulls diskcache; Seiso uses LlamaRAMCache (not diskcache pickle).
+  # No fixed diskcache release is advertised by pip-audit for this CVE yet.
   "CVE-2025-69872",
-  # pip-audit currently flags ecdsa 0.19.2 even though upstream identifies
-  # 0.19.2 as the patched release for malformed DER handling.
-  "PYSEC-2026-1325",
 ]
 
 [tool.pylint.messages_control]

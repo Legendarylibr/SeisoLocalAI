@@ -13,19 +13,7 @@ from seiso.rl_verify.extract import (
 from seiso.rl_verify.verify import outcome_reward
 
 __all__ = [
-    "ensure_thinking_completion",
     "final_answer_text",
     "format_thinking_prompt",
     "outcome_reward",
 ]
-
-
-def ensure_thinking_completion(completion: str, *, enabled: bool) -> str:
-    """Deprecated no-op for scoring safety.
-
-    Historically this prepended a synthetic ``<think>`` tag after generation so
-    format checks could pass without the model producing the tag. That creates a
-    reward/token mismatch. Completions are now scored as generated.
-    """
-    del enabled
-    return completion

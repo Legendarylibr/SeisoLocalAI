@@ -241,9 +241,7 @@ def test_trainer_fails_without_data_designer(tmp_path: Path):
             return_value=False,
         ),
         patch("seiso.slime.trainer._distributed_barrier"),
-        pytest.raises(
-            RuntimeError, match="data_gen_source|Data Designer|materialize source"
-        ),
+        pytest.raises(RuntimeError, match="data_gen_source|Data Designer|materialize source"),
     ):
         _maybe_materialize_data_gen(cfg, dist)
 

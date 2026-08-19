@@ -255,9 +255,7 @@ class TrainConfig(BaseModel):
     )
     loss_aggregation: str = Field(
         default="seq_mean",
-        description=(
-            "GRPO loss reduction: seq_mean (DeepSeekMath) or token_mean (length-biased)."
-        ),
+        description=("GRPO loss reduction: seq_mean (DeepSeekMath) or token_mean (length-biased)."),
     )
     temperature: float = Field(default=0.9, gt=0)
     top_p: float = Field(default=0.95, gt=0, le=1)
@@ -326,9 +324,7 @@ class TrainConfig(BaseModel):
     )
     slime_eval_dataset: Path | None = Field(
         default=None,
-        description=(
-            "Frozen held-out JSONL for slime unit-test eval (must differ from dataset)."
-        ),
+        description=("Frozen held-out JSONL for slime unit-test eval (must differ from dataset)."),
     )
     slime_eval_every_steps: int = Field(
         default=0,
@@ -397,6 +393,7 @@ class TrainConfig(BaseModel):
         if text.strip().lower() == "hf_dataset":
             return "dataset"
         return text
+
     require_held_out_eval: bool = Field(
         default=True,
         description="Require disjoint eval_dataset for product slime runs",
@@ -446,6 +443,28 @@ class TrainConfig(BaseModel):
             "and lora_target_modules."
         ),
     )
+
+    @field_validator(
+        "best_checkpoint_dir",
+        "verifier_data_file",
+        "data_gen_filename",
+        "sglang_weight_dir",
+        "vllm_weight_dir",
+    )
+    @classmethod
+    def _validate_relative_artifact_name(cls, v: str) -> str:
+        from seiso.security import assert_relative_artifact_name
+
+        return assert_relative_artifact_name(v, field="artifact_path")
+
+    @field_validator("final_checkpoint_dir")
+    @classmethod
+    def _validate_final_checkpoint_dir(cls, v: str) -> str:
+        if not (v or "").strip():
+            return ""
+        from seiso.security import assert_relative_artifact_name
+
+        return assert_relative_artifact_name(v, field="final_checkpoint_dir")
 
     @field_validator(
         "output_dir",
@@ -657,11 +676,7 @@ class TrainConfig(BaseModel):
                 "placeholder (recipes ship their own data) or a real JSONL. "
                 "Smoke/CI: SEISO_ALLOW_TINY_RL=1."
             )
-        if (
-            not self.nemo_rl_dry_run
-            and not self.nemo_rl_ack_recipe_corpus
-            and not allow_tiny_rl()
-        ):
+        if not self.nemo_rl_dry_run and not self.nemo_rl_ack_recipe_corpus and not allow_tiny_rl():
             raise ValueError(
                 "method=nemo_rl requires nemo_rl_ack_recipe_corpus=true "
                 "(NeMo recipes ship their own datasets; TrainConfig.dataset is "
@@ -716,9 +731,7 @@ class TrainConfig(BaseModel):
             output_dir=self.output_dir,
             sandbox_root=self.sandbox_root,
             eval_dataset=(
-                Path(self.slime_eval_dataset)
-                if self.slime_eval_dataset is not None
-                else None
+                Path(self.slime_eval_dataset) if self.slime_eval_dataset is not None else None
             ),
             eval_every_steps=self.slime_eval_every_steps,
             eval_max_prompts=self.slime_eval_max_prompts,
@@ -746,11 +759,7 @@ class TrainConfig(BaseModel):
             weight_decay=self.weight_decay,
             max_grad_norm=self.max_grad_norm,
             epochs=self.epochs,
-            max_steps=(
-                self.max_steps
-                if self.max_steps is not None
-                else extra.get("max_steps")
-            ),
+            max_steps=(self.max_steps if self.max_steps is not None else extra.get("max_steps")),
             kl_coef=self.kl_coef,
             clip_ratio=self.clip_ratio,
             clip_ratio_high=self.clip_ratio_high,
@@ -972,9 +981,7 @@ def run_training(
                 "NeMo RL: launching external NVIDIA-NeMo/RL via uv "
                 "(set SEISO_NEMO_RL_ROOT if the checkout is not auto-discovered)."
             )
-        out = train_nemo_rl(
-            config.to_nemo_rl_config(), should_stop=should_stop(job_id)
-        )
+        out = train_nemo_rl(config.to_nemo_rl_config(), should_stop=should_stop(job_id))
         if is_main_process():
             # Manifest is written by the NeMo RL runner; ensure path exists.
             manifest = out / "seiso_manifest.json"

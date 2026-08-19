@@ -50,6 +50,7 @@ def _set_native_linux_nvidia_boundary_for_local_forge(settings: ForgeSettings) -
 
 def validate_security_settings(settings: ForgeSettings) -> None:
     """Fail fast on unsafe combinations; log warnings for elevated risk."""
+    from forge.security.audit import audit_event
     from seiso.security.nvidia_boundary import (
         approved_nvidia_boundary,
         is_linux_nvidia_host,
@@ -84,13 +85,18 @@ def validate_security_settings(settings: ForgeSettings) -> None:
         tools_dangerous = settings.allow_tools or settings.allow_compat_tools
         if tools_dangerous and not _env_enabled(_REMOTE_DANGEROUS_ACK_ENV):
             raise RuntimeError(
-                "Remote access with tools requires: "
-                f"export {_REMOTE_DANGEROUS_ACK_ENV}=1"
+                f"Remote access with tools requires: export {_REMOTE_DANGEROUS_ACK_ENV}=1"
             )
         if tools_dangerous:
-            logger.warning(
-                "Remote access with tools enabled — high risk if credentials leak."
-            )
+            logger.warning("Remote access with tools enabled — high risk if credentials leak.")
+        audit_event(
+            "security_elevated",
+            allow_remote=True,
+            allow_tools=bool(settings.allow_tools),
+            allow_compat_tools=bool(settings.allow_compat_tools),
+            allow_code_exec=False,
+            remote_dangerous_ack=_env_enabled(_REMOTE_DANGEROUS_ACK_ENV),
+        )
 
     if settings.debug and settings.allow_remote:
         raise RuntimeError(

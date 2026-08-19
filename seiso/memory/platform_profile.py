@@ -42,9 +42,7 @@ def native_linux_nvidia_llama_batch_caps(
     return batch, ubatch, cache_cap
 
 
-def _refresh_native_linux_llama_env(
-    *, batch_cap: int, ubatch_cap: int, cache_cap: int
-) -> None:
+def _refresh_native_linux_llama_env(*, batch_cap: int, ubatch_cap: int, cache_cap: int) -> None:
     """Pin native Linux llama.cpp batch env to VRAM-derived caps on every Forge start."""
     if env_bool("SEISO_DISABLE_MEMORY_CAPS", False):
         return
@@ -161,9 +159,7 @@ def _lean_runtime_caps(profile: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def apply_platform_memory_profile(
-    *, profile: dict[str, Any] | None = None
-) -> dict[str, Any]:
+def apply_platform_memory_profile(*, profile: dict[str, Any] | None = None) -> dict[str, Any]:
     """
     Apply lean RAM defaults for this OS/tier.
 
@@ -192,12 +188,7 @@ def apply_platform_memory_profile(
         or memory_profile_label(profile) == "low"
     )
     # Apple unified memory only — discrete Linux VRAM must keep VRAM-derived caps.
-    tight_apple = (
-        not memory_caps_disabled
-        and system == "Darwin"
-        and ram_gb > 0
-        and ram_gb <= 24
-    )
+    tight_apple = not memory_caps_disabled and system == "Darwin" and ram_gb > 0 and ram_gb <= 24
 
     os.environ.setdefault("SEISO_LLAMA_USE_MMAP", "true")
     os.environ.setdefault("SEISO_LLAMA_USE_MLOCK", "false")
@@ -259,9 +250,7 @@ def apply_platform_memory_profile(
         ):
             # Avoid importing llama_cpp at idle. If already loaded and the wheel
             # cannot offload, seed CPU layers; otherwise prefer full offload.
-            os.environ.setdefault(
-                "SEISO_LLAMA_GPU_LAYERS", _nvidia_llama_gpu_layers_default()
-            )
+            os.environ.setdefault("SEISO_LLAMA_GPU_LAYERS", _nvidia_llama_gpu_layers_default())
             if tier in (
                 HardwareTier.WORKSTATION,
                 HardwareTier.CAPABLE,

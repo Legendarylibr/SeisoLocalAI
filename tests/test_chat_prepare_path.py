@@ -36,9 +36,7 @@ async def test_prepare_local_chat_target_missing_model_is_404(monkeypatch):
     settings = SimpleNamespace(data_dir="/tmp", model_router_enabled=False)
 
     with pytest.raises(HTTPException) as exc:
-        await inference_chat.prepare_local_chat_target(
-            object(), "u1", settings, model_id="missing"
-        )
+        await inference_chat.prepare_local_chat_target(object(), "u1", settings, model_id="missing")
     assert exc.value.status_code == 404
 
 
@@ -61,9 +59,7 @@ async def test_prepare_local_chat_target_rejects_incomplete(monkeypatch, tmp_pat
     settings = SimpleNamespace(data_dir=tmp_path)
 
     with pytest.raises(HTTPException) as exc:
-        await inference_chat.prepare_local_chat_target(
-            object(), "u1", settings, model_id="m1"
-        )
+        await inference_chat.prepare_local_chat_target(object(), "u1", settings, model_id="m1")
     assert exc.value.status_code == 400
     assert "incomplete" in str(exc.value.detail).lower()
 

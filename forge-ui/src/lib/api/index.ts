@@ -8,7 +8,6 @@ import { knowledgeApi } from "./knowledge";
 import { modelsApi } from "./models";
 import { providersApi } from "./providers";
 import { recipesApi } from "./recipes";
-import { rlQuantApi } from "./rlQuant";
 import { settingsApi } from "./settings";
 import { streamChat, subscribeSSE } from "./sse";
 import { systemApi } from "./system";
@@ -20,7 +19,6 @@ export const api = {
   ...exportApi,
   ...inferenceApi,
   ...trainingApi,
-  ...rlQuantApi,
   ...compressApi,
   ...distillRlApi,
   ...settingsApi,

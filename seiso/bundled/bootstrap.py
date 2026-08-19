@@ -37,14 +37,10 @@ def make_bundled_package(
             missing_hint=hint,
         )
 
-    return BundledPackage(
-        root=root, ensure_importable=ensure_importable, require=require
-    )
+    return BundledPackage(root=root, ensure_importable=ensure_importable, require=require)
 
 
-def ensure_bundled_importable(
-    bundle_root: Path, *, src_subdir: str | None = None
-) -> Path:
+def ensure_bundled_importable(bundle_root: Path, *, src_subdir: str | None = None) -> Path:
     """Insert the package import root on sys.path if needed."""
     import_root = bundle_root / src_subdir if src_subdir else bundle_root.parent
     root = str(import_root.resolve())
@@ -65,8 +61,6 @@ def require_bundled_package(
     try:
         __import__(package_name)
     except ImportError as exc:
-        hint = (
-            missing_hint or f"Expected {import_root / package_name.replace('.', '/')}"
-        )
+        hint = missing_hint or f"Expected {import_root / package_name.replace('.', '/')}"
         raise RuntimeError(f"Bundled package {package_name!r} missing. {hint}") from exc
     return import_root

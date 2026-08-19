@@ -69,8 +69,8 @@ export function MetricsProvider({ children }: { children: ReactNode }) {
         if (fingerprint !== lastPayloadRef.current) {
           lastPayloadRef.current = fingerprint;
           lastChangeRef.current = Date.now();
+          setMetrics(next);
         }
-        setMetrics(next);
       } catch {
         /* metrics are best-effort and local-only */
       } finally {

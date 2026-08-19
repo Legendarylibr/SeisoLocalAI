@@ -23,6 +23,7 @@ export function DistillRLPage() {
     localModels,
     modelsReady,
     starting,
+    startError,
     runPipeline,
     logs,
     result,
@@ -158,6 +159,7 @@ export function DistillRLPage() {
         presetsReady && modelsReady && !!teacherModel && !!studentModel && dataReady
       }
       starting={starting}
+      startError={startError}
       onStart={start}
       startLabel="Run distill-RL pipeline"
     >

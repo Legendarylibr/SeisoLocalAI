@@ -30,28 +30,19 @@ def build_hydra_overrides(config: NeMoRLConfig) -> list[str]:
             overrides.append(f"grpo.max_num_steps={int(config.max_steps)}")
         # Always override generations/prompt so upstream recipe defaults of 1
         # cannot silently disable grouped GRPO advantages.
-        grpo_rpp = (
-            int(config.rollouts_per_prompt)
-            if config.rollouts_per_prompt is not None
-            else 4
-        )
+        grpo_rpp = int(config.rollouts_per_prompt) if config.rollouts_per_prompt is not None else 4
         if grpo_rpp < 2:
             raise ValueError(
-                "rollouts_per_prompt must be >= 2 for NeMo RL GRPO/smoke "
-                f"(got {grpo_rpp})"
+                f"rollouts_per_prompt must be >= 2 for NeMo RL GRPO/smoke (got {grpo_rpp})"
             )
         overrides.append(f"grpo.num_generations_per_prompt={grpo_rpp}")
         if config.num_prompts_per_step is not None:
-            overrides.append(
-                f"grpo.num_prompts_per_step={int(config.num_prompts_per_step)}"
-            )
+            overrides.append(f"grpo.num_prompts_per_step={int(config.num_prompts_per_step)}")
         overrides.append(f"grpo.seed={int(config.seed)}")
 
     if config.learning_rate is not None:
         # NeMo RL DTensor path: policy.optimizer.kwargs.lr
-        overrides.append(
-            f"policy.optimizer.kwargs.lr={float(config.learning_rate)}"
-        )
+        overrides.append(f"policy.optimizer.kwargs.lr={float(config.learning_rate)}")
 
     if config.use_lora:
         # NeMo RL LoRA GRPO/DPO: enable when the base recipe supports it.
@@ -92,9 +83,7 @@ def write_launch_sidecar(config: NeMoRLConfig, *, nemo_root: Path) -> Path:
         "upstream": "https://github.com/NVIDIA-NeMo/RL",
         "model_id": config.model_id,
         "recipe": (
-            config.recipe.value
-            if isinstance(config.recipe, NeMoRLRecipe)
-            else str(config.recipe)
+            config.recipe.value if isinstance(config.recipe, NeMoRLRecipe) else str(config.recipe)
         ),
         "nemo_rl_root": str(nemo_root),
         "base_config": config.recipe_base_config(),
@@ -125,11 +114,17 @@ def build_command(
     script = config.recipe_script()
     base = config.recipe_base_config()
     script_path = nemo_root / script
-    base_path = nemo_root / base
+    base_path = _resolve_base_config_path(nemo_root, base)
     if not script_path.is_file():
         raise FileNotFoundError(f"NeMo RL script missing: {script_path}")
     if not base_path.is_file():
         raise FileNotFoundError(f"NeMo RL base config missing: {base_path}")
+
+    # Prefer a path relative to nemo_root for Hydra when possible.
+    try:
+        base_arg = str(base_path.resolve().relative_to(nemo_root.resolve()))
+    except ValueError:
+        base_arg = str(base_path)
 
     cmd = [
         uv,
@@ -137,10 +132,40 @@ def build_command(
         "python",
         script,
         "--config",
-        base,
+        base_arg,
     ]
     cmd.extend(build_hydra_overrides(config))
     return cmd
+
+
+def _resolve_base_config_path(nemo_root: Path, base: str) -> Path:
+    """Resolve recipe base YAML under ``nemo_root``; reject ``..`` escapes."""
+    from seiso.security import SecurityError, assert_relative_artifact_name, assert_within
+
+    raw = str(base or "").strip()
+    if not raw:
+        raise ValueError("NeMo RL base_config must not be empty")
+    root = nemo_root.resolve()
+    candidate = Path(raw).expanduser()
+    if candidate.is_absolute():
+        try:
+            return assert_within(root, candidate)
+        except SecurityError as exc:
+            raise ValueError(
+                f"nemo_rl base_config must resolve under the NeMo checkout (rejected: {raw!r})"
+            ) from exc
+    try:
+        assert_relative_artifact_name(raw, field="base_config")
+    except ValueError as exc:
+        raise ValueError(
+            f"nemo_rl base_config must be a relative path without '..' (rejected: {raw!r})"
+        ) from exc
+    try:
+        return assert_within(root, root / raw)
+    except SecurityError as exc:
+        raise ValueError(
+            f"nemo_rl base_config must resolve under the NeMo checkout (rejected: {raw!r})"
+        ) from exc
 
 
 def _hydra_quote(value: str) -> str:

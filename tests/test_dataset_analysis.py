@@ -38,9 +38,7 @@ class _Rows:
         return _Rows([self._rows[i] for i in indices])
 
     def remove_columns(self, names):
-        return _Rows(
-            [{k: v for k, v in row.items() if k not in names} for row in self._rows]
-        )
+        return _Rows([{k: v for k, v in row.items() if k not in names} for row in self._rows])
 
 
 def test_detect_format_consensus_majority_vote():
@@ -101,9 +99,7 @@ def test_build_dataset_training_config_code_pretraining():
 
 
 def test_length_stats_percentiles():
-    stats = _length_stats(
-        [{"text": "a" * 10}, {"text": "b" * 100}, {"text": "c" * 1000}]
-    )
+    stats = _length_stats([{"text": "a" * 10}, {"text": "b" * 100}, {"text": "c" * 1000}])
     assert stats["chars_min"] == 10
     assert stats["chars_p50"] == 100
     assert stats["chars_max"] == 1000

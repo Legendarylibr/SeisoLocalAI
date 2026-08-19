@@ -20,6 +20,7 @@ def evaluate_pipeline(
     prompt_library_path: Path | None,
     eval_max_prompts: int,
     trust_remote_code: bool = False,
+    use_chat_template: bool = False,
     benchmark_verifiable: bool = False,
     benchmark_tasks: list[str] | None = None,
     require_thinking_trace: bool = False,
@@ -45,13 +46,13 @@ def evaluate_pipeline(
             if len(eval_texts) >= max(1, eval_max_prompts):
                 break
         eval_prompts = [
-            RolloutPrompt(prompt_id=f"pref_{idx}", text=text)
-            for idx, text in enumerate(eval_texts)
+            RolloutPrompt(prompt_id=f"pref_{idx}", text=text) for idx, text in enumerate(eval_texts)
         ]
 
     results: dict[str, Any] = {
         "checkpoints": {},
         "eval_prompt_count": len(eval_prompts),
+        "use_chat_template": bool(use_chat_template),
     }
     val_rows = _load_jsonl(val_preferences_path)
     skipped: list[str] = []
@@ -68,20 +69,20 @@ def evaluate_pipeline(
             eval_texts,
             val_rows,
             trust_remote_code=trust_remote_code,
+            use_chat_template=use_chat_template,
         )
         metrics["samples"] = _write_samples(
             output_dir / f"samples_{name}.jsonl",
             model_path,
             eval_prompts,
             trust_remote_code=trust_remote_code,
+            use_chat_template=use_chat_template,
         )
         results["checkpoints"][name] = metrics
 
     if checkpoints and not results["checkpoints"]:
         detail = ", ".join(skipped) if skipped else "none resolved"
-        raise FileNotFoundError(
-            f"Evaluate found no usable checkpoints (skipped: {detail})"
-        )
+        raise FileNotFoundError(f"Evaluate found no usable checkpoints (skipped: {detail})")
     if skipped and on_log:
         on_log(f"Evaluate skipped missing checkpoints: {', '.join(skipped)}")
 
@@ -126,6 +127,7 @@ def _evaluate_checkpoint(
     val_rows: list[dict[str, Any]],
     *,
     trust_remote_code: bool = False,
+    use_chat_template: bool = False,
 ) -> dict[str, Any]:
     from seiso.compress.bootstrap import require_codellama_compress
 
@@ -144,7 +146,13 @@ def _evaluate_checkpoint(
             eval_texts[0] if eval_texts else "def fib(n):",
             device,
         )
-        val_metrics = _val_preference_metrics(model, tokenizer, val_rows, device)
+        val_metrics = _val_preference_metrics(
+            model,
+            tokenizer,
+            val_rows,
+            device,
+            use_chat_template=use_chat_template,
+        )
     finally:
         release_causal_lm(model)
 
@@ -162,6 +170,8 @@ def _val_preference_metrics(
     tokenizer,
     val_rows: list[dict[str, Any]],
     device,
+    *,
+    use_chat_template: bool = False,
 ) -> dict[str, float | int | bool | None]:
     if not val_rows:
         return {
@@ -176,7 +186,7 @@ def _val_preference_metrics(
     correct = 0
     margins: list[float] = []
     for row in val_rows:
-        # Match DPO training default: joint tokenize + sum logprobs (not mean).
+        # Match DPO training: chat-template formatting + joint tokenize + sum.
         chosen_lp = _sequence_logprob(
             model,
             tokenizer,
@@ -184,6 +194,7 @@ def _val_preference_metrics(
             row["chosen"],
             device,
             average=False,
+            use_chat_template=use_chat_template,
         )
         rejected_lp = _sequence_logprob(
             model,
@@ -192,6 +203,7 @@ def _val_preference_metrics(
             row["rejected"],
             device,
             average=False,
+            use_chat_template=use_chat_template,
         )
         margin = chosen_lp - rejected_lp
         margins.append(margin)
@@ -210,6 +222,21 @@ def _val_preference_metrics(
     }
 
 
+def _format_eval_prompt(tokenizer, prompt: str, *, use_chat_template: bool) -> str:
+    """Mirror DPODataCollator._format_prompt for val metrics."""
+    if not use_chat_template:
+        return prompt
+    apply_template = getattr(tokenizer, "apply_chat_template", None)
+    if apply_template is None:
+        return prompt
+    formatted = apply_template(
+        [{"role": "user", "content": prompt}],
+        tokenize=False,
+        add_generation_prompt=True,
+    )
+    return str(formatted)
+
+
 def _sequence_logprob(
     model,
     tokenizer,
@@ -218,24 +245,24 @@ def _sequence_logprob(
     device,
     *,
     average: bool = False,
+    use_chat_template: bool = False,
 ) -> float:
     """Completion logprob with joint tokenization (matches DPO collator).
 
     Prompt length is derived from a joint encode of ``prompt+completion`` so
     BPE merges across the boundary cannot empty the completion label span.
+    When ``use_chat_template`` is set, format the prompt the same way as training.
     """
     import torch
 
-    text = f"{prompt}{completion}"
-    joint = tokenizer(text, return_tensors="pt", add_special_tokens=True)
-    # Prefix length: tokenize prompt alone with the same special-token policy,
-    # then clamp so labels stay inside the joint sequence.
-    prompt_ids = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)[
+    prompt_text = _format_eval_prompt(tokenizer, prompt, use_chat_template=use_chat_template)
+    add_special = not use_chat_template
+    text = f"{prompt_text}{completion}"
+    joint = tokenizer(text, return_tensors="pt", add_special_tokens=add_special)
+    prompt_ids = tokenizer(prompt_text, return_tensors="pt", add_special_tokens=add_special)[
         "input_ids"
     ][0]
     prompt_len = min(int(prompt_ids.numel()), int(joint["input_ids"].shape[1]) - 1)
-    # If separate prompt encode overshoots (merge divergence), rediscover a
-    # safe split by longest joint prefix matching the prompt string decode.
     if prompt_len < 1:
         prompt_len = 1
     enc = {k: v.to(device) for k, v in joint.items()}
@@ -258,6 +285,7 @@ def _write_samples(
     prompts: list[RolloutPrompt],
     *,
     trust_remote_code: bool = False,
+    use_chat_template: bool = False,
 ) -> str:
     from seiso.distill_rl.rollouts import generate_completions
 
@@ -267,7 +295,7 @@ def _write_samples(
         max_new_tokens=64,
         temperature=0.0,
         seed=0,
-        use_chat_template=False,
+        use_chat_template=use_chat_template,
         trust_remote_code=trust_remote_code,
     )
     with path.open("w", encoding="utf-8") as handle:

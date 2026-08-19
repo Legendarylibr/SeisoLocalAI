@@ -160,11 +160,7 @@ def export_checkpoint(
             # feed adapter-only dirs into GGUF conversion.
             merged = results.get(ExportFormat.MERGED.value)
             full = results.get(ExportFormat.FULL.value)
-            if (
-                full is not None
-                and full.exists()
-                and (full / "adapter_config.json").is_file()
-            ):
+            if full is not None and full.exists() and (full / "adapter_config.json").is_file():
                 full = None
             merged_dir = merged if merged and merged.exists() else None
             if merged_dir is None and full is not None and full.exists():
@@ -279,9 +275,7 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
         max_file_bytes=None if full_checksums else 8 * 1024 * 1024,
         always_hash_suffixes=weight_suffixes,
     )
-    incomplete = any(
-        value in {"skipped-large-file", "error"} for value in checksums.values()
-    )
+    incomplete = any(value in {"skipped-large-file", "error"} for value in checksums.values())
     payload = {
         "format": fmt.value,
         "checkpoint_kind": kind,
@@ -308,14 +302,16 @@ def _write_export_sidecar(dest: Path, ckpt: Path, fmt: ExportFormat, kind: str) 
 
 
 def _select_hub_folder(out_root: Path, formats: list[ExportFormat]) -> Path:
-    """Prefer merged/full weights; fall back to GGUF quant dir or export root."""
+    """Prefer merged/full weights; then LoRA adapter dir; then GGUF; else root."""
     for key in (ExportFormat.MERGED, ExportFormat.FULL, ExportFormat.BASE):
         if key in formats:
-            candidate = out_root / (
-                "merged" if key == ExportFormat.MERGED else key.value
-            )
+            candidate = out_root / ("merged" if key == ExportFormat.MERGED else key.value)
             if candidate.is_dir() and any(candidate.iterdir()):
                 return candidate
+    if ExportFormat.LORA in formats:
+        lora_dir = out_root / "lora"
+        if lora_dir.is_dir() and any(lora_dir.iterdir()):
+            return lora_dir
     if ExportFormat.GGUF in formats:
         gguf_dirs: list[Path] = []
         for child in out_root.iterdir():
@@ -330,9 +326,7 @@ def _select_hub_folder(out_root: Path, formats: list[ExportFormat]) -> Path:
             )
             if not looks_gguf and not any(child.glob("*.gguf")):
                 continue
-            ggufs = [
-                p for p in child.glob("*.gguf") if p.is_file() and p.stat().st_size > 0
-            ]
+            ggufs = [p for p in child.glob("*.gguf") if p.is_file() and p.stat().st_size > 0]
             if ggufs:
                 gguf_dirs.append(child)
         if gguf_dirs:
@@ -448,9 +442,7 @@ def validate_lora_checkpoint(checkpoint: Path) -> None:
             raise ValueError(f"LoRA checkpoint missing adapter weights: {checkpoint}")
 
 
-def _export_lora_adapter(
-    checkpoint: Path, dest: Path, log: Callable[[str], None]
-) -> None:
+def _export_lora_adapter(checkpoint: Path, dest: Path, log: Callable[[str], None]) -> None:
     """Copy a validated LoRA adapter tree for standalone use."""
     validate_lora_checkpoint(checkpoint)
     if dest.exists():
@@ -459,11 +451,7 @@ def _export_lora_adapter(
     readme = dest / "README.md"
     if not readme.is_file():
         manifest = _load_training_manifest(checkpoint)
-        base = (
-            manifest.get("original_model_id")
-            or manifest.get("model_id")
-            or "base model"
-        )
+        base = manifest.get("original_model_id") or manifest.get("model_id") or "base model"
         quant = manifest.get("quant", "unknown")
         readme.write_text(
             f"# LoRA adapter\n\n"
@@ -482,9 +470,7 @@ def _export_lora_adapter(
     log(f"Validated LoRA adapter ({checkpoint.name})")
 
 
-def merge_lora_checkpoint(
-    checkpoint: Path, dest: Path, log: Callable[[str], None]
-) -> None:
+def merge_lora_checkpoint(checkpoint: Path, dest: Path, log: Callable[[str], None]) -> None:
     """Merge LoRA weights into base model when PEFT adapter present."""
     adapter_config = checkpoint / "adapter_config.json"
     if adapter_config.exists():
@@ -496,12 +482,8 @@ def merge_lora_checkpoint(
         from seiso.memory.protection import ensure_load_fits, release_cached_memory
 
         ensure_load_fits(base_id, mode="chat")
-        tok_path = (
-            checkpoint if (checkpoint / "tokenizer_config.json").is_file() else base_id
-        )
-        tok = deps.auto_tokenizer.from_pretrained(
-            str(tok_path), revision="main"
-        )  # nosec B615: revision pinned
+        tok_path = checkpoint if (checkpoint / "tokenizer_config.json").is_file() else base_id
+        tok = deps.auto_tokenizer.from_pretrained(str(tok_path), revision="main")  # nosec B615: revision pinned
         model = None
         merged = None
         try:
@@ -522,9 +504,7 @@ def merge_lora_checkpoint(
         shutil.copytree(checkpoint, dest, dirs_exist_ok=True)
         log(f"Copied full checkpoint to {dest}")
     else:
-        raise ValueError(
-            f"Checkpoint is neither a LoRA adapter nor a full model: {checkpoint}"
-        )
+        raise ValueError(f"Checkpoint is neither a LoRA adapter nor a full model: {checkpoint}")
 
 
 def _push_hub(

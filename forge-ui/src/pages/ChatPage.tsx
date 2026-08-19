@@ -654,13 +654,11 @@ export function ChatPage() {
 
   const closeTab = (threadId: string, e: React.MouseEvent) => {
     e.stopPropagation();
-    setOpenTabs((prev) => {
-      const remaining = prev.filter((t) => t.threadId !== threadId);
-      if (active === threadId) {
-        setActive(remaining.length ? remaining[remaining.length - 1].threadId : null);
-      }
-      return remaining;
-    });
+    const remaining = openTabs.filter((t) => t.threadId !== threadId);
+    if (active === threadId) {
+      setActive(remaining.length ? remaining[remaining.length - 1].threadId : null);
+    }
+    setOpenTabs(remaining);
   };
 
   const newThread = async () => {
@@ -674,13 +672,11 @@ export function ChatPage() {
     e.stopPropagation();
     await api.deleteThread(threadId);
     setThreads((prev) => prev.filter((t) => t.id !== threadId));
-    setOpenTabs((prev) => {
-      const remaining = prev.filter((t) => t.threadId !== threadId);
-      if (active === threadId) {
-        setActive(remaining.length ? remaining[remaining.length - 1].threadId : null);
-      }
-      return remaining;
-    });
+    const remaining = openTabs.filter((t) => t.threadId !== threadId);
+    if (active === threadId) {
+      setActive(remaining.length ? remaining[remaining.length - 1].threadId : null);
+    }
+    setOpenTabs(remaining);
     setMessagesByThread((prev) => {
       const copy = { ...prev };
       delete copy[threadId];
@@ -728,16 +724,24 @@ export function ChatPage() {
     setError(null);
 
     let threadId = active;
-    if (!threadId) {
-      const t = await api.createThread(content.slice(0, 48));
-      threadId = t.id;
-      setThreads((prev) => [t, ...prev]);
-      openThread(t);
-    }
+    let displayedMessages: ChatMessage[];
+    try {
+      if (!threadId) {
+        const t = await api.createThread(content.slice(0, 48));
+        threadId = t.id;
+        setThreads((prev) => [t, ...prev]);
+        openThread(t);
+      }
 
-    let displayedMessages = messagesByThread[threadId!] ?? [];
-    if (displayedMessages.length === 0 && threads.some((t) => t.id === threadId)) {
-      displayedMessages = await api.getMessages(threadId!);
+      displayedMessages = messagesByThread[threadId!] ?? [];
+      if (displayedMessages.length === 0 && threads.some((t) => t.id === threadId)) {
+        displayedMessages = await api.getMessages(threadId!);
+      }
+    } catch (e) {
+      setInput(content);
+      setStreaming(false);
+      setError(e instanceof Error ? e.message : "Failed to start chat");
+      return;
     }
 
     setMessagesByThread((prev) => ({
@@ -953,7 +957,7 @@ export function ChatPage() {
       <aside className="chat-sidebar" aria-hidden={!sidebarOpen}>
         <div className={`chat-sidebar-header${waitingForModel ? " chat-sidebar-header-loading" : ""}`}>
           {!waitingForModel && (
-            <button type="button" className="chat-new-btn" onClick={newThread}>
+            <button type="button" className="chat-new-btn" onClick={() => { newThread().catch(console.error); }}>
               <IconPlus size={16} />
               <span>New chat</span>
             </button>
@@ -982,13 +986,18 @@ export function ChatPage() {
               onClick={() => openThread(t)}
               role="button"
               tabIndex={0}
-              onKeyDown={(e) => e.key === "Enter" && openThread(t)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  openThread(t);
+                }
+              }}
             >
               <span className="chat-thread-title">{t.title}</span>
               <button
                 type="button"
                 className="chat-thread-delete"
-                onClick={(e) => deleteThread(t.id, e)}
+                onClick={(e) => { deleteThread(t.id, e).catch(console.error); }}
                 aria-label="Delete chat"
               >
                 <IconClose size={14} />
@@ -1045,7 +1054,7 @@ export function ChatPage() {
           <button
             type="button"
             className="chat-refresh-models"
-            onClick={refreshModels}
+            onClick={() => { refreshModels().catch(console.error); }}
             title="Refresh model list"
             aria-label="Refresh models"
           >
@@ -1229,17 +1238,26 @@ export function ChatPage() {
         {openTabs.length > 1 && (
           <div className="chat-tabs">
             {openTabs.map((tab) => (
-              <button
+              <div
                 key={tab.threadId}
-                type="button"
                 className={`chat-tab${active === tab.threadId ? " active" : ""}`}
-                onClick={() => setActive(tab.threadId)}
               >
-                <span className="chat-tab-title">{tab.title.slice(0, 24)}</span>
-                <span className="chat-tab-close" onClick={(e) => closeTab(tab.threadId, e)} aria-label="Close tab">
+                <button
+                  type="button"
+                  className="chat-tab-button"
+                  onClick={() => setActive(tab.threadId)}
+                >
+                  <span className="chat-tab-title">{tab.title.slice(0, 24)}</span>
+                </button>
+                <button
+                  type="button"
+                  className="chat-tab-close"
+                  onClick={(e) => closeTab(tab.threadId, e)}
+                  aria-label="Close tab"
+                >
                   <IconClose size={12} />
-                </span>
-              </button>
+                </button>
+              </div>
             ))}
           </div>
         )}
@@ -1256,7 +1274,7 @@ export function ChatPage() {
               ) : (
                 <>
                   <p>Start a new chat — your conversation is encrypted locally until you sign out.</p>
-                  <button type="button" className="btn btn-primary" onClick={newThread}>New chat</button>
+                  <button type="button" className="btn btn-primary" onClick={() => { newThread().catch(console.error); }}>New chat</button>
                 </>
               )}
             </div>

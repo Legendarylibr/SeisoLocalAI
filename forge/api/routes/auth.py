@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 import os
 from typing import Annotated, cast
 
@@ -25,8 +26,10 @@ from forge.security.csrf import (
     generate_csrf_token,
     set_csrf_cookie,
 )
+from forge.security.session_token import maybe_access_token
 from forge.services.nostr_auth import (
     NOSTR_PASSWORD_SENTINEL,
+    npub_from_pubkey_hex,
     persist_user_signing_key,
     resolve_identity,
     user_public_view,
@@ -77,7 +80,8 @@ class ResetSessionRequest(BaseModel):
 
 
 class AuthResponse(BaseModel):
-    access_token: str
+    # Cookie session is primary; body JWT only when X-Seiso-Return-Token: 1.
+    access_token: str | None = None
     token_type: str = "bearer"
     user: dict
     # Returned only when Forge generated a fresh key during register.
@@ -89,11 +93,11 @@ class OnboardingStatus(BaseModel):
     storage_mode: str
     storage_mode_configured: bool
     auth_method: str = "nostr"
+    # Instance owner npub when an account exists (public identity).
+    owner_npub: str | None = None
 
 
-def _set_session_cookies(
-    response: Response, token: str, settings: ForgeSettings
-) -> None:
+def _set_session_cookies(response: Response, token: str, settings: ForgeSettings) -> None:
     csrf = generate_csrf_token()
     response.set_cookie(
         "seiso_token",
@@ -117,22 +121,29 @@ async def onboarding_status(
     # Issue CSRF before reset-session / register so pre-auth forms can double-submit.
     if not request.cookies.get(CSRF_COOKIE):
         set_csrf_cookie(response, generate_csrf_token(), secure=settings.cookie_secure)
+    owner_npub: str | None = None
+    if count > 0:
+        sole = await db.get_sole_user()
+        pubkey = str((sole or {}).get("nostr_pubkey") or "").strip()
+        if len(pubkey) == 64:
+            owner_npub = npub_from_pubkey_hex(pubkey)
     return OnboardingStatus(
         needs_onboarding=count == 0,
         storage_mode=settings.storage_mode,
         storage_mode_configured=settings.storage_mode_configured,
         auth_method="nostr",
+        owner_npub=owner_npub,
     )
 
 
-@router.post(
-    "/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED
-)
+@router.post("/register", response_model=AuthResponse, status_code=status.HTTP_201_CREATED)
 async def register(
     body: RegisterRequest,
+    request: Request,
     response: Response,
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> AuthResponse:
+    _login_limiter.check(client_ip(request))
     if not settings.storage_mode_configured:
         if not body.storage_mode:
             raise HTTPException(
@@ -162,6 +173,8 @@ async def register(
         pair=identity.pair,
         persist=not settings.db_ephemeral,
     )
+    # Compat /v1 key is owned by this npub (rotate if unbound or prior owner).
+    settings.sync_inference_api_key_owner(identity.pubkey_hex)
     token = create_access_token(user["id"], settings)
     _set_session_cookies(response, token, settings)
     audit_event(
@@ -171,7 +184,7 @@ async def register(
         generated=generate,
     )
     return AuthResponse(
-        access_token=token,
+        access_token=maybe_access_token(request, token),
         user=user_public_view(user),
         nsec=identity.nsec if generate else None,
     )
@@ -194,7 +207,14 @@ async def login(
 
     user = await db.get_sole_user()
     stored = str((user or {}).get("nostr_pubkey") or "").strip().lower()
-    if not user or not stored or stored != identity.pubkey_hex:
+    presented = identity.pubkey_hex.strip().lower()
+    # Constant-time compare so pubkey mismatch timing cannot oracle the owner.
+    if (
+        not user
+        or len(stored) != 64
+        or len(presented) != 64
+        or not hmac.compare_digest(stored, presented)
+    ):
         audit_event("auth_login_failed")
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, "Invalid credentials")
 
@@ -205,13 +225,13 @@ async def login(
         pair=identity.pair,
         persist=not settings.db_ephemeral,
     )
+    # Ensure Compat key stays bound to the logging-in owner npub.
+    settings.sync_inference_api_key_owner(identity.pubkey_hex)
     token = create_access_token(user["id"], settings)
     _set_session_cookies(response, token, settings)
-    audit_event(
-        "auth_login", user_id=user["id"], nostr_pubkey=identity.pubkey_hex
-    )
+    audit_event("auth_login", user_id=user["id"], nostr_pubkey=identity.pubkey_hex)
     return AuthResponse(
-        access_token=token,
+        access_token=maybe_access_token(request, token),
         user=user_public_view(user),
     )
 
@@ -235,6 +255,16 @@ async def reset_session(
             "Type RESET to confirm starting a new local session",
         )
 
+    # Fail closed before wiping anything when the Compat key cannot rotate
+    # (env-bound). Otherwise a prior /v1 holder keeps working for the next
+    # npub after forgotten-key wipe.
+    if "SEISO_INFERENCE_API_KEY" in os.environ:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Session reset refused: SEISO_INFERENCE_API_KEY is env-bound and "
+            "cannot rotate. Unset it (or use a disk-managed key) before wipe.",
+        )
+
     counts = await db.reset_local_session()
     from forge.services.nostr_settings import wipe_nostr_identity_material
 
@@ -246,6 +276,15 @@ async def reset_session(
         key_file.write_text(generate_secret_key(), encoding="utf-8")
         key_file.chmod(0o600)
         sessions_rotated = True
+    # Drop owner binding + Compat key so a prior key cannot authenticate as
+    # the next npub after forgotten-key wipe + re-onboard.
+    settings.clear_inference_api_key_owner()
+    inference_key_rotated = settings.rotate_inference_api_key()
+    if not inference_key_rotated:
+        raise HTTPException(
+            status.HTTP_409_CONFLICT,
+            "Session reset refused: Compat /v1 key could not be rotated",
+        )
 
     response.delete_cookie(
         "seiso_token",
@@ -259,6 +298,8 @@ async def reset_session(
         rows_deleted=sum(counts.values()),
         nostr_keys_removed=nostr_wipe.get("removed_files"),
         nostr_encryption_key_rotated=nostr_wipe.get("encryption_key_rotated"),
+        inference_key_rotated=inference_key_rotated,
+        owner_cleared=True,
     )
     await close_dependency_caches()
     clear_dependency_caches()
@@ -266,6 +307,9 @@ async def reset_session(
         "status": "reset",
         "needs_onboarding": True,
         "sessions_rotated": sessions_rotated,
+        "inference_key_rotated": inference_key_rotated,
+        "owner_cleared": True,
+        "owner_npub": None,
         "rows_deleted": sum(counts.values()),
         "nostr_identity_wiped": True,
     }

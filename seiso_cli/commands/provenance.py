@@ -86,18 +86,14 @@ def provenance_verify(
     manifest: Annotated[str, typer.Argument(help="Path to local manifest JSON")],
     relay: Annotated[
         list[str] | None,
-        typer.Option(
-            "--relay", "-r", help="Relay URL (repeatable); else receipt/env relays"
-        ),
+        typer.Option("--relay", "-r", help="Relay URL (repeatable); else receipt/env relays"),
     ] = None,
     allow_loopback: Annotated[
         bool, typer.Option(help="Allow ws://127.0.0.1 relays (dev/mock only)")
     ] = False,
     local_only: Annotated[
         bool,
-        typer.Option(
-            "--local-only", help="Skip relay fetch; check local receipt digests only"
-        ),
+        typer.Option("--local-only", help="Skip relay fetch; check local receipt digests only"),
     ] = False,
 ) -> None:
     """Recompute digests and verify the Nostr event commitment."""
@@ -222,9 +218,7 @@ def provenance_dataset_verify_proof(
         list[str] | None,
         typer.Option("--relay", "-r", help="Relay URL (repeatable)"),
     ] = None,
-    allow_loopback: Annotated[
-        bool, typer.Option(help="Allow ws://127.0.0.1 relays")
-    ] = False,
+    allow_loopback: Annotated[bool, typer.Option(help="Allow ws://127.0.0.1 relays")] = False,
     local_only: Annotated[
         bool,
         typer.Option(
@@ -293,9 +287,7 @@ def provenance_dataset_verify_proof(
             raise typer.Exit(code=1)
         from urllib.parse import urlparse
 
-        host_allowlist = [
-            (urlparse(r).hostname or "").lower() for r in relay_urls if r.strip()
-        ]
+        host_allowlist = [(urlparse(r).hostname or "").lower() for r in relay_urls if r.strip()]
         normalized = normalize_relay_list(
             relay_urls, allowlist=host_allowlist, allow_loopback=allow_loopback
         )
@@ -317,9 +309,7 @@ def provenance_dataset_verify_proof(
         except json.JSONDecodeError:
             remote_att = None
         if isinstance(remote_att, dict):
-            remote_root = (
-                str(remote_att.get("dataset_merkle_root") or "").strip() or None
-            )
+            remote_root = str(remote_att.get("dataset_merkle_root") or "").strip() or None
         if not sig_ok:
             report["ok"] = False
             report["error"] = "invalid event signature"
@@ -335,9 +325,7 @@ def provenance_dataset_verify_proof(
         console.print_json(data=report)
         raise typer.Exit(code=1)
 
-    match = (
-        remote_root is not None and root.lower() == remote_root.lower()
-    )
+    match = remote_root is not None and root.lower() == remote_root.lower()
     report["event_root_match"] = match
     report["remote_dataset_merkle_root"] = remote_root
     report["ok"] = bool(path_ok and match and report.get("event_verified") is not False)

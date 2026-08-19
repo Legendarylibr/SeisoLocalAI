@@ -65,7 +65,18 @@ The `[mlx]` extra is included automatically by `start` on macOS. For manual inst
 pip install -e ".[mlx]"
 ```
 
-In Forge Chat, pick a model with MLX backend or let hardware detection prefer MLX on Apple Silicon.
+In Forge Chat, pick a model with MLX backend when you want safetensors on Apple Silicon.
+On **≤24 GB** unified Macs, Forge prefers **llama.cpp + GGUF** (Metal GPU layers) over MLX so larger models can mmap and partially offload.
+
+## Larger models / Metal offload
+
+Apple Silicon GGUF chat uses **llama.cpp with Metal** (`SEISO_LLAMA_GPU_LAYERS=-1` by default). When a model does not fit the Metal working set, Seiso retries with fewer GPU layers and optional CPU-side KQV (`SEISO_LLAMA_MAC_CPU_OFFLOAD=true`, default on), plus `mmap` so weights can exceed free RAM. Prefer Q4/Q5 GGUF; use **Free memory** before loading the next large model.
+
+| Goal | Path |
+|------|------|
+| Bigger chat models on Mac | GGUF + llama.cpp Metal / partial CPU offload |
+| Fast small–mid safetensors | MLX (`.[mlx]`) when RAM headroom is ample (typically 32 GB+) |
+| Training | PyTorch MPS 16-bit LoRA only (small models) — not Metal/MLX chat offload |
 
 ## Training on macOS
 

@@ -30,6 +30,14 @@ Or use the shell wrapper:
 | Job | What it runs | Skipped by `--fast` |
 |-----|--------------|---------------------|
 | **deps** | lock digests/hashes + CVE floors + pyproject coverage + freshness recompile | no |
+
+After changing `forge-ui/package-lock.json` or `locks/python.lock`, refresh digests:
+
+```bash
+python scripts/update_dep_locks.py --skip-python
+```
+
+Dependabot npm PRs get digests + `forge-ui/bun.lock` refresh automatically via `.github/workflows/dependabot-digests.yml`.
 | **lint** | `ruff check`, `ruff format --check`, `pylint` (E/F only) | no |
 | **types** | `mypy seiso forge seiso_cli` | no |
 | **test** | smoke imports + `pytest -m "not slow and not gpu"` | no |
@@ -40,7 +48,10 @@ Or use the shell wrapper:
 ### Lint detail
 
 1. **Ruff check** — style, imports, pyupgrade, bugbear, simplify rules (`pyproject.toml`)
-2. **Pylint** — fatal/error class only (`--enable=E,F`), optional deps ignored
+2. **Ruff format --check** — files must already match `ruff format` output. Ruff is
+   pinned to one version everywhere (`pyproject.toml` dev extra, `locks/python.lock`,
+   `.pre-commit-config.yaml`); bump it only together with a tree-wide reformat.
+3. **Pylint** — fatal/error class only (`--enable=E,F`), optional deps ignored
 
 Ruff uses a **baseline** (`scripts/ruff-baseline.txt`): CI fails only on *new* issues. Refresh after intentional cleanup:
 
@@ -76,8 +87,7 @@ Presets under `configs/` for agent/CI loops (not all run in default `ci-fast`):
 | `configs/smoke_train_gpu_e2e.yaml` | Longer GPU e2e |
 | `configs/smoke_slime_cpu.yaml` | Slime GRPO CPU smoke |
 | `configs/smoke_nemo_rl.yaml` | NeMo RL dry-run / smoke |
-| `configs/rl_quant_smoke.json` | RL quant product smoke |
-| `configs/distill_rl_smoke.json` | Distill-RL smoke |
+| `configs/distill_rl_smoke.json` | Distill-RL pipeline smoke |
 
 ### Test detail
 
@@ -143,8 +153,9 @@ This mode deliberately does not claim full transitive coverage. Run
 
 ## GitHub Actions
 
-CI runs dependency locks, lint, Mypy, CPU tests, security, and frontend checks
-as independent parallel jobs. Python jobs install via `uv` with
+CI runs dependency locks, lint (Python 3.10 and 3.12), Mypy, CPU tests,
+security, optional-extra import smokes, and frontend checks as independent
+parallel jobs. Python jobs install via `uv` with
 `UV_TORCH_BACKEND=cpu` so runners skip multi-gigabyte CUDA wheels that CPU CI
 never exercises. Each job calls the local runner with `--skip-install`. Pull
 requests use path filters so frontend-only or Python-only changes skip the
@@ -203,3 +214,5 @@ Lint/type/test jobs target first-party code only:
 - `seiso/`, `forge/`, `seiso_cli/`, `tests/`
 
 `forge-ui/dist/` build output is excluded.
+
+Adaptive RL quantization research: [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization).

@@ -70,9 +70,7 @@ async def run_orchestrated_job(
             try:
                 await on_finished(job)
             except Exception:
-                logger.exception(
-                    "Failed to persist cancelled state for job %s", job_id
-                )
+                logger.exception("Failed to persist cancelled state for job %s", job_id)
         raise
     except Exception as exc:
         await on_failed(job_failure_message(orchestrator, job_id, exc))

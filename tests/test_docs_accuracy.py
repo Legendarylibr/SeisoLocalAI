@@ -25,6 +25,11 @@ def _read(path: str) -> str:
         "docs/forge.md",
         "docs/cli.md",
         "docs/README.md",
+        "ROADMAP.md",
+        "seiso/agent/kernel.py",
+        "seiso/agent/harness.py",
+        "seiso/routing/select.py",
+        "seiso/pay/catalog.py",
         "configs/example_lora.yaml",
         "data/sample.jsonl",
         "AGENTS.md",
@@ -64,9 +69,7 @@ def test_quickstart_documents_real_train_config_fields():
     model_fields = set(TrainConfig.model_fields.keys())
     undocumented = table_fields - model_fields
     assert table_fields, "expected config field table in quickstart"
-    assert (
-        not undocumented
-    ), f"quickstart table lists unknown TrainConfig fields: {undocumented}"
+    assert not undocumented, f"quickstart table lists unknown TrainConfig fields: {undocumented}"
 
 
 def test_sample_jsonl_is_valid_chat_dataset():
@@ -125,9 +128,7 @@ def test_docs_internal_markdown_links_resolve():
             try:
                 resolved.relative_to(REPO_ROOT)
             except ValueError:
-                broken.append(
-                    f"{md_path.relative_to(REPO_ROOT)} -> {target} (outside repo)"
-                )
+                broken.append(f"{md_path.relative_to(REPO_ROOT)} -> {target} (outside repo)")
                 continue
             if not resolved.exists():
                 broken.append(f"{md_path.relative_to(REPO_ROOT)} -> {target}")
@@ -143,14 +144,28 @@ def test_repository_layout_snippet_matches_core_packages():
     assert (REPO_ROOT / "seiso/training/practices.py").is_file()
 
 
+def test_cli_docs_cover_tui_command():
+    cli_doc = _read("docs/cli.md")
+    readme = _read("README.md")
+    assert "seiso tui" in cli_doc
+    assert "seiso tui" in readme
+    from seiso_cli.main import app
+
+    names = {cmd.name or getattr(cmd.callback, "__name__", "") for cmd in app.registered_commands}
+    assert "tui" in names
+
+
 def test_cli_docs_cover_experiment_command():
-    """seiso experiment quant-regression must appear in user-facing CLI docs."""
+    """Experiment CLI stub points researchers to Adaptive-RL-Quantization."""
     cli_doc = _read("docs/cli.md")
     readme = _read("README.md")
     assert "seiso experiment" in cli_doc
-    assert "quant-regression" in cli_doc
-    assert "configs/examples/quant_regression_study.yaml" in cli_doc
-    assert "seiso experiment" in readme and "quant-regression" in readme
+    assert "Adaptive-RL-Quantization" in cli_doc
+    assert "seiso experiment" in readme
+    from seiso_cli.main import app
+
+    group_names = {g.name for g in app.registered_groups}
+    assert "experiment" in group_names
 
 
 def test_cli_docs_cover_provenance_nostr():
@@ -191,7 +206,10 @@ def test_cli_docs_cover_slime_training():
     assert "method: slime" in cli_doc or "method: slime" in quickstart
     assert "rollout_backend" in quickstart
     # Dedicated CLI exists; docs may say `seiso slime` and/or `seiso train -c …`.
-    assert "seiso slime" in cli_doc or "seiso train --config configs/example_training_slime.yaml" in cli_doc
+    assert (
+        "seiso slime" in cli_doc
+        or "seiso train --config configs/example_training_slime.yaml" in cli_doc
+    )
     from seiso_cli.main import app
 
     registered = {cmd.name for cmd in app.registered_commands}
@@ -215,18 +233,6 @@ def test_cli_docs_cover_nemo_rl_training():
     assert "nemo-rl" in registered
 
 
-def test_docs_do_not_reference_nonexistent_rl_quant_extra():
-    """pyproject.toml has no [rl-quant] optional extra — docs must not claim one."""
-    for rel in ("docs/compression.md", "docs/install.md"):
-        text = _read(rel)
-        assert (
-            ".[rl-quant]" not in text
-        ), f"{rel} references nonexistent .[rl-quant] extra"
-        assert (
-            "`rl-quant`" not in text or "seiso rl-quant" in text or "rl_quant/" in text
-        ), f"{rel} may list rl-quant as pip extra"
-
-
 def test_smoke_configs_exist_and_are_referenced():
     """F6-04: smoke presets must exist and be discoverable from AGENTS/docs."""
     smokes = [
@@ -235,7 +241,6 @@ def test_smoke_configs_exist_and_are_referenced():
         "configs/smoke_train_moe_cpu.yaml",
         "configs/smoke_slime_cpu.yaml",
         "configs/smoke_nemo_rl.yaml",
-        "configs/rl_quant_smoke.json",
         "configs/distill_rl_smoke.json",
     ]
     agents = _read("AGENTS.md")
@@ -244,9 +249,9 @@ def test_smoke_configs_exist_and_are_referenced():
         path = REPO_ROOT / rel
         assert path.is_file(), f"missing smoke config {rel}"
         name = path.name
-        assert (
-            name in agents or name in docs_ci or rel in agents or rel in docs_ci
-        ), f"{rel} is unreferenced in AGENTS.md / docs/CI_LOCAL.md"
+        assert name in agents or name in docs_ci or rel in agents or rel in docs_ci, (
+            f"{rel} is unreferenced in AGENTS.md / docs/CI_LOCAL.md"
+        )
 
 
 def test_forge_doc_covers_settings_api():

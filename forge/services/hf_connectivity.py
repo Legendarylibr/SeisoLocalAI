@@ -140,9 +140,7 @@ def check_inference_runtime() -> InferenceRuntimeStatus:
                 "llama-cpp-python is only needed for the explicit unsafe in-process override."
             )
         elif platform.system() == "Linux":
-            hints.append(
-                f"{hint} — required for GGUF chat (re-run start to auto-install)"
-            )
+            hints.append(f"{hint} — required for GGUF chat (re-run start to auto-install)")
         else:
             hints.append(f"{hint}  # GGUF chat via llama.cpp")
         if status.llamacpp_error:
@@ -160,9 +158,7 @@ def check_inference_runtime() -> InferenceRuntimeStatus:
 register_runtime_cache_clear(check_inference_runtime.cache_clear)
 
 
-def _probe_hf_hub_anonymous(
-    api: Any, *, timeout: float, started: float
-) -> HfConnectivityResult:
+def _probe_hf_hub_anonymous(api: Any, *, timeout: float, started: float) -> HfConnectivityResult:
     """Anonymous reachability check — public models work without credentials."""
     try:
         api.model_info("gpt2", timeout=timeout)
@@ -173,14 +169,10 @@ def _probe_hf_hub_anonymous(
             anonymous_ok=True,
         )
     except Exception as exc:
-        return HfConnectivityResult(
-            reachable=False, error=format_hub_error(exc, context="probe")
-        )
+        return HfConnectivityResult(reachable=False, error=format_hub_error(exc, context="probe"))
 
 
-def probe_hf_hub(
-    *, token: str | None = None, timeout: float = 15.0
-) -> HfConnectivityResult:
+def probe_hf_hub(*, token: str | None = None, timeout: float = 15.0) -> HfConnectivityResult:
     """
     Verify Hub reachability using the standard HfApi probe.
 
@@ -260,9 +252,7 @@ def build_hf_status(
         settings_token=settings_token,
     )
     transfer = hf_transfer_stack()
-    connectivity = (
-        probe_hf_hub(token=token) if probe else HfConnectivityResult(reachable=False)
-    )
+    connectivity = probe_hf_hub(token=token) if probe else HfConnectivityResult(reachable=False)
     runtime = check_inference_runtime()
 
     ready_for_download = (
@@ -274,9 +264,7 @@ def build_hf_status(
     if _native_linux_nvidia_gguf_isolated():
         ready_for_gguf_chat = ready_for_download and runtime.llamaswap
     else:
-        ready_for_gguf_chat = ready_for_download and (
-            runtime.llamacpp or runtime.llamaswap
-        )
+        ready_for_gguf_chat = ready_for_download and (runtime.llamacpp or runtime.llamaswap)
     ready_for_local_chat = ready_for_download and (
         runtime.llamacpp or runtime.llamaswap or runtime.mlx or runtime.torch
     )
@@ -339,6 +327,5 @@ def assert_hub_ready_for_download(
         raise ValueError(result.error or "Cannot reach Hugging Face Hub")
     if not result.anonymous_ok and not result.token_valid:
         raise ValueError(
-            result.error
-            or "Cannot reach Hugging Face Hub — check your network connection"
+            result.error or "Cannot reach Hugging Face Hub — check your network connection"
         )

@@ -10,6 +10,29 @@ seiso_forge_url() {
   printf 'http://%s:%s' "${SEISO_HOST:-127.0.0.1}" "${SEISO_PORT:-8765}"
 }
 
+seiso_forge_instance_active() {
+  # True when /health is up, or a live process still holds SEISO_DATA_DIR/.forge.lock
+  # (lifespan may still be starting — port not listening yet).
+  local url="${1:-$(seiso_forge_url)}"
+  local lock pid
+  if curl -fsS --max-time 2 "${url}/health" >/dev/null 2>&1; then
+    return 0
+  fi
+  lock="${SEISO_DATA_DIR:-$HOME/.seiso}/.forge.lock"
+  [[ -f "$lock" ]] || return 1
+  pid="$(
+    python3 - "$lock" <<'PY' 2>/dev/null || true
+import json, sys
+try:
+    print(int(json.load(open(sys.argv[1])).get("pid") or 0))
+except Exception:
+    print(0)
+PY
+  )"
+  [[ -n "$pid" && "$pid" != "0" && -d "/proc/$pid" ]] || return 1
+  return 0
+}
+
 seiso_follow_symlinks() {
   local path="$1"
   [[ -n "$path" && -e "$path" ]] || return 1
@@ -25,20 +48,34 @@ seiso_follow_symlinks() {
   cd "$(dirname "$path")" && pwd
 }
 
+seiso_repo_layout_ok() {
+  local root="$1"
+  [[ -n "$root" && -f "$root/pyproject.toml" && -d "$root/seiso_cli" ]]
+}
+
 seiso_resolve_repo_for_start() {
+  # Prefer the repository that owns the invoked start/start.sh script, walking
+  # parents (scripts/start.sh → repo root). Only then fall back to SEISO_INSTALL_DIR.
   local install_dir="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
   local src="${1:-}"
+  local root candidate
 
   if [[ -n "$src" && -e "$src" ]]; then
-    local root
-    root="$(seiso_follow_symlinks "$src")" || return 1
-    if [[ -f "$root/pyproject.toml" && -d "$root/seiso_cli" ]]; then
-      printf '%s\n' "$root"
-      return 0
-    fi
+    root="$(seiso_follow_symlinks "$src")" || true
+    candidate="$root"
+    # Walk up a few levels: start (repo root), scripts/start.sh → scripts → repo.
+    local i
+    for ((i = 0; i < 5; i++)); do
+      if seiso_repo_layout_ok "$candidate"; then
+        printf '%s\n' "$candidate"
+        return 0
+      fi
+      [[ -n "$candidate" && "$candidate" != "/" ]] || break
+      candidate="$(cd "$candidate/.." 2>/dev/null && pwd)" || break
+    done
   fi
 
-  if [[ -d "$install_dir/seiso_cli" && -f "$install_dir/pyproject.toml" ]]; then
+  if seiso_repo_layout_ok "$install_dir"; then
     printf '%s\n' "$install_dir"
     return 0
   fi
@@ -50,23 +87,31 @@ seiso_start_bin_dir() {
   printf '%s\n' "${SEISO_BIN_DIR:-$HOME/.local/bin}"
 }
 
+seiso_link_start_command() {
+  # Install a symlink into SEISO_BIN_DIR. Skip non-symlink collisions so we never
+  # clobber an unrelated tool (especially the generic name "start").
+  local start_script="$1" link_path="$2"
+  if [[ -e "$link_path" && ! -L "$link_path" ]]; then
+    seiso_warn "$link_path exists and is not a symlink — leaving it unchanged"
+    return 1
+  fi
+  ln -sf "$start_script" "$link_path"
+}
+
 seiso_install_start_command() {
   local root="$1"
-  local bin_dir start_script link_path
+  local bin_dir start_script
 
   bin_dir="$(seiso_start_bin_dir)"
   start_script="$root/start"
-  link_path="$bin_dir/start"
 
   [[ -f "$start_script" ]] || return 0
   chmod +x "$start_script" 2>/dev/null || true
 
   mkdir -p "$bin_dir"
-  if [[ -e "$link_path" && ! -L "$link_path" ]]; then
-    seiso_warn "$link_path exists and is not a symlink — leaving it unchanged"
-    return 0
-  fi
-  ln -sf "$start_script" "$link_path"
+  # Prefer the unambiguous name; keep "start" for backward compatibility when free.
+  seiso_link_start_command "$start_script" "$bin_dir/seiso-start" || true
+  seiso_link_start_command "$start_script" "$bin_dir/start" || true
 
   seiso_ensure_bin_on_path "$bin_dir"
 }
@@ -138,8 +183,14 @@ seiso_is_wsl() {
   [[ -f /proc/version ]] && grep -qiE 'microsoft|WSL' /proc/version 2>/dev/null
 }
 
+# Bash 3.2 (macOS /bin/bash) has no ${var,,}; keep install helpers portable.
+seiso_tolower() {
+  printf '%s' "$1" | tr '[:upper:]' '[:lower:]'
+}
+
 seiso_install_profile_extras() {
-  local profile="${1,,}"
+  local profile
+  profile="$(seiso_tolower "$1")"
   case "$profile" in
     linux-nvidia|linux-nvidia-native)
       printf '%s\n' "forge,train,cuda,llamacpp"
@@ -178,8 +229,8 @@ seiso_detect_platform_extras() {
   local profile extras os
   if [[ -n "${SEISO_INSTALL_PROFILE:-}" ]]; then
     extras="$(seiso_install_profile_extras "$SEISO_INSTALL_PROFILE")" \
-      || seiso_die "Unknown SEISO_INSTALL_PROFILE=${SEISO_INSTALL_PROFILE!r}. Use: linux-nvidia, linux-cpu, linux-rocm, wsl-nvidia, macos, chat"
-    case "${SEISO_INSTALL_PROFILE,,}" in
+      || seiso_die "Unknown SEISO_INSTALL_PROFILE=${SEISO_INSTALL_PROFILE}. Use: linux-nvidia, linux-cpu, linux-rocm, wsl-nvidia, macos, chat"
+    case "$(seiso_tolower "$SEISO_INSTALL_PROFILE")" in
       wsl|wsl-nvidia)
         export SEISO_NVIDIA_WSL_ACK="${SEISO_NVIDIA_WSL_ACK:-1}"
         ;;
@@ -281,24 +332,153 @@ seiso_ensure_bun() {
   command -v bun >/dev/null 2>&1
 }
 
+seiso_nodejs_major() {
+  # Prints Node major version, or 0 if node is missing/unusable.
+  if ! command -v node >/dev/null 2>&1; then
+    printf '0\n'
+    return 0
+  fi
+  node -p "Number(String(process.versions.node||'0').split('.')[0])||0" 2>/dev/null || printf '0\n'
+}
+
+seiso_npm_usable() {
+  command -v npm >/dev/null 2>&1 || return 1
+  local major
+  major="$(seiso_nodejs_major)"
+  [[ "$major" -ge 18 ]]
+}
+
 seiso_ui_pkg_manager() {
   seiso_ensure_bun_on_path
-  if [[ "${SEISO_USE_NPM:-0}" != "1" ]] && command -v bun >/dev/null 2>&1; then
+  if [[ "${SEISO_USE_NPM:-0}" == "1" ]]; then
+    if seiso_npm_usable; then
+      printf 'npm\n'
+      return 0
+    fi
+    return 1
+  fi
+  # Linux: prefer npm + package-lock.json when Node 18+ is present.
+  # Dependabot's primary updates land on package-lock; bun.lock drift plus hung
+  # `bun install` was the native Linux Forge UI regression after the Bun switch.
+  # Opt back into Bun with SEISO_USE_BUN=1.
+  if [[ "$(uname -s)" == "Linux" && "${SEISO_USE_BUN:-0}" != "1" ]] && seiso_npm_usable; then
+    printf 'npm\n'
+    return 0
+  fi
+  if command -v bun >/dev/null 2>&1; then
     printf 'bun\n'
-  elif command -v npm >/dev/null 2>&1; then
+  elif seiso_npm_usable; then
     printf 'npm\n'
   else
     return 1
   fi
 }
 
+seiso_ui_bun_timeout_sec() {
+  # Bun can hang with 0% CPU on some hosts; never block install forever.
+  # Keep the default short enough that npm fallback is reachable in a normal install.
+  local t="${SEISO_BUN_INSTALL_TIMEOUT_SEC:-90}"
+  case "$t" in
+    ''|*[!0-9]*) t=90 ;;
+  esac
+  if [[ "$t" -lt 30 ]]; then
+    t=30
+  fi
+  printf '%s\n' "$t"
+}
+
+seiso_run_with_timeout() {
+  # Run command with a wall-clock timeout when `timeout` exists.
+  # Exit 124 matches GNU coreutils `timeout` on overrun.
+  local sec="$1"
+  shift
+  if command -v timeout >/dev/null 2>&1; then
+    timeout --signal=TERM --kill-after=10s "${sec}s" "$@"
+  else
+    "$@"
+  fi
+}
+
+seiso_ensure_npm_available() {
+  # Best-effort Node/npm for Forge UI when Bun hangs or lockfile drifts.
+  if seiso_npm_usable; then
+    return 0
+  fi
+  seiso_log "Installing Node.js 18+ for Forge UI npm fallback..."
+  if command -v brew >/dev/null 2>&1; then
+    brew install node || true
+  elif command -v apt-get >/dev/null 2>&1; then
+    local apt_cmd=(apt-get)
+    if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
+      apt_cmd=(sudo apt-get)
+    fi
+    "${apt_cmd[@]}" update -qq || true
+    "${apt_cmd[@]}" install -y nodejs npm || true
+  elif command -v dnf >/dev/null 2>&1; then
+    local dnf_cmd=(dnf)
+    if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
+      dnf_cmd=(sudo dnf)
+    fi
+    "${dnf_cmd[@]}" install -y nodejs npm || true
+  elif command -v pacman >/dev/null 2>&1; then
+    local pacman_cmd=(pacman)
+    if [[ "$(id -u)" -ne 0 ]] && command -v sudo >/dev/null 2>&1; then
+      pacman_cmd=(sudo pacman)
+    fi
+    "${pacman_cmd[@]}" -Sy --noconfirm nodejs npm || true
+  fi
+  if seiso_npm_usable; then
+    return 0
+  fi
+  seiso_warn "Node.js 18+ / npm is required for Forge UI fallback — install from https://nodejs.org/ then re-run with SEISO_USE_NPM=1"
+  return 1
+}
+
+seiso_ui_npm_ci() {
+  local ui_dir="$1"
+  seiso_ensure_npm_available || return 1
+  # Sticky for the rest of this process so `bun run build` is not used after npm ci.
+  export SEISO_USE_NPM=1
+  (cd "$ui_dir" && npm ci --no-audit --no-fund)
+}
+
 seiso_ui_install_deps() {
-  local ui_dir="$1" pm
+  local ui_dir="$1" pm bun_timeout status=0
   pm="$(seiso_ui_pkg_manager)" || seiso_die "Bun or npm is required for Forge UI — install Bun (https://bun.sh) or Node.js 18+"
   if [[ "$pm" == "bun" ]]; then
-    (cd "$ui_dir" && bun install --frozen-lockfile)
+    # Prefer frozen installs for reproducibility. If Dependabot (or a human)
+    # bumped package-lock.json / package.json without regenerating bun.lock,
+    # frozen fails and macOS/Linux `start` never builds Forge UI — fall back
+    # once so local installs keep working, then warn to commit bun.lock.
+    # Wall-clock timeout: bun has been observed to hang after printing its version.
+    # On timeout (exit 124), skip the unfrozen retry — a hung bun will hang again.
+    bun_timeout="$(seiso_ui_bun_timeout_sec)"
+    status=0
+    seiso_run_with_timeout "$bun_timeout" bash -c "cd \"\$1\" && bun install --frozen-lockfile" _ "$ui_dir" || status=$?
+    if [[ "$status" -eq 0 ]]; then
+      return 0
+    fi
+    if [[ "$status" -eq 124 ]]; then
+      seiso_warn "bun install --frozen-lockfile timed out after ${bun_timeout}s — skipping unfrozen retry, falling back to npm ci"
+      seiso_ui_npm_ci "$ui_dir" || return 1
+      return 0
+    fi
+    seiso_warn "bun install --frozen-lockfile failed — retrying without freeze (lockfile may be stale)"
+    status=0
+    seiso_run_with_timeout "$bun_timeout" bash -c "cd \"\$1\" && bun install" _ "$ui_dir" || status=$?
+    if [[ "$status" -eq 0 ]]; then
+      seiso_warn "forge-ui/bun.lock may be out of sync — commit an updated bun.lock if package.json changed"
+      return 0
+    fi
+    if [[ "$status" -eq 124 ]]; then
+      seiso_warn "bun install timed out after ${bun_timeout}s — falling back to npm ci"
+    else
+      seiso_warn "bun install failed — falling back to npm ci for forge-ui"
+    fi
+    seiso_ui_npm_ci "$ui_dir" || return 1
+    return 0
   else
-    (cd "$ui_dir" && npm ci --no-audit --no-fund)
+    seiso_ui_npm_ci "$ui_dir"
   fi
 }
 
@@ -312,15 +492,50 @@ seiso_ui_run_script() {
   fi
 }
 
+seiso_forge_ui_dist_ready() {
+  local root="$1"
+  [[ -f "$root/forge-ui/dist/index.html" ]]
+}
+
 seiso_build_forge_ui() {
   local root="$1"
-  seiso_ensure_bun || true
+  # Skip dependency install + rebuild when a production UI already exists unless forced.
+  if seiso_forge_ui_dist_ready "$root" && [[ "${SEISO_FORCE_UI:-0}" != "1" ]]; then
+    seiso_log "Forge UI dist present — skipping rebuild (set SEISO_FORCE_UI=1 to rebuild)"
+    return 0
+  fi
+  # Linux with usable npm prefers package-lock — skip auto-installing Bun unless opted in.
+  if [[ "${SEISO_USE_NPM:-0}" == "1" ]] \
+    || { [[ "$(uname -s)" == "Linux" && "${SEISO_USE_BUN:-0}" != "1" ]] && seiso_npm_usable; }; then
+    :
+  else
+    seiso_ensure_bun || true
+  fi
   seiso_ui_install_deps "$root/forge-ui" || return 1
   seiso_ui_run_script "$root/forge-ui" build || return 1
 }
 
+seiso_python_venv_ok() {
+  # Debian/Ubuntu often ship python3 without python3-venv / ensurepip.
+  command -v python3 >/dev/null 2>&1 || return 1
+  python3 - <<'PY' >/dev/null 2>&1
+import ensurepip
+import venv
+raise SystemExit(0)
+PY
+}
+
+seiso_build_tools_ok() {
+  # Native extensions (bitsandbytes, llama-cpp source builds, fused kernels)
+  # need a C/C++ toolchain. cmake helps llama-cpp and similar.
+  command -v gcc >/dev/null 2>&1 || return 1
+  command -v g++ >/dev/null 2>&1 || return 1
+  command -v make >/dev/null 2>&1 || return 1
+  return 0
+}
+
 seiso_ensure_system_deps() {
-  local missing=()
+  local missing=() need_pkgs=0
   command -v python3 >/dev/null 2>&1 || missing+=(python3)
   command -v git >/dev/null 2>&1 || missing+=(git)
   command -v curl >/dev/null 2>&1 || missing+=(curl)
@@ -328,9 +543,23 @@ seiso_ensure_system_deps() {
     command -v node >/dev/null 2>&1 || missing+=(node)
     command -v npm >/dev/null 2>&1 || missing+=(npm)
   fi
-  [[ ${#missing[@]} -eq 0 ]] && return 0
 
-  seiso_log "Installing missing system tools: ${missing[*]}"
+  # Even when python3/git/curl already exist, install venv headers + compilers
+  # when missing — minimal images commonly hit this gap.
+  if ((${#missing[@]} > 0)); then
+    need_pkgs=1
+  elif ! seiso_python_venv_ok; then
+    need_pkgs=1
+    seiso_log "Python venv support missing (python3-venv / ensurepip) — installing system packages"
+  elif ! seiso_build_tools_ok; then
+    need_pkgs=1
+    seiso_log "Build tools missing (gcc/g++/make) — installing system packages"
+  fi
+  [[ "$need_pkgs" -eq 1 ]] || return 0
+
+  if ((${#missing[@]} > 0)); then
+    seiso_log "Installing missing system tools: ${missing[*]}"
+  fi
 
   if command -v brew >/dev/null 2>&1; then
     local brew_pkgs=() dep
@@ -341,6 +570,10 @@ seiso_ensure_system_deps() {
         node|npm) [[ " ${brew_pkgs[*]} " == *" node "* ]] || brew_pkgs+=(node) ;;
       esac
     done
+    # Always ensure a compiler toolchain on macOS when Xcode CLT is absent.
+    if ! seiso_build_tools_ok; then
+      [[ " ${brew_pkgs[*]} " == *" gcc "* ]] || brew_pkgs+=(gcc)
+    fi
     if ((${#brew_pkgs[@]} > 0)); then
       brew install "${brew_pkgs[@]}" || return 1
     fi
@@ -636,7 +869,9 @@ seiso_pip_install_for_venv() {
 }
 
 seiso_pip_bootstrap() {
-  seiso_pip_install -U pip wheel "setuptools<82" hatchling
+  # Match pyproject build-system / [dev] pin (setuptools>=83, PYSEC-2026-3447).
+  # setuptools is the build backend; hatchling is not required.
+  seiso_pip_install -U pip wheel "setuptools>=83"
 }
 
 seiso_extras_without_llamacpp() {
@@ -737,10 +972,17 @@ seiso_required_python_modules() {
 }
 
 seiso_python_modules_available() {
+  # CUDA-linked wheels (llama-cpp-python) need venv nvidia/* on LD_LIBRARY_PATH
+  # before import. Bare importlib checks falsely fail on native Linux NVIDIA and
+  # force a full reinstall on every `start` even when the stack is healthy.
   local root="$1" extras="$2" module
   [[ -x "$root/.venv/bin/python" ]] || return 1
   while IFS= read -r module; do
     [[ -n "$module" ]] || continue
+    if [[ "$module" == "llama_cpp" ]]; then
+      seiso_llamacpp_import_ok "$root" || return 1
+      continue
+    fi
     "$root/.venv/bin/python" - "$module" <<'PY' >/dev/null 2>&1 || return 1
 import importlib
 import sys
@@ -751,11 +993,42 @@ PY
   return 0
 }
 
+seiso_maybe_git_pull() {
+  # Opt-in code upgrade for complete clones. Never force-resets local work.
+  # Repair of incomplete clones still uses install.sh sync_install_clone.
+  local root="$1"
+  [[ "${SEISO_GIT_PULL:-0}" == "1" ]] || return 0
+  [[ -d "$root/.git" ]] || return 0
+  local branch
+  branch="${SEISO_BRANCH:-main}"
+  seiso_log "SEISO_GIT_PULL=1 — fast-forwarding $root to origin/$branch"
+  git -C "$root" fetch --depth 1 origin "$branch" >/dev/null 2>&1 || {
+    seiso_warn "git fetch failed — continuing with local tree"
+    return 0
+  }
+  if git -C "$root" merge-base --is-ancestor HEAD "origin/$branch" 2>/dev/null \
+    && ! git -C "$root" merge-base --is-ancestor "origin/$branch" HEAD 2>/dev/null; then
+    git -C "$root" pull --ff-only origin "$branch" >/dev/null 2>&1 \
+      || seiso_warn "git pull --ff-only failed (local commits or dirty tree?) — continuing"
+  fi
+}
+
 seiso_ensure_installed() {
   local root="$1"
   local extras install_log
 
+  seiso_maybe_git_pull "$root"
+
   extras="$(seiso_detect_platform_extras)"
+
+  # Fast path: CLI + UI dist + CUDA-aware module imports — do not reinstall.
+  if [[ -x "$root/.venv/bin/seiso" ]] && seiso_forge_ui_dist_ready "$root" \
+    && seiso_python_modules_available "$root" "$extras"; then
+    if [[ "$extras" == *cuda* || "$extras" == *llamacpp* ]]; then
+      seiso_repair_linux_cuda_stack "$root" || true
+    fi
+    return 0
+  fi
 
   if [[ "$extras" == *cuda* ]]; then
     seiso_log "NVIDIA GPU detected — installing with CUDA extras"
@@ -766,7 +1039,8 @@ seiso_ensure_installed() {
     seiso_ensure_llamacpp "$root" || true
   fi
 
-  if [[ -x "$root/.venv/bin/seiso" && -f "$root/forge-ui/dist/index.html" ]] \
+  # Re-check after CUDA runtime / llamacpp ensure (may have fixed import path only).
+  if [[ -x "$root/.venv/bin/seiso" ]] && seiso_forge_ui_dist_ready "$root" \
     && seiso_python_modules_available "$root" "$extras"; then
     if [[ "$extras" == *cuda* || "$extras" == *llamacpp* ]]; then
       seiso_repair_linux_cuda_stack "$root" || true

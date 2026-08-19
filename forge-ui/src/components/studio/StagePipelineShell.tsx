@@ -35,6 +35,7 @@ type StagePipelineShellProps = {
   jobsEmptyMessage: string;
   canStart: boolean;
   starting: boolean;
+  startError?: string | null;
   onStart: () => void;
   startLabel: string;
   children: ReactNode;
@@ -60,6 +61,7 @@ export function StagePipelineShell({
   jobsEmptyMessage,
   canStart,
   starting,
+  startError = null,
   onStart,
   startLabel,
   children,
@@ -114,6 +116,15 @@ export function StagePipelineShell({
             <div className="studio-config-block">{children}</div>
           </div>
           </StudioCardBody>
+
+          {startError && (
+            <div className="status-callout status-callout-error studio-error-callout" role="alert">
+              <div className="status-callout-body">
+                <strong className="status-callout-title">Failed to start pipeline</strong>
+                <div className="status-callout-text">{startError}</div>
+              </div>
+            </div>
+          )}
 
           <div className="studio-action-bar studio-action-bar-flush">
             <button

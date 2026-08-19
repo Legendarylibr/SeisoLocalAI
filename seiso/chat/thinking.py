@@ -356,10 +356,7 @@ def apply_thinking_policy(payload: dict[str, Any]) -> dict[str, Any]:
     content = max(1, int(out.get("max_tokens") or 512))
     messages = out.get("messages") if isinstance(out.get("messages"), list) else None
     model_key = (
-        out.get("model_name")
-        or out.get("model_id")
-        or out.get("model_path")
-        or out.get("model")
+        out.get("model_name") or out.get("model_id") or out.get("model_path") or out.get("model")
     )
     n_ctx = out.get("n_ctx") or out.get("sidecar_num_ctx")
     try:
@@ -439,11 +436,17 @@ class ThinkingStreamGuard:
                     rest = buf[i:]
                     # Hold back a short suffix that might be a partial close tag.
                     hold = min(len(rest), 24)
-                    body, maybe_partial = rest[:-hold] if hold else rest, rest[-hold:] if hold else ""
+                    body, maybe_partial = (
+                        rest[:-hold] if hold else rest,
+                        rest[-hold:] if hold else "",
+                    )
                     if body:
                         self.thinking_tokens += estimate_chunk_tokens(body)
                     self._carry = maybe_partial
-                    if self.thinking_tokens >= self.think_max_tokens and not self.saw_visible_content:
+                    if (
+                        self.thinking_tokens >= self.think_max_tokens
+                        and not self.saw_visible_content
+                    ):
                         self.capped = True
                         return "".join(emit_parts), True
                     return "".join(emit_parts), False
@@ -466,7 +469,11 @@ class ThinkingStreamGuard:
                 hold_n = 0
                 for n in range(1, min(len(tail), 20) + 1):
                     frag = tail[-n:].lower()
-                    if "<think".startswith(frag) or "<redacted_thinking".startswith(frag) or frag.endswith("<"):
+                    if (
+                        "<think".startswith(frag)
+                        or "<redacted_thinking".startswith(frag)
+                        or frag.endswith("<")
+                    ):
                         hold_n = n
                         break
                 visible = tail[:-hold_n] if hold_n else tail

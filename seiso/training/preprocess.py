@@ -94,9 +94,7 @@ def text_body_from_sample(sample: dict[str, Any]) -> str:
     return ""
 
 
-def normalize_sample(
-    sample: dict[str, Any], fmt: DatasetFormat
-) -> dict[str, Any] | None:
+def normalize_sample(sample: dict[str, Any], fmt: DatasetFormat) -> dict[str, Any] | None:
     """Map a raw row to a canonical schema, or None if it has no trainable content."""
     if fmt == DatasetFormat.TEXT:
         text = text_body_from_sample(sample)
@@ -119,9 +117,7 @@ def normalize_sample(
             return {"question": question, "answer": answer}
         if "prompt" in sample and ("completion" in sample or "response" in sample):
             prompt = _normalize_text(sample.get("prompt"))
-            completion = _normalize_text(
-                sample.get("completion") or sample.get("response")
-            )
+            completion = _normalize_text(sample.get("completion") or sample.get("response"))
             if not completion:
                 return None
             return {"instruction": prompt, "output": completion}
@@ -144,32 +140,19 @@ def normalize_sample(
             if not content:
                 continue
             role = _normalize_role(str(turn.get("from") or turn.get("role") or "user"))
-            from_role = (
-                "human" if role == "user" else "gpt" if role == "assistant" else role
-            )
+            from_role = "human" if role == "user" else "gpt" if role == "assistant" else role
             turns.append({"from": from_role, "value": content})
         if not turns or not any(t["from"] == "gpt" for t in turns):
             return None
         return {"conversations": turns}
 
     if fmt == DatasetFormat.PREFERENCE:
-        chosen = (
-            sample.get("chosen")
-            or sample.get("chosen_response")
-            or sample.get("accepted")
-        )
+        chosen = sample.get("chosen") or sample.get("chosen_response") or sample.get("accepted")
         messages: list[dict[str, str]] = parse_human_assistant_dialog(chosen)
         if not messages:
             prompt = _normalize_text(sample.get("prompt"))
-            response = _normalize_text(
-                sample.get("chosen") or sample.get("chosen_response")
-            )
-            if (
-                prompt
-                and response
-                and "Human:" not in response
-                and "Assistant:" not in response
-            ):
+            response = _normalize_text(sample.get("chosen") or sample.get("chosen_response"))
+            if prompt and response and "Human:" not in response and "Assistant:" not in response:
                 messages = [
                     {"role": "user", "content": prompt},
                     {"role": "assistant", "content": response},
@@ -298,9 +281,7 @@ def preprocess_training_dataset(
         "removed_invalid": 0,
         "removed_duplicate": 0,
         "kept": 0,
-        "preference_as_sft": bool(
-            preference_as_sft and resolved_fmt == DatasetFormat.PREFERENCE
-        ),
+        "preference_as_sft": bool(preference_as_sft and resolved_fmt == DatasetFormat.PREFERENCE),
     }
 
     def transform(sample: dict[str, Any]) -> dict[str, Any]:
@@ -326,8 +307,7 @@ def preprocess_training_dataset(
             fingerprints = filtered["_seiso_fingerprint"]
         except (KeyError, TypeError):
             fingerprints = [
-                str(filtered[idx].get("_seiso_fingerprint") or "")
-                for idx in range(len(filtered))
+                str(filtered[idx].get("_seiso_fingerprint") or "") for idx in range(len(filtered))
             ]
         keep_indices = _first_unique_indices(fingerprints)
         if len(keep_indices) < len(filtered):

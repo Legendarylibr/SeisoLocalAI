@@ -151,9 +151,7 @@ def _run_single_job(
             on_log=on_log,
             run_dpo_fn=_run_dpo,
         )
-        config = apply_best_sweep_overrides(
-            config, sweep_result.get("best_overrides") or {}
-        )
+        config = apply_best_sweep_overrides(config, sweep_result.get("best_overrides") or {})
 
     stage_results: dict[str, Any] = dict(shared.stage_results)
     distilled_dir = shared.distilled_dir
@@ -204,6 +202,7 @@ def _run_single_job(
             prompt_library_path=eval_library,
             eval_max_prompts=config.eval_max_prompts,
             trust_remote_code=config.trust_remote_code,
+            use_chat_template=bool(config.use_chat_template),
             benchmark_verifiable=config.benchmark_verifiable,
             benchmark_tasks=config.benchmark_tasks,
             require_thinking_trace=config.require_thinking_trace,
@@ -229,9 +228,7 @@ def _run_single_job(
 
     manifest_report = verify_run_manifest(config.output_root)
     if isinstance(manifest_report, dict) and manifest_report.get("ok") is False:
-        raise RuntimeError(
-            f"Distill-RL manifest verification failed: {manifest_report}"
-        )
+        raise RuntimeError(f"Distill-RL manifest verification failed: {manifest_report}")
     try:
         from seiso.research.nostr import maybe_auto_attest
 
@@ -258,9 +255,7 @@ def _run_single_job(
     if isinstance(evaluation, dict):
         from seiso.distill_rl.verifiable_benchmarks import summarize_accuracy_jumps
 
-        benchmark_jumps = summarize_accuracy_jumps(
-            evaluation.get("verifiable_benchmarks")
-        )
+        benchmark_jumps = summarize_accuracy_jumps(evaluation.get("verifiable_benchmarks"))
 
     result: dict[str, Any] = {
         "output_dir": str(config.output_root),
@@ -297,9 +292,7 @@ def _run_shared_stages(
             on_log("Phase: distill (teacher logits → student)")
         distilled_dir = _run_distill(config, on_log=on_log)
         stage_results["distilled"] = str(distilled_dir)
-        append_artifact(
-            config.output_root, stage="distill", artifact_path=distilled_dir
-        )
+        append_artifact(config.output_root, stage="distill", artifact_path=distilled_dir)
     elif not distilled_dir.is_dir():
         raise FileNotFoundError(
             f"Distilled student checkpoint missing: {distilled_dir}. "
@@ -315,9 +308,7 @@ def _run_shared_stages(
         if source == "teacher_style":
             library_path = config.prompt_library_path
             if library_path is None:
-                raise ValueError(
-                    "preference_source=teacher_style requires prompt_library"
-                )
+                raise ValueError("preference_source=teacher_style requires prompt_library")
             if on_log:
                 on_log(f"Phase: rollout (teacher_style; library={library_path})")
             min_grounded = None
@@ -355,9 +346,7 @@ def _run_shared_stages(
         stage_results["preferences_train"] = str(bundle.train_path)
         stage_results["preferences_val"] = str(bundle.val_path)
         stage_results["preferences_manifest"] = str(bundle.manifest_path)
-        append_artifact(
-            config.output_root, stage="rollout", artifact_path=bundle.manifest_path
-        )
+        append_artifact(config.output_root, stage="rollout", artifact_path=bundle.manifest_path)
         append_artifact(
             config.output_root,
             stage="rollout",
@@ -397,9 +386,7 @@ def _resolve_policy_model_dir(config: DistillRLConfig) -> Path:
 
 def _write_effective_config(config: DistillRLConfig) -> None:
     path = config.output_root / "distill_rl_config.json"
-    path.write_text(
-        json.dumps(config.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8"
-    )
+    path.write_text(json.dumps(config.model_dump(mode="json"), indent=2) + "\n", encoding="utf-8")
 
 
 def _distill_texts(config: DistillRLConfig) -> list[str]:
@@ -420,15 +407,11 @@ def _distill_texts(config: DistillRLConfig) -> list[str]:
         prompts = load_rollout_prompts(library, limit=limit or 0)
     texts = prompt_texts(prompts)
     if config.require_thinking_trace:
-        return [
-            format_thinking_prompt(text, config.thinking_instruction) for text in texts
-        ]
+        return [format_thinking_prompt(text, config.thinking_instruction) for text in texts]
     return texts
 
 
-def _run_distill(
-    config: DistillRLConfig, *, on_log: Callable[[str], None] | None
-) -> Path:
+def _run_distill(config: DistillRLConfig, *, on_log: Callable[[str], None] | None) -> Path:
     from contextlib import nullcontext
 
     from seiso.compress.bootstrap import require_codellama_compress
@@ -506,14 +489,9 @@ def _run_dpo(
     preferences_path: Path,
     on_log: Callable[[str], None] | None,
 ) -> Path:
-    from seiso.rl_quant.bootstrap import require_adaptive_quant
-
-    require_adaptive_quant()
-    from seiso.adaptive_quant.llm_alignment.config import DPOSettings
-    from seiso.adaptive_quant.llm_alignment.dpo_trainer import DPOTrainer
-    from seiso.adaptive_quant.llm_alignment.preference_data import (
-        load_preference_dataset,
-    )
+    from seiso.distill_rl.dpo.config import DPOSettings
+    from seiso.distill_rl.dpo.dpo_trainer import DPOTrainer
+    from seiso.distill_rl.dpo.preference_data import load_preference_dataset
 
     settings = DPOSettings(
         sft_model_path=str(model_dir),
@@ -541,17 +519,13 @@ def _run_dpo(
     examples = load_preference_dataset(preferences_path)
     if config.dpo_max_steps is not None:
         settings.max_steps = int(config.dpo_max_steps)
-        micro_batches = max(
-            1, math.ceil(len(examples) / settings.per_device_train_batch_size)
-        )
+        micro_batches = max(1, math.ceil(len(examples) / settings.per_device_train_batch_size))
         optimizer_steps_per_epoch = max(
             1,
             math.ceil(micro_batches / settings.gradient_accumulation_steps),
         )
         # Keep epochs as an upper bound; max_steps is the hard optimizer cap.
-        settings.num_epochs = max(
-            1, math.ceil(config.dpo_max_steps / optimizer_steps_per_epoch)
-        )
+        settings.num_epochs = max(1, math.ceil(config.dpo_max_steps / optimizer_steps_per_epoch))
 
     if on_log:
         on_log(

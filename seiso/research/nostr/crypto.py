@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import contextlib
 import os
 import re
 from pathlib import Path
@@ -40,9 +41,10 @@ def load_or_create_encryption_key(path: Path) -> bytes:
     """Load a 32-byte AES key from disk, or create and persist one."""
     if path.is_file():
         raw = path.read_bytes()
-        if len(raw) == _KEY_LEN:
-            return raw
-        return resolve_encryption_key(raw.decode("utf-8").strip())
+        key = raw if len(raw) == _KEY_LEN else resolve_encryption_key(raw.decode("utf-8").strip())
+        with contextlib.suppress(OSError):
+            path.chmod(0o600)
+        return key
     path.parent.mkdir(parents=True, exist_ok=True)
     key = generate_encryption_key()
     path.write_text(base64.b64encode(key).decode("ascii"), encoding="utf-8")

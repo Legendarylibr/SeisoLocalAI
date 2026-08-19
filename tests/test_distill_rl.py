@@ -113,9 +113,10 @@ async def test_forge_prepare_rejects_reproducible_without_dataset(tmp_path: Path
     with pytest.raises(HTTPException) as exc:
         await _prepare_distill_rl_config(body, db=None, user_id="user-1", settings=settings)  # type: ignore[arg-type]
     assert exc.value.status_code == 400
-    assert "dataset_ref" in str(exc.value.detail).lower() or "prompt_library" in str(
-        exc.value.detail
-    ).lower()
+    assert (
+        "dataset_ref" in str(exc.value.detail).lower()
+        or "prompt_library" in str(exc.value.detail).lower()
+    )
 
 
 def test_validate_stage_sequence_rejects_out_of_order():
@@ -200,7 +201,9 @@ def test_build_preference_bundle_filters_degenerate_pairs(tmp_path: Path, monkey
     ]
     lib = tmp_path / "lib.json"
     lib.write_text(
-        json.dumps({"prompts": [{"prompt_id": "p1", "text": "one"}, {"prompt_id": "p2", "text": "two"}]}),
+        json.dumps(
+            {"prompts": [{"prompt_id": "p1", "text": "one"}, {"prompt_id": "p2", "text": "two"}]}
+        ),
         encoding="utf-8",
     )
 
@@ -217,9 +220,7 @@ def test_build_preference_bundle_filters_degenerate_pairs(tmp_path: Path, monkey
             for row in rows
         ]
 
-    monkeypatch.setattr(
-        "seiso.distill_rl.preferences.generate_preference_rows", fake_rows
-    )
+    monkeypatch.setattr("seiso.distill_rl.preferences.generate_preference_rows", fake_rows)
     monkeypatch.setattr(
         "seiso.distill_rl.preferences.load_rollout_prompts",
         lambda *_args, **_kwargs: prompts,
@@ -238,17 +239,13 @@ def test_build_preference_bundle_filters_degenerate_pairs(tmp_path: Path, monkey
         use_chat_template=False,
         verifiable_outcome_rewards=False,
     )
-    train_rows = [
-        json.loads(line) for line in bundle.train_path.read_text().splitlines() if line
-    ]
+    train_rows = [json.loads(line) for line in bundle.train_path.read_text().splitlines() if line]
     assert bundle.filtered_count >= 0
     assert bundle.manifest_path.is_file()
     assert all(row["chosen"] != row["rejected"] for row in train_rows)
 
 
-def test_build_preference_bundle_forwards_trust_remote_code(
-    tmp_path: Path, monkeypatch
-):
+def test_build_preference_bundle_forwards_trust_remote_code(tmp_path: Path, monkeypatch):
     prompts = [RolloutPrompt(prompt_id="p1", text="one")]
     lib = tmp_path / "lib.json"
     lib.write_text(
@@ -269,9 +266,7 @@ def test_build_preference_bundle_forwards_trust_remote_code(
             }
         ]
 
-    monkeypatch.setattr(
-        "seiso.distill_rl.preferences.generate_preference_rows", fake_rows
-    )
+    monkeypatch.setattr("seiso.distill_rl.preferences.generate_preference_rows", fake_rows)
     monkeypatch.setattr(
         "seiso.distill_rl.preferences.load_rollout_prompts",
         lambda *_args, **_kwargs: prompts,
@@ -567,14 +562,10 @@ def test_aggregate_multiseed_runs(tmp_path: Path):
             "distilled": {"perplexity": 10.0, "val_preference_accuracy": 0.5},
         }
     }
-    (run_a / "evaluation_summary.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
+    (run_a / "evaluation_summary.json").write_text(json.dumps(payload), encoding="utf-8")
     payload["checkpoints"]["distilled"]["perplexity"] = 12.0
     payload["checkpoints"]["distilled"]["val_preference_accuracy"] = 0.7
-    (run_b / "evaluation_summary.json").write_text(
-        json.dumps(payload), encoding="utf-8"
-    )
+    (run_b / "evaluation_summary.json").write_text(json.dumps(payload), encoding="utf-8")
 
     aggregate = aggregate_multiseed_runs(
         [tmp_path / "run-a", tmp_path / "run-b"], output_dir=tmp_path / "agg"
@@ -713,23 +704,10 @@ def test_run_distill_rl_job_orchestrates_stages(tmp_path: Path):
     )
     (prefs_dir / "preferences_manifest.json").write_text("{}", encoding="utf-8")
 
-    dpo_dir = (
-        tmp_path
-        / "distill_rl"
-        / "cli"
-        / "job-x"
-        / "dpo"
-        / "seiso_job-x"
-        / "checkpoint-1"
-    )
+    dpo_dir = tmp_path / "distill_rl" / "cli" / "job-x" / "dpo" / "seiso_job-x" / "checkpoint-1"
     dpo_dir.mkdir(parents=True)
     eval_summary = (
-        tmp_path
-        / "distill_rl"
-        / "cli"
-        / "job-x"
-        / "evaluation"
-        / "evaluation_summary.json"
+        tmp_path / "distill_rl" / "cli" / "job-x" / "evaluation" / "evaluation_summary.json"
     )
     eval_summary.parent.mkdir(parents=True)
     eval_summary.write_text(json.dumps({"checkpoints": {}}), encoding="utf-8")
@@ -757,9 +735,7 @@ def test_run_distill_rl_job_orchestrates_stages(tmp_path: Path):
             "seiso.distill_rl.grounded_data.materialize_distill_grounded_prompts",
             return_value=train,
         ),
-        patch(
-            "seiso.distill_rl.preferences.build_preference_bundle", return_value=bundle
-        ),
+        patch("seiso.distill_rl.preferences.build_preference_bundle", return_value=bundle),
         patch("seiso.distill_rl.runner._run_dpo", return_value=dpo_dir),
         patch(
             "seiso.distill_rl.evaluate.evaluate_pipeline",
@@ -767,9 +743,7 @@ def test_run_distill_rl_job_orchestrates_stages(tmp_path: Path):
                 "checkpoints": {},
                 "summary_path": str(eval_summary),
                 "verifiable_benchmarks": {
-                    "summary_path": str(
-                        eval_summary.parent / "verifiable_benchmarks.json"
-                    ),
+                    "summary_path": str(eval_summary.parent / "verifiable_benchmarks.json"),
                     "accuracy_jumps": {
                         "baseline": "student_base",
                         "by_checkpoint": {"dpo": {"gsm8k": 0.25}},
@@ -813,9 +787,7 @@ def test_run_distill_rl_multiseed_from_preset(tmp_path: Path):
         "output_dir": str(tmp_path / "distill_rl" / "cli" / "job-s13"),
         "stage_results": {},
     }
-    with patch(
-        "seiso.distill_rl.runner._run_single_job", return_value=single_result
-    ) as single:
+    with patch("seiso.distill_rl.runner._run_single_job", return_value=single_result) as single:
         result = run_distill_rl_job(
             job_id="job-ms",
             user_id="cli",
@@ -837,9 +809,7 @@ def test_run_distill_rl_multiseed_explicit_seeds(tmp_path: Path):
         "output_dir": str(tmp_path / "distill_rl" / "cli" / "job-s13"),
         "stage_results": {},
     }
-    with patch(
-        "seiso.distill_rl.runner._run_single_job", return_value=single_result
-    ) as single:
+    with patch("seiso.distill_rl.runner._run_single_job", return_value=single_result) as single:
         result = run_distill_rl_job(
             job_id="job-ms",
             user_id="cli",

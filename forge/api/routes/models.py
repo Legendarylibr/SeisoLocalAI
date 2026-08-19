@@ -55,12 +55,8 @@ async def model_catalog(
     purpose: str = Query(
         "chat", description="chat = GGUF Hub catalog; train = safetensors checkpoints"
     ),
-    hardware_aware: bool = Query(
-        True, description="Rank and annotate by local hardware fit"
-    ),
-    fits_only: bool = Query(
-        False, description="Show only ideal/good fits for this machine"
-    ),
+    hardware_aware: bool = Query(True, description="Rank and annotate by local hardware fit"),
+    fits_only: bool = Query(False, description="Show only ideal/good fits for this machine"),
     limit: int = Query(50, ge=1, le=100),
     cursor: str | None = Query(None, description="Hugging Face Hub pagination cursor"),
 ) -> dict:
@@ -72,11 +68,7 @@ async def model_catalog(
         encryption_key=settings.hf_token_encryption_key,
         settings_token=settings.hf_token or None,
     )
-    search_fn = (
-        search_trainable_catalog
-        if purpose.strip().lower() == "train"
-        else search_catalog
-    )
+    search_fn = search_trainable_catalog if purpose.strip().lower() == "train" else search_catalog
     try:
         result = search_fn(
             q,
@@ -396,12 +388,12 @@ async def register_local(
     existing = await db.get_model_by_path(user_id, str(path))
     if existing:
         return existing
-    # Clients may not claim Seiso-created provenance (training/export/rl_quant).
+    # Clients may not claim Seiso-created provenance (training/export).
     source = (body.source or "manual").strip() or "manual"
     if source.split(":")[0] in PUSHABLE_SOURCES:
         raise HTTPException(
             400,
-            "source cannot be training, export, or rl_quant for manual registration",
+            "source cannot be training or export for manual registration",
         )
     return await db.add_model(
         user_id=user_id,

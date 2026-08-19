@@ -39,9 +39,7 @@ class DatasetAnalysisCacheEntry:
 
 _dataset_analysis_cache: dict[str, DatasetAnalysisCacheEntry] = {}
 # Content-addressed analysis results so validate/analyze don't rescans the same corpus.
-_dataset_analysis_results: dict[
-    tuple[str, str, str, str], tuple[float, dict[str, Any]]
-] = {}
+_dataset_analysis_results: dict[tuple[str, str, str, str], tuple[float, dict[str, Any]]] = {}
 _DATASET_RESULT_CACHE_MAX = 32
 
 
@@ -175,9 +173,7 @@ def serialize_metrics_payload(
     from seiso.security.hardware_privacy import sanitize_system_metric_point
 
     training = [p for p in points if p.get("type") in ("training", "eval")]
-    system = [
-        sanitize_system_metric_point(p) for p in points if p.get("type") == "system"
-    ]
+    system = [sanitize_system_metric_point(p) for p in points if p.get("type") == "system"]
     return {
         "summary": summary or {},
         "training": training[-2000:],

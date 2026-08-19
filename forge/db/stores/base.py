@@ -58,9 +58,7 @@ class DatabaseCore:
         try:
             return decrypt_field(value, self._encryption_key)
         except Exception as exc:
-            raise DatabaseCryptoError(
-                "Encrypted database field could not be decrypted"
-            ) from exc
+            raise DatabaseCryptoError("Encrypted database field could not be decrypted") from exc
 
     def _decrypt_row(self, table: str, row: dict[str, Any]) -> dict[str, Any]:
         out = dict(row)
@@ -118,7 +116,6 @@ class DatabaseCore:
             "CREATE INDEX IF NOT EXISTS idx_hub_publish_jobs_user_created ON hub_publish_jobs(user_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_compress_jobs_user_created ON compress_jobs(user_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_distill_rl_jobs_user_created ON distill_rl_jobs(user_id, created_at DESC)",
-            "CREATE INDEX IF NOT EXISTS idx_rl_quant_jobs_user_created ON rl_quant_jobs(user_id, created_at DESC)",
             "CREATE INDEX IF NOT EXISTS idx_providers_user_created ON providers(user_id, created_at DESC)",
         ):
             await conn.execute(statement)
@@ -169,9 +166,7 @@ class DatabaseCore:
             await conn.commit()
         return {"id": jid, "status": "pending", "config": config, "created_at": now}
 
-    async def _get_config_job(
-        self, table: str, job_id: str, user_id: str
-    ) -> dict | None:
+    async def _get_config_job(self, table: str, job_id: str, user_id: str) -> dict | None:
         table = config_job_table(table)
         query = f"SELECT * FROM {table} WHERE id = ? AND user_id = ?"  # nosec B608
         async with (

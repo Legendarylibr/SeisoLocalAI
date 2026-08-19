@@ -57,11 +57,7 @@ def train_nemo_rl(
             if looks_like_path:
                 # Resolve relative values against cwd (NeMo launch dir) so
                 # embedded ``..`` segments cannot skip the sandbox check.
-                target = (
-                    candidate
-                    if candidate.is_absolute()
-                    else (Path.cwd() / candidate)
-                )
+                target = candidate if candidate.is_absolute() else (Path.cwd() / candidate)
                 assert_within(sandbox, target)
 
     try:
@@ -71,9 +67,7 @@ def train_nemo_rl(
             raise
         # Dry-run may preview Hydra overrides without a checkout present.
         nemo_root = Path(
-            config.nemo_rl_root
-            or os.environ.get("SEISO_NEMO_RL_ROOT")
-            or "<nemo-rl-not-found>"
+            config.nemo_rl_root or os.environ.get("SEISO_NEMO_RL_ROOT") or "<nemo-rl-not-found>"
         )
 
     sidecar = write_launch_sidecar(config, nemo_root=nemo_root)
@@ -155,11 +149,7 @@ def _write_manifest(
     nemo_root: Path,
     status: str,
 ) -> None:
-    recipe = (
-        config.recipe.value
-        if isinstance(config.recipe, NeMoRLRecipe)
-        else str(config.recipe)
-    )
+    recipe = config.recipe.value if isinstance(config.recipe, NeMoRLRecipe) else str(config.recipe)
     payload: dict[str, Any] = {
         "model_id": config.model_id,
         "method": "nemo_rl",

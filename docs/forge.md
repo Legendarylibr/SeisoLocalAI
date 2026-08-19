@@ -38,11 +38,11 @@ On later sessions, skip the UI build unless `forge-ui/dist` is missing or you ch
 
 Open **http://127.0.0.1:8765**. On first run:
 
-1. **Generate key** (default) or import an `nsec` / `ncryptsec`
-2. Write down the shown `nsec1…` (optional NIP-49 encrypted `.txt` download), then **Continue** (the `npub` is your public identity)
-3. Later: unlock with the instance `nsec`, or `ncryptsec` plus passphrase
+1. **Create account and continue** (default), or open **Already have a recovery key?** to restore
+2. **Save the recovery key** shown once (optional encrypted `.txt` download with passphrase), then **I saved my recovery key — continue**. The public ID is safe to share
+3. Later: unlock by pasting that recovery key (or an encrypted backup + passphrase)
 
-See [Auth (Nostr)](#auth-nostr) below.
+You do not need a Nostr app. See [Auth (local account / Nostr keys)](#auth-local-account--nostr-keys) for the technical mapping.
 
 ### UI development (hot reload)
 
@@ -83,7 +83,7 @@ To run a second Forge intentionally, change **both** `SEISO_PORT` and `SEISO_DAT
 
 ### Process model
 
-Forge runs as a **single uvicorn worker** by default. Job orchestrators (training, export, compress, distill-RL, RL quant), live SSE log streams, in-memory rate limiting, and loaded inference models all live in that one process.
+Forge runs as a **single uvicorn worker** by default. Job orchestrators (training, export, compress, distill-RL), live SSE log streams, in-memory rate limiting, and loaded inference models all live in that one process.
 
 | Constraint | Why |
 |------------|-----|
@@ -99,40 +99,55 @@ For production behind a reverse proxy, terminate TLS upstream and run **one** Fo
 |------|------|---------|
 | `/` | Dashboard | Workspace overview and quick links |
 | `/hub` | Model Hub | Browse and download catalog models |
-| `/chat` | Chat | Local inference (GGUF, MLX, PyTorch); native Linux NVIDIA GGUF uses llama-swap sidecar by default; **Free memory** unloads models from RAM/VRAM without changing selection |
+| `/chat` | Chat | Local inference (GGUF, MLX, PyTorch); native Linux NVIDIA GGUF uses Ollama first (llama-swap fallback); **Free memory** unloads models from RAM/VRAM without changing selection |
 | `/train` | Training Studio | LoRA / QLoRA fine-tuning with live SSE logs |
 | `/export` | Export | Merge LoRA, GGUF, Hub publish from checkpoints |
 | `/compress` | Compress | LLM distillation / prune (Llama-family) / quant pipeline |
 | `/distill-rl` | Distill-RL | Teacher → student distillation + DPO alignment |
-| `/rl-quant` | RL Quant | Adaptive GGUF quantization policy training |
-| `/recipes` | Recipe Studio | Visual graph editor for data/recipe jobs |
 | `/knowledge` | Knowledge | RAG corpus ingest and retrieval |
 | `/integrations` | Integrations | External providers + Nostr provenance |
 | `/settings` | Settings | HF token, hardware info, security toggles |
 
 Knowledge-base ingest and retrieve are also available via API (`/api/knowledge/...`).
 
-## Auth (Nostr)
+## Auth (local account / Nostr keys)
 
-Forge uses a single local account per instance (JWT + HttpOnly cookies + CSRF). Nostr keys replace passwords:
+Forge is single-tenant: one **owner public ID** per instance. The matching **recovery key** proves ownership. Browser sessions are HttpOnly cookies + CSRF (no Bearer JWT in the JSON body). Compat `/v1` uses a file-backed inference key that is **bound to that same owner**.
 
-| Term | Meaning in Seiso |
-|------|------------------|
-| **npub** | Public identity for this instance (safe to share / show in UI) |
-| **nsec** | Private key — write it down on first generate; paste it (or decrypt from ncryptsec) to sign in later |
-| **ncryptsec** | NIP-49 passphrase-encrypted backup of the nsec (safe to store as a file; useless without the passphrase) |
-| **Relays** | Allowlisted `wss://` endpoints for digests-only provenance, stored in per-user prefs next to the npub — not on the nsec |
+The UI speaks in everyday terms; crypto is unchanged (open Nostr key formats). You do **not** need a Nostr client or relay to sign in.
+
+| UI label | Technical name | Meaning in Seiso |
+|----------|----------------|------------------|
+| **Public ID** | `npub` | Public owner identity (safe to share / show in UI) |
+| **Recovery key** | `nsec` | Private — save on create; paste to sign in later |
+| **Encrypted backup** | `ncryptsec` (NIP-49) | Passphrase-locked file backup of the recovery key |
+| **Compat key** | file under data dir | `{SEISO_DATA_DIR}/.inference_api_key` for `/v1` only; owner in `.inference_api_key.owner` |
+| **Relays** | allowlisted `wss://` | Digests-only provenance prefs next to the public ID — not on the recovery key |
 
 | Step | What happens |
 |------|----------------|
-| First launch | **Generate key** (default) or import `nsec` / `ncryptsec` |
-| After generate | UI shows the new `nsec1…` once — write it down, optionally **Download encrypted .txt** (NIP-49 `ncryptsec` + passphrase; no raw nsec in the file), then **Continue**. The matching `npub` is your public identity. |
-| Later sessions | Paste `nsec1…`, or `ncryptsec1…` plus the backup passphrase (decrypted in the browser before login). The npub alone cannot unlock. |
-| Lost nsec | **Start a new session** clears the local account, `job_events`, and `nostr_keys/` (downloaded model files remain) |
+| First launch | **Create account and continue** (default), or restore a recovery key / encrypted backup — that public ID becomes the instance owner |
+| After create | UI shows the recovery key once — save it, optionally **Download encrypted .txt**, then **I saved my recovery key — continue**. Public ID is shown for reference. |
+| Later sessions | Paste the recovery key, or encrypted backup plus passphrase (decrypted in the browser before login). The public ID alone cannot unlock. |
+| Lost recovery key | **Start a new session** clears the local account, owner binding, Compat key, `job_events`, and `nostr_keys/` (downloaded model files remain) |
 | Ephemeral DB | In-memory SQLite (`SEISO_DB_EPHEMERAL`); signing keys are **not** written under `nostr_keys/` |
-| Settings key rotate | Import/keygen updates the account `npub` and attest key together (keygen returns `nsec` once) |
+| Settings key rotate | Import/keygen updates the account public ID (`npub`), attest key, and Compat owner binding together (keygen returns `nsec` once; Compat key rotates) |
 
-There is no password path. Generated secrets are shown once in the browser; an encrypted signing key is kept under `{SEISO_DATA_DIR}/nostr_keys/` for provenance attest (skipped in ephemeral mode). See also [provenance-nostr.md](provenance-nostr.md).
+There is no password path. Generated secrets are shown once in the browser; an encrypted signing key is kept under `{SEISO_DATA_DIR}/nostr_keys/` for provenance attest (skipped in ephemeral mode). Non-browser clients that need a Bearer JWT can send `X-Seiso-Return-Token: 1` on login/register. The default **TUI** (`seiso tui`) uses the same owner, keys, storage-mode marker, and reset/wipe rules; it stores a 24h session in `{SEISO_DATA_DIR}/.tui_session` (mode `0600`) instead of a cookie. See also [provenance-nostr.md](provenance-nostr.md).
+
+### Auth crypto (what is / is not guaranteed)
+
+| Layer | Mechanism |
+|-------|-----------|
+| Keygen | `os.urandom(32)` → BIP-340 x-only secp256k1; bech32 `nsec` / `npub` |
+| At-rest signing key | AES-256-GCM (`enc:v1:`) under `{SEISO_DATA_DIR}/nostr_keys/`; plaintext files are refused on load |
+| Master AES key | `os.urandom(32)` in `.nostr_key_encryption_key` (mode `0600`) — same-machine trust |
+| Optional backup | NIP-49 scrypt (encrypt `log_n` ≥ 16) + XChaCha20-Poly1305 → `ncryptsec` |
+| Session | HS256 JWT (`secrets.token_urlsafe` ≥ 32 bytes), HttpOnly cookie + CSRF; login pubkey check is constant-time |
+
+**Residual risks (local-first model):** anyone with OS access to the data dir can use the AES key + ciphertext; XSS in the Forge UI can read the one-time recovery key from `sessionStorage` until Continue; default bind is localhost — remote exposure requires explicit `SEISO_ALLOW_REMOTE` acknowledgements.
+
+**Keep it simple:** Nostr owns **identity and Buzz-facing signatures** (login npub, attest, mesh/agent events). Do **not** replace local JWT sessions with NIP-42, or put HF/mesh/pay tokens in Nostr events. At-rest AES (`enc:v1`) is one shared helper for DB columns and signing-key files — not a second crypto religion.
 
 ## API surface
 
@@ -145,8 +160,6 @@ There is no password path. Generated secrets are shown once in the browser; an e
 | `/api/export` | Export jobs, Hub publish |
 | `/api/compress` | LLM compression jobs |
 | `/api/distill-rl` | Distill → rollout → DPO jobs |
-| `/api/rl-quant` | RL quantization jobs |
-| `/api/recipes` | Recipe graph execution |
 | `/api/knowledge` | RAG ingest and retrieve |
 | `/api/providers` | External LLM provider configs |
 | `/api/system` | Hardware detection, metrics |
@@ -205,7 +218,7 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 | `SEISO_ALLOW_REMOTE` | `false` | Bind `0.0.0.0` (requires `SEISO_REMOTE_ACK=1`) |
 | `SEISO_TRUST_PROXY` | `false` | Honor `X-Forwarded-*` from `SEISO_TRUSTED_PROXY_IPS` only |
 | `SEISO_TRUSTED_PROXY_IPS` | — | Comma-separated proxy IPs (e.g. `127.0.0.1,::1`) |
-| `SEISO_INFERENCE_API_KEY` | auto | Scoped key for `/v1` only (file: `{SEISO_DATA_DIR}/.inference_api_key`) |
+| `SEISO_INFERENCE_API_KEY` | auto | Scoped `/v1` key bound to the owner npub (files: `.inference_api_key` + `.inference_api_key.owner`; rotated on reset / npub rotate unless env-bound) |
 | `SEISO_SECURE_COOKIES` | `false` | `Secure` cookies when TLS is terminated upstream |
 | `SEISO_CORS_ORIGINS` | *(local defaults)* | Only set for HTTPS reverse proxy |
 | `SEISO_HF_TOKEN` | — | Hugging Face token for gated models |
@@ -223,3 +236,5 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 | `SEISO_MODEL_ROUTER_URL` | — | Router base URL (e.g. `http://127.0.0.1:8780`) |
 
 HTTPS reverse-proxy deployment: [deployment/reverse-proxy.md](deployment/reverse-proxy.md) and [deploy/README.md](../deploy/README.md).
+
+Adaptive RL quantization research: [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization).

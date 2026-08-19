@@ -69,11 +69,7 @@ def extract_quant_label(
     meta = metadata or {}
     for candidate in (
         meta.get("gguf_file"),
-        (
-            meta.get("gguf_files", [None])[0]
-            if isinstance(meta.get("gguf_files"), list)
-            else None
-        ),
+        (meta.get("gguf_files", [None])[0] if isinstance(meta.get("gguf_files"), list) else None),
         Path(path).name if path else None,
         name,
     ):
@@ -146,5 +142,5 @@ def rank_gguf_filenames(
     return sorted(filenames, key=score)
 
 
-# Backward-compatible alias used across adaptive_quant.
+# Backward-compatible alias used across GGUF export paths.
 QUANT_BITS = KNOWN_QUANT_BITS

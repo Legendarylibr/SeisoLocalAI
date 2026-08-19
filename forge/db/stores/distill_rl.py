@@ -7,9 +7,7 @@ class DistillRLMixin:
     async def create_distill_rl_job(
         self, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
-        return await self._create_config_job(
-            "distill_rl_jobs", user_id, config, job_id=job_id
-        )
+        return await self._create_config_job("distill_rl_jobs", user_id, config, job_id=job_id)
 
     async def get_distill_rl_job(self, job_id: str, user_id: str) -> dict | None:
         return await self._get_config_job("distill_rl_jobs", job_id, user_id)

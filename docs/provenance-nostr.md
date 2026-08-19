@@ -7,7 +7,7 @@ stay on disk (or Hugging Face). This does **not** resume training and is
 
 ## What it proves
 
-After a compress / distill-rl / adaptive_quant / training / export run writes a
+After a compress / distill-rl / training / export run writes a
 manifest, Seiso can seal:
 
 - `manifest_sha256` (local JSON with the mutable `nostr` receipt excluded)
@@ -77,6 +77,19 @@ corpus — without putting the row text on Nostr.
 | Attestation signature + digest match (when verifying via Nostr) | Model weights, gradients, or “fair” training |
 
 Corpus membership ≠ gradient provenance.
+
+### Lean formalization
+
+The membership path algorithm and its binding to a Nostr-sealed root are modeled in
+Lean 4 under [`formal/seiso-provenance/`](../formal/seiso-provenance/README.md):
+
+- **Completeness** — an honestly opened path always verifies against the corpus root
+- **Nostr binding** — if a valid kind-`31250` event seals that root, the opened proof
+  satisfies the Nostr-backed verifier
+
+Build with `cd formal/seiso-provenance && lake build` (requires [elan](https://github.com/leanprover/elan)).
+SHA-256 and BIP-340 are opaque; the proofs cover the Merkle/path scheme and attestation
+root binding, not a full mechanization of secp256k1.
 
 ### End-to-end CLI
 
@@ -165,14 +178,17 @@ Private keys are encrypted under `$SEISO_DATA_DIR/nostr_keys/` (skipped when
 `SEISO_DB_EPHEMERAL` is on). Auth returns a one-time `nsec` when Forge generated
 the key (onboarding write-down). Settings **keygen** also returns `nsec` once
 because it rotates the account `npub` and attest key together; login and key
-import never echo `nsec`. `reset-session` wipes `nostr_keys/` and rotates the
-Nostr field-encryption key.
+import never echo `nsec`. `reset-session` wipes `nostr_keys/`, clears the
+Compat owner-npub binding, rotates the Nostr field-encryption key, and
+regenerates the Compat `/v1` inference API key (unless `SEISO_INFERENCE_API_KEY`
+is env-bound). Register / keygen / import rebind that Compat key to the active
+owner npub.
 
 ## Replay vs attestation
 
 | Goal | Command / path |
 |------|----------------|
-| Re-check local artifact hashes | `seiso compress manifest-verify`, adaptive_quant replay CLIs |
+| Re-check local artifact hashes | `seiso compress manifest-verify` |
 | Check external commitment | `seiso provenance verify` |
 | Prove a held row was in the train corpus | `seiso provenance dataset-prove` / `dataset-verify-proof` |
 

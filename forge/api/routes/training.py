@@ -53,11 +53,29 @@ from seiso.models.hf_env import configure_hf_hub_cache
 from seiso.models.hub_quant import native_quant_training_block_reason
 from seiso.models.trainable_snapshot import is_gguf_only_repo_id
 from seiso.security import SecurityError, safe_join
+from seiso.training.access import (
+    FRONTEND_SURFACE,
+    assert_surface_distributed_config,
+    frontend_training_surface,
+)
 from seiso.training.config import DatasetFormat, TrainConfig
 from seiso.training.recommendations import recommend_training_config
 
 router = APIRouter(prefix="/training", tags=["training"])
 logger = logging.getLogger(__name__)
+
+
+@router.get("/surface")
+async def training_surface(
+    user_id: Annotated[str, Depends(get_current_user_id)],
+) -> dict:
+    """Frontend training surface: full local config exposed; mesh/multi-node off.
+
+    The Forge UI must keep showing proper training settings (method, quant,
+    local multi-GPU DDP, hyperparams). Multi-node / mesh is Buzz-agent-only.
+    """
+    _ = user_id
+    return frontend_training_surface()
 
 
 def _resolve_dataset_for_user(
@@ -93,9 +111,7 @@ async def list_training_models(
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> dict:
     inventory = await db.list_models(user_id)
-    models = list_trainable_models(
-        inventory, data_dir=settings.data_dir, user_id=user_id
-    )
+    models = list_trainable_models(inventory, data_dir=settings.data_dir, user_id=user_id)
     return {"models": models, "total": len(models)}
 
 
@@ -132,11 +148,7 @@ async def _analyze_dataset_shared(
 ) -> dict:
     """Shared analyze/validate path with content-addressed result cache."""
     ds = _resolve_dataset_for_user(body.dataset, user_id=user_id, settings=settings)
-    ds_fmt = (
-        DatasetFormat(body.dataset_format)
-        if body.dataset_format
-        else DatasetFormat.AUTO
-    )
+    ds_fmt = DatasetFormat(body.dataset_format) if body.dataset_format else DatasetFormat.AUTO
     analysis = await asyncio.to_thread(
         run_dataset_analysis,
         ds,
@@ -314,6 +326,19 @@ async def start_training(
     except SecurityError as exc:
         raise_forbidden(exc)
 
+    from forge.services.dataset_security import warn_instruction_like_dataset
+
+    warn_instruction_like_dataset(
+        training_config.get("dataset"),
+        user_id=user_id,
+    )
+
+    # Forge HTTP is the frontend surface: full local training config, no mesh.
+    try:
+        assert_surface_distributed_config(FRONTEND_SURFACE, training_config)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from exc
+
     try:
         TrainConfig.model_validate(training_config)
     except Exception as exc:
@@ -385,18 +410,14 @@ async def start_training(
     training_config = {**training_config, "model_id": resolved_model_id}
     training_config.setdefault("extra", {})
     if local_path or resolved_model_id != original_model_id:
-        training_config["extra"]["resolved_model_path"] = (
-            local_path or resolved_model_id
-        )
+        training_config["extra"]["resolved_model_path"] = local_path or resolved_model_id
         training_config["extra"]["original_model_id"] = original_model_id
     resolved_block = native_quant_training_block_reason(resolved_model_id)
     if resolved_block:
         raise HTTPException(400, resolved_block)
 
     job_id = str(uuid.uuid4())
-    await db.create_training_job(
-        user_id, training_config, body.project_id, job_id=job_id
-    )
+    await db.create_training_job(user_id, training_config, body.project_id, job_id=job_id)
     orchestrator.create_job(job_id=job_id, user_id=user_id)
     extra = {**training_config.get("extra", {}), "user_id": user_id}
     if body.dataset_analysis_token:
@@ -464,9 +485,7 @@ async def start_training(
                     error_text=error_text,
                     user_id=user_id,
                 )
-                if job.status.value == "completed" and job.result.get(
-                    "checkpoint_path"
-                ):
+                if job.status.value == "completed" and job.result.get("checkpoint_path"):
                     export_error: str | None = None
                     try:
                         from forge.services.model_registry import (
@@ -506,9 +525,7 @@ async def start_training(
                                 )
                                 hub_metadata.validate()
                                 hub_repo = hub_metadata.repo_id
-                                hub_token = resolve_hub_publish_token(
-                                    settings, user_id, hub
-                                )
+                                hub_token = resolve_hub_publish_token(settings, user_id, hub)
 
                             export_dir = safe_join(
                                 settings.data_dir,
@@ -572,10 +589,14 @@ async def start_training(
             existing = await db.get_training_job(job_id, user_id)
             if str((existing or {}).get("status") or "").lower() == "cancelled":
                 return
+            error_text = job_failure_message(orchestrator, job_id, exc)
+            # If the pre-start status update raised, start() never ran: fail the
+            # in-memory record so streams close and the job becomes evictable.
+            orchestrator.fail_unstarted_job(job_id, error_text)
             await db.update_job_status(
                 job_id,
                 "failed",
-                error_text=job_failure_message(orchestrator, job_id, exc),
+                error_text=error_text,
                 user_id=user_id,
             )
 
@@ -605,13 +626,9 @@ async def get_training_metrics(
     if live:
         return serialize_metrics_payload(live)
 
-    durable_metrics = await db.list_job_events(
-        job_id, user_id, event_types=("metric",), limit=5000
-    )
+    durable_metrics = await db.list_job_events(job_id, user_id, event_types=("metric",), limit=5000)
     if durable_metrics:
-        return serialize_metrics_payload(
-            [row.get("payload") or {} for row in durable_metrics]
-        )
+        return serialize_metrics_payload([row.get("payload") or {} for row in durable_metrics])
 
     row = await db.get_training_job(job_id, user_id)
     raw = row.get("metrics_json") if row else None
@@ -666,15 +683,19 @@ async def stream_training(
         log_task = asyncio.create_task(forward_logs())
         metric_task = asyncio.create_task(forward_metrics())
         finished = 0
-        while finished < 2:
-            item = await queue.get()
-            if item is None:
-                finished += 1
-                continue
-            event, data = item
-            yield {"event": event, "data": data}
-
-        await asyncio.gather(log_task, metric_task, return_exceptions=True)
+        try:
+            while finished < 2:
+                item = await queue.get()
+                if item is None:
+                    finished += 1
+                    continue
+                event, data = item
+                yield {"event": event, "data": data}
+        finally:
+            # Client disconnects must not leak the forward tasks (or their queues).
+            log_task.cancel()
+            metric_task.cancel()
+            await asyncio.gather(log_task, metric_task, return_exceptions=True)
 
         j = orchestrator.get_job(job_id)
         if j and j.error:

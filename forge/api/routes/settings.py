@@ -135,9 +135,7 @@ async def save_hf_token(
 
     token = _normalize_token(body.token)
     if not token:
-        raise HTTPException(
-            status_code=400, detail="Invalid Hugging Face token format."
-        )
+        raise HTTPException(status_code=400, detail="Invalid Hugging Face token format.")
 
     result = probe_hf_hub(token=token)
     if not result.reachable:
@@ -266,6 +264,8 @@ async def nostr_keygen(
             persist=not settings.db_ephemeral,
         )
         await db.update_user_nostr_pubkey(user_id, result["pubkey_hex"])
+        # New npub owns the instance — rotate Compat /v1 key with the identity.
+        settings.sync_inference_api_key_owner(result["pubkey_hex"])
     except (ImportError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {
@@ -293,6 +293,7 @@ async def nostr_import_key(
             persist=not settings.db_ephemeral,
         )
         await db.update_user_nostr_pubkey(user_id, result["pubkey_hex"])
+        settings.sync_inference_api_key_owner(result["pubkey_hex"])
     except (ImportError, ValueError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     return {"status": result["status"], "npub": result["npub"]}

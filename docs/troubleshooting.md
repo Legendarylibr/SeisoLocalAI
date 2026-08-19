@@ -142,25 +142,44 @@ SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.co
 
 **Symptom:** `Seiso CLI missing at …/Seiso/.venv/bin/seiso` or `seiso: command not found` right after install on native Linux.
 
-**Cause:** Usually the pip install did not finish (install TUI reported success too early, or heavy extras like PyTorch / llama.cpp failed). The installer now installs core `[forge,dev]` first so the CLI exists before optional training stacks.
+**Cause:** Usually the pip install did not finish (install TUI reported success too early, or heavy extras like PyTorch / llama.cpp failed). On failure the installer falls back to core `[forge]` first so the CLI exists, then retries optional training/inference extras.
+
+**Related — `start` reinstalls every time on native Linux NVIDIA even though Forge already works:**
+older installers probed `import llama_cpp` without setting the venv CUDA library path (`libcudart.so.12`), which falsely failed and re-ran the full install (often hanging on `bun install`). Current `start` uses a CUDA-aware import probe, skips UI rebuild when `forge-ui/dist` exists, prefers `npm ci` on Linux when Node 18+ is present, times out hung Bun installs (and skips the useless unfrozen retry on timeout), and if Forge is already healthy on the target port it opens the browser instead of starting a second instance.
+
+**Related — Forge UI never builds / install hangs on `bun install` (Linux):**
+Regression path: Dependabot refreshed `package-lock.json` without `bun.lock` → `bun install --frozen-lockfile` failed or hung → no `forge-ui/dist` → `start` looped. Recovery on a stuck host:
+
+```bash
+# Prefer the Dependabot-fresh npm lock (Node 18+ required):
+SEISO_USE_NPM=1 SEISO_FORCE_UI=1 SEISO_NO_BANNER=1 start
+# or manually:
+cd "$HOME/Seiso/forge-ui" && npm ci && npm run build
+```
 
 **Fix:**
 ```bash
-SEISO_NO_BANNER=1 start
+SEISO_NO_BANNER=1 seiso-start
+# or: SEISO_NO_BANNER=1 start
 ```
 
 If that still fails, inspect the log and reinstall core extras manually:
 ```bash
 cat "$HOME/Seiso/.seiso-install.log" | tail -50
 source "$HOME/Seiso/.venv/bin/activate"
-pip install -U pip wheel setuptools hatchling
-pip install -e "$HOME/Seiso[forge,dev]"
+pip install -U pip wheel 'setuptools>=83'
+pip install -e "$HOME/Seiso[forge]"
 "$HOME/Seiso/.venv/bin/seiso" forge
 ```
 
-Optional training/inference extras can be added afterward:
+Optional training/inference extras can be added afterward (pick your platform):
 ```bash
-pip install -e "$HOME/Seiso[train,llamacpp,dev]"
+# Linux NVIDIA:
+pip install -e "$HOME/Seiso[train,cuda,llamacpp]"
+# Linux CPU / ROCm base:
+# pip install -e "$HOME/Seiso[train,llamacpp]"
+# macOS Apple Silicon:
+# pip install -e "$HOME/Seiso[train,llamacpp,mlx]"
 ```
 
 ## Flash Attention / flash-attn wheel build fails
@@ -309,3 +328,33 @@ python -c "from seiso.training.platform_caps import training_capabilities; impor
 ## Reset Seiso data
 
 Default data dir: `$HOME/.seiso` on Linux/macOS/WSL, `%USERPROFILE%\.seiso` on Windows (override with `SEISO_DATA_DIR`).
+
+## Opt-in pay marketplace / Ark + L402
+
+> **Not functional yet — do not use.** Live Ark and L402 settlement are not wired; faucet/sim only for local smoke tests.
+
+| Symptom | Check |
+|---------|--------|
+| `seiso pay` refuses to run | `SEISO_ALLOW_PAY=1` must be set |
+| Settle / funding fails closed | Set `SEISO_PROTOCOL_TREASURY_ARK` (and operator Ark) **or** use `SEISO_PAY_FAUCET=1` for local tests only |
+| `SEISO_ARK_BACKEND=bark\|second` errors | Backend not bundled yet — leave unset / use faucet for smoke tests |
+| Expecting live L402 | Live Lightning not wired — set `SEISO_PAY_L402_SIM=1` (or faucet) for sim fund/exchange; use `seiso pay session fund --l402` ([L402 explained](https://lightningfaucet.com/learn/l402-payments-explained/)) |
+| Job failed / cancelled but balance missing | Escrow should restore to session (`refunded_sats`); check job receipt `settlement.status=refunded` |
+| Buyer can’t reach operator | Hit `SEISO_PAY_URL` (pay sidecar), not Forge; check `GET /.well-known/seiso-pay.json` |
+| Accidentally exposed faucet | Turn `SEISO_PAY_FAUCET` **off** on any public market |
+
+Full guide: [pay/marketplace.md](pay/marketplace.md).
+
+## Opt-in Buzz mesh
+
+> Secondary / opt-in Buzz-agent path. Local single-node training stays primary.
+
+| Symptom | Check |
+|---------|--------|
+| `seiso mesh` refuses | `SEISO_ALLOW_MESH=1`, `BUZZ_PRIVATE_KEY` (nsec), and shared `SEISO_MESH_TOKEN` (≥16 chars; never post to Buzz) |
+| Loopback master refused | Real multi-host needs a reachable addr; for single-host smoke only set `SEISO_MESH_ALLOW_LOOPBACK=1` |
+| Peers don’t join | Import signed plan (`seiso mesh import-plan`); same token + channel; master addr reachable; ranks claimed with `--rank` |
+| Worker only prints overlay | Pass `--base-config` to materialize; `--dry-run` / `--launch` to preview or start train |
+| Confused with marketplace | Mesh has **no** protocol fee; paid remote compute is [pay/marketplace.md](pay/marketplace.md) |
+
+Full guide: [training/mesh.md](training/mesh.md).

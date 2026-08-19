@@ -4,6 +4,12 @@ from pathlib import Path
 
 import pytest
 
+from forge.security.token_revocation import (
+    clear_revocations_for_tests,
+    is_jti_revoked,
+    revoke_jti,
+)
+from forge.services.models import resolve_training_model_id
 from seiso.security import (
     USER_SCOPED_DATA_ROOTS,
     SecurityError,
@@ -12,6 +18,7 @@ from seiso.security import (
     safe_join,
     sanitize_filename,
 )
+from tests.conftest import RETURN_TOKEN_HEADERS
 
 
 def test_safe_join_blocks_traversal(tmp_path: Path):
@@ -101,7 +108,6 @@ def test_user_scoped_data_roots_cover_tenant_categories():
         "exports",
         "compress",
         "distill_rl",
-        "rl_quant",
         "recipes",
     }
     assert expected == USER_SCOPED_DATA_ROOTS
@@ -131,3 +137,423 @@ def test_assert_user_scoped_path_rejects_hf_cache_direct(tmp_path: Path):
     cache.write_bytes(b"x")
     with pytest.raises(SecurityError, match="Access denied to path root"):
         assert_user_scoped_path(tmp_path, "user-1", cache)
+
+
+def test_revocation_persist_is_atomic(tmp_path: Path, monkeypatch):
+    from forge.security import token_revocation as tr
+
+    store = tmp_path / ".revoked_jtis.json"
+    monkeypatch.setattr(tr, "_store_path", store)
+    tr.clear_revocations_for_tests()
+    tr.revoke_jti("abc", 4_000_000_000.0)
+    assert store.is_file()
+    assert not store.with_name(store.name + ".tmp").exists()
+    raw = store.read_text(encoding="utf-8")
+    assert "abc" in raw
+
+
+def test_resolve_training_model_id_rejects_cross_user_path(tmp_path: Path):
+    bob = tmp_path / "models" / "bob" / "secret"
+    bob.mkdir(parents=True)
+    (bob / "config.json").write_text("{}", encoding="utf-8")
+    (bob / "model.safetensors").write_bytes(b"weights")
+
+    with pytest.raises(SecurityError, match="models/alice"):
+        resolve_training_model_id(
+            str(bob.resolve()),
+            data_dir=tmp_path,
+            user_id="alice",
+            inventory=[],
+        )
+
+
+def test_resolve_training_model_id_rejects_host_path_outside_data_dir(tmp_path: Path):
+    outside = tmp_path.parent / f"outside-{tmp_path.name}"
+    outside.mkdir(exist_ok=True)
+    (outside / "config.json").write_text("{}", encoding="utf-8")
+    (outside / "model.safetensors").write_bytes(b"weights")
+
+    with pytest.raises(SecurityError):
+        resolve_training_model_id(
+            str(outside.resolve()),
+            data_dir=tmp_path,
+            user_id="alice",
+            inventory=[],
+        )
+
+
+def test_rate_limiter_evicts_idle_ips():
+    from forge.security.auth import RateLimiter
+
+    limiter = RateLimiter(max_per_minute=100)
+    for i in range(300):
+        limiter._hits[f"ip-{i}"] = [0.0]  # all expired vs monotonic now
+    limiter.check("fresh-ip")
+    assert "fresh-ip" in limiter._hits
+    assert len(limiter._hits) < 300
+
+
+def test_jwt_revocation_overflow_evicts_oldest(monkeypatch):
+    import time
+
+    monkeypatch.setattr("forge.security.token_revocation._MAX_ENTRIES", 3)
+    now = time.time()
+    for idx in range(5):
+        revoke_jti(f"jti-{idx}", now + 3600 + idx)
+
+    assert not is_jti_revoked("jti-0")
+    assert not is_jti_revoked("jti-1")
+    assert all(is_jti_revoked(f"jti-{idx}") for idx in range(2, 5))
+    clear_revocations_for_tests()
+
+
+def test_expired_jti_not_revoked_without_full_prune():
+    import time
+
+    from forge.security import token_revocation as tr
+
+    clear_revocations_for_tests()
+    now = time.time()
+    # Seed the store directly: revoke_jti prunes on write, so expired entries
+    # can only linger from loads or elapsed time between writes.
+    tr._revoked["expired-a"] = now - 10
+    tr._revoked["expired-b"] = now - 5
+    tr._revoked["live"] = now + 3600
+
+    assert not is_jti_revoked("expired-a")
+    assert is_jti_revoked("live")
+    # Read path prunes only the looked-up entry, never the whole table.
+    assert "expired-a" not in tr._revoked
+    assert "expired-b" in tr._revoked
+    clear_revocations_for_tests()
+
+
+@pytest.mark.asyncio
+async def test_jwt_revocation_retained_until_expiry(monkeypatch):
+    from forge.config import get_settings
+    from forge.security import auth as auth_mod
+    from forge.security.token_revocation import (
+        clear_revocations_for_tests,
+        is_jti_revoked,
+    )
+
+    clear_revocations_for_tests()
+    settings = get_settings()
+    tokens = [auth_mod.create_access_token(f"user-{i}", settings) for i in range(5)]
+    for token in tokens:
+        auth_mod.revoke_access_token(token, settings)
+
+    for token in tokens:
+        with pytest.raises(auth_mod.InvalidTokenError):
+            auth_mod.decode_token(token, settings)
+
+    # Prune should not resurrect revoked tokens before JWT exp.
+    import jwt
+
+    payload = jwt.decode(tokens[0], settings.secret_key, algorithms=[auth_mod.ALGORITHM])
+    assert is_jti_revoked(str(payload["jti"]))
+
+
+@pytest.mark.asyncio
+async def test_jwt_revoked_after_logout(app, auth_client):
+    client, token, headers, _tmp = auth_client
+    logout = await client.post("/api/auth/logout", headers=headers)
+    assert logout.status_code == 200
+
+    me = await client.get("/api/auth/me", headers={"Authorization": f"Bearer {token}"})
+    assert me.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_registration_rejects_second_user(app):
+    from httpx import ASGITransport, AsyncClient
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        first = await client.post(
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
+        assert first.status_code == 201
+        second = await client.post(
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
+        assert second.status_code == 403
+
+
+def test_client_ip_ignores_forwarded_without_trusted_proxy(monkeypatch):
+    from unittest.mock import MagicMock
+
+    from forge.config import ForgeSettings
+    from forge.security.client_ip import client_ip
+
+    settings = ForgeSettings(trust_proxy=False)
+    monkeypatch.setattr("forge.security.client_ip.get_settings", lambda: settings)
+
+    request = MagicMock()
+    request.client.host = "203.0.113.10"
+    request.headers = {"x-forwarded-for": "198.51.100.99"}
+
+    assert client_ip(request) == "203.0.113.10"
+
+
+def _xff_request(monkeypatch, peer: str, xff: str):
+    from unittest.mock import MagicMock
+
+    from forge.config import ForgeSettings
+    from forge.security.client_ip import client_ip
+
+    settings = ForgeSettings(trust_proxy=True, trusted_proxy_ips="10.0.0.1,10.0.0.2")
+    monkeypatch.setattr("forge.security.client_ip.get_settings", lambda: settings)
+
+    request = MagicMock()
+    request.client.host = peer
+    request.headers = {"x-forwarded-for": xff}
+    return client_ip(request)
+
+
+def test_client_ip_skips_spoofed_leftmost_xff(monkeypatch):
+    # Attacker-controlled leftmost entries are ignored; the first untrusted
+    # hop walking right-to-left from the trusted proxy wins.
+    assert (
+        _xff_request(monkeypatch, "10.0.0.1", "198.51.100.99, 203.0.113.5, 10.0.0.1")
+        == "203.0.113.5"
+    )
+
+
+def test_client_ip_single_trusted_proxy_append(monkeypatch):
+    assert _xff_request(monkeypatch, "10.0.0.1", "203.0.113.5") == "203.0.113.5"
+
+
+def test_client_ip_falls_back_to_peer_when_all_xff_trusted(monkeypatch):
+    assert _xff_request(monkeypatch, "10.0.0.1", "10.0.0.2, 10.0.0.1") == "10.0.0.1"
+
+
+def test_remote_access_requires_ack(monkeypatch, tmp_path):
+    monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SEISO_SECRET_KEY", "test-secret-key-for-jwt-signing-32b")
+    monkeypatch.setenv("SEISO_ALLOW_REMOTE", "true")
+    monkeypatch.delenv("SEISO_REMOTE_ACK", raising=False)
+    from forge.api.deps import clear_dependency_caches
+
+    clear_dependency_caches()
+    with pytest.raises(RuntimeError, match="SEISO_REMOTE_ACK"):
+        from forge.config import ForgeSettings
+
+        ForgeSettings()
+
+
+def test_remote_code_exec_always_refused(monkeypatch):
+    """Remote + code-exec is refused entirely (AST sandbox is not OS isolation)."""
+    from types import SimpleNamespace
+
+    from forge.security.startup import validate_security_settings
+
+    monkeypatch.setenv("SEISO_REMOTE_ACK", "1")
+    # Legacy ack must not re-enable remote code-exec.
+    monkeypatch.setenv("SEISO_REMOTE_CODE_EXEC_ACK", "1")
+    monkeypatch.setenv("SEISO_REMOTE_DANGEROUS_ACK", "1")
+
+    settings = SimpleNamespace(
+        allow_remote=True,
+        allow_code_exec=True,
+        allow_tools=False,
+        allow_compat_tools=False,
+        trust_proxy=False,
+        trusted_proxy_ips="",
+        debug=False,
+    )
+    with pytest.raises(RuntimeError, match="cannot be combined with code execution"):
+        validate_security_settings(settings)
+
+
+def test_debug_plus_remote_refused(monkeypatch):
+    """S1-016: debug CSP unsafe-inline must not combine with remote bind."""
+    from types import SimpleNamespace
+
+    from forge.security.startup import validate_security_settings
+
+    monkeypatch.setenv("SEISO_REMOTE_ACK", "1")
+    settings = SimpleNamespace(
+        allow_remote=True,
+        allow_code_exec=False,
+        allow_tools=False,
+        allow_compat_tools=False,
+        trust_proxy=False,
+        trusted_proxy_ips="",
+        debug=True,
+    )
+    with pytest.raises(RuntimeError, match="SEISO_DEBUG"):
+        validate_security_settings(settings)
+
+
+def test_remote_tools_still_use_dangerous_ack(monkeypatch):
+    from types import SimpleNamespace
+
+    from forge.security.startup import validate_security_settings
+
+    monkeypatch.setenv("SEISO_REMOTE_ACK", "1")
+    monkeypatch.delenv("SEISO_REMOTE_DANGEROUS_ACK", raising=False)
+    monkeypatch.delenv("SEISO_REMOTE_CODE_EXEC_ACK", raising=False)
+
+    settings = SimpleNamespace(
+        allow_remote=True,
+        allow_code_exec=False,
+        allow_tools=True,
+        allow_compat_tools=False,
+        trust_proxy=False,
+        trusted_proxy_ips="",
+        debug=False,
+    )
+    with pytest.raises(RuntimeError, match="SEISO_REMOTE_DANGEROUS_ACK"):
+        validate_security_settings(settings)
+
+    monkeypatch.setenv("SEISO_REMOTE_DANGEROUS_ACK", "1")
+    validate_security_settings(settings)
+
+
+def test_trust_proxy_requires_allowlist(monkeypatch, tmp_path):
+    monkeypatch.setenv("SEISO_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("SEISO_SECRET_KEY", "test-secret-key-for-jwt-signing-32b")
+    monkeypatch.setenv("SEISO_TRUST_PROXY", "true")
+    monkeypatch.delenv("SEISO_TRUSTED_PROXY_IPS", raising=False)
+    from forge.api.deps import clear_dependency_caches
+
+    clear_dependency_caches()
+    with pytest.raises(RuntimeError, match="SEISO_TRUSTED_PROXY_IPS"):
+        from forge.config import ForgeSettings
+
+        ForgeSettings()
+
+
+@pytest.mark.asyncio
+async def test_inference_api_key_scoped_to_compat(app, auth_client, tmp_path):
+    from forge.config import get_settings
+
+    settings = get_settings()
+    assert settings.inference_api_key
+    assert settings.get_inference_api_key_owner()
+    client, _token, _headers, _tmp = auth_client
+    res = await client.post(
+        "/v1/chat/completions",
+        headers={"Authorization": f"Bearer {settings.inference_api_key}"},
+        json={
+            "model": "default",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": False,
+        },
+    )
+    assert res.status_code in {400, 500}
+
+    admin = await client.get(
+        "/api/auth/me",
+        headers={"Authorization": f"Bearer {settings.inference_api_key}"},
+    )
+    assert admin.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_inference_api_key_rejects_owner_mismatch(app, auth_client):
+    """Compat key must match the sole owner's npub binding."""
+    from forge.config import get_settings
+
+    client, _token, _headers, _tmp = auth_client
+    settings = get_settings()
+    key = settings.inference_api_key
+    # Point owner file at a different pubkey without rotating the key material.
+    settings.bind_inference_api_key_owner("ab" * 32)
+    stale = await client.get(
+        "/v1/models",
+        headers={"Authorization": f"Bearer {key}"},
+    )
+    assert stale.status_code == 401
+    assert "owner npub" in stale.json()["detail"].lower()
+
+
+@pytest.mark.asyncio
+async def test_npub_keygen_rotates_compat_owner_binding(app, auth_client):
+    """Rotating the account npub rebinds and rotates the Compat /v1 key."""
+    from forge.config import get_settings
+
+    client, _token, headers, _tmp = auth_client
+    settings = get_settings()
+    old_key = settings.inference_api_key
+    old_owner = settings.get_inference_api_key_owner()
+    assert old_key and old_owner
+
+    regen = await client.post("/api/settings/nostr/keygen", headers=headers)
+    assert regen.status_code == 200, regen.text
+    settings = get_settings()
+    assert settings.inference_api_key != old_key
+    assert settings.get_inference_api_key_owner() != old_owner
+    ok = await client.get(
+        "/v1/models",
+        headers={"Authorization": f"Bearer {settings.inference_api_key}"},
+    )
+    assert ok.status_code == 200
+    stale = await client.get(
+        "/v1/models",
+        headers={"Authorization": f"Bearer {old_key}"},
+    )
+    assert stale.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_inference_api_key_cannot_use_compat_tools(monkeypatch, app, auth_client):
+    """Inference API key stays chat-only even when Compat tools are server-enabled."""
+    from forge.api.deps import clear_dependency_caches
+    from forge.config import get_settings
+    from forge.security.compat_auth import CompatIdentity
+
+    assert CompatIdentity("u1", "inference_key").tools_allowed is False
+    assert CompatIdentity("u1", "session").tools_allowed is True
+
+    monkeypatch.setenv("SEISO_ALLOW_COMPAT_TOOLS", "true")
+    clear_dependency_caches()
+    try:
+        settings = get_settings()
+        assert settings.allow_compat_tools is True
+        client, token, headers, _tmp = auth_client
+        key_res = await client.post(
+            "/v1/chat/completions",
+            headers={"Authorization": f"Bearer {settings.inference_api_key}"},
+            json={
+                "model": "default",
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": [{"type": "function", "function": {"name": "web_search"}}],
+                "stream": False,
+            },
+        )
+        assert key_res.status_code == 403
+        assert "chat-only" in key_res.json()["detail"].lower()
+
+        # Session JWT may proceed past the auth-method gate (may fail later on model).
+        jwt_res = await client.post(
+            "/v1/chat/completions",
+            headers=headers,
+            json={
+                "model": "default",
+                "messages": [{"role": "user", "content": "hi"}],
+                "tools": [{"type": "function", "function": {"name": "web_search"}}],
+                "stream": False,
+            },
+        )
+        assert "chat-only" not in jwt_res.text.lower()
+        assert token  # keep fixture unpack used
+    finally:
+        monkeypatch.delenv("SEISO_ALLOW_COMPAT_TOOLS", raising=False)
+        clear_dependency_caches()
+
+
+@pytest.mark.asyncio
+async def test_router_status_requires_auth(app, auth_client):
+    from httpx import ASGITransport, AsyncClient
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        anon = await client.get("/api/inference/router/status")
+        assert anon.status_code == 401
+
+    client, _token, headers, _tmp = auth_client
+    authed = await client.get("/api/inference/router/status", headers=headers)
+    assert authed.status_code == 200
+    assert authed.json().get("enabled") is False

@@ -15,7 +15,6 @@ const DashboardPage = lazy(() => import("@/pages/DashboardPage").then((m) => ({ 
 const HubPage = lazy(() => import("@/pages/HubPage").then((m) => ({ default: m.HubPage })));
 const ChatPage = lazy(() => import("@/pages/ChatPage").then((m) => ({ default: m.ChatPage })));
 const ExportPage = lazy(() => import("@/pages/ExportPage").then((m) => ({ default: m.ExportPage })));
-const RLQuantPage = lazy(() => import("@/pages/RLQuantPage").then((m) => ({ default: m.RLQuantPage })));
 const CompressPage = lazy(() => import("@/pages/CompressPage").then((m) => ({ default: m.CompressPage })));
 const DistillRLPage = lazy(() => import("@/pages/DistillRLPage").then((m) => ({ default: m.DistillRLPage })));
 const TrainPage = lazy(() => import("@/pages/TrainPage").then((m) => ({ default: m.TrainPage })));
@@ -30,8 +29,8 @@ function PageLoading() {
   return (
     <div className="app-loading">
       <div className="app-loading-atmosphere" aria-hidden />
-      <div className="app-loading-mark">
-        <SeisoLogoMark className="brand-logo-img app-loading-logo" />
+      <div className="app-loading-mark app-loading-mark-wordmark">
+        <SeisoLogoMark className="app-loading-logo" />
       </div>
       <div className="app-loading-bar" aria-hidden />
       <p className="app-loading-text">Seiso Local AI</p>
@@ -95,7 +94,6 @@ function AppRoutes() {
         <Route path="/hub" element={<Guard {...guardProps}><HubPage /></Guard>} />
         <Route path="/chat" element={<Guard {...guardProps} fullBleed><ChatPage /></Guard>} />
         <Route path="/export" element={<Guard {...guardProps}><ExportPage /></Guard>} />
-        <Route path="/rl-quant" element={<Guard {...guardProps}><RLQuantPage /></Guard>} />
         <Route path="/compress" element={<Guard {...guardProps}><CompressPage /></Guard>} />
         <Route path="/distill-rl" element={<Guard {...guardProps}><DistillRLPage /></Guard>} />
         <Route path="/train" element={<Guard {...guardProps}><TrainPage /></Guard>} />

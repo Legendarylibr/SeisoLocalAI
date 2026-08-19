@@ -11,9 +11,7 @@ from typing import Any
 
 from seiso.io.jsonl import read_json_file
 
-_FINETUNE_TYPES = frozenset(
-    {"lora", "qlora", "full", "embedding", "slime", "nemo_rl", "rl_quant", "compress"}
-)
+_FINETUNE_TYPES = frozenset({"lora", "qlora", "full", "embedding", "slime", "nemo_rl", "compress"})
 
 
 @dataclass
@@ -53,9 +51,7 @@ class HubModelMetadata:
                 "Model name must start with alphanumeric and contain only letters, digits, '.', '_', or '-'"
             )
         if self.finetune_type and self.finetune_type not in _FINETUNE_TYPES:
-            raise ValueError(
-                f"finetune_type must be one of: {', '.join(sorted(_FINETUNE_TYPES))}"
-            )
+            raise ValueError(f"finetune_type must be one of: {', '.join(sorted(_FINETUNE_TYPES))}")
 
     def to_card_dict(self) -> dict[str, Any]:
         self.validate()
@@ -93,9 +89,7 @@ def _yaml_frontmatter(card: dict[str, Any]) -> str:
     return "\n".join(lines)
 
 
-def render_readme(
-    meta: HubModelMetadata, *, extra: dict[str, Any] | None = None
-) -> str:
+def render_readme(meta: HubModelMetadata, *, extra: dict[str, Any] | None = None) -> str:
     """Render README.md body with YAML frontmatter for Hugging Face."""
     meta.validate()
     card = meta.to_card_dict()
@@ -103,9 +97,7 @@ def render_readme(
     quant_line = ""
     if meta.quantizations:
         quant_line = (
-            "\n## Quantizations\n\n"
-            + "\n".join(f"- `{q}`" for q in meta.quantizations)
-            + "\n"
+            "\n## Quantizations\n\n" + "\n".join(f"- `{q}`" for q in meta.quantizations) + "\n"
         )
 
     body = meta.description.strip() or (

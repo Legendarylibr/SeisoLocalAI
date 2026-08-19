@@ -1,6 +1,13 @@
 # Dependabot tracks declared deps in pyproject.toml / forge-ui.
-# CI and local quality installs use hashed locks/python.lock — after merging
-# dependency PRs, refresh locks with: python scripts/update_dep_locks.py
+# Canonical Python lock is locks/python.lock (hashed; refresh via
+# python scripts/update_dep_locks.py). Do not commit uv.lock — a stale
+# committed copy previously produced ghost Dependabot alerts (nltk/pyasn1)
+# after the file was removed from main.
+#
+# npm PRs: workflow dependabot-digests.yml regenerates forge-ui/bun.lock and
+# refreshes locks/digests.json from the updated package-lock.json. pip PRs
+# that change resolved versions still need a full
+# `python scripts/update_dep_locks.py` (recompile) before merge.
 version: 2
 updates:
   - package-ecosystem: pip

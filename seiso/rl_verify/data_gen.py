@@ -39,9 +39,7 @@ class DataGenResult:
             "stream_counts": dict(self.stream_counts),
             "difficulty_counts": dict(self.difficulty_counts),
             "unique_noncode_answers": unique_answers,
-            "answer_diversity": (
-                unique_answers / max(1, len(answers)) if answers else 0.0
-            ),
+            "answer_diversity": (unique_answers / max(1, len(answers)) if answers else 0.0),
         }
 
 
@@ -68,9 +66,7 @@ def parse_weight_mix(
             raw[key.strip().lower()] = float(weight)
     unknown = set(raw) - set(allowed)
     if unknown:
-        raise ValueError(
-            f"unknown mix keys {sorted(unknown)}; allowed: {sorted(allowed)}"
-        )
+        raise ValueError(f"unknown mix keys {sorted(unknown)}; allowed: {sorted(allowed)}")
     if not raw:
         raw = dict(default)
     total = sum(raw.values())

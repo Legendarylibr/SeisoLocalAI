@@ -166,12 +166,8 @@ def test_prepare_for_gpu_task_refuses_uncertain_ollama_orphan_unload(monkeypatch
 
     memory_release._ACTIVE_GPU_TASKS.clear()
     monkeypatch.setattr(memory_release, "running_gpu_task_kinds", lambda **_kwargs: [])
-    monkeypatch.setattr(
-        "seiso.memory.gpu_resource_lock.acquire_gpu_resource_lock", lambda: None
-    )
-    monkeypatch.setattr(
-        "seiso.memory.gpu_resource_lock.release_gpu_resource_lock", lambda: None
-    )
+    monkeypatch.setattr("seiso.memory.gpu_resource_lock.acquire_gpu_resource_lock", lambda: None)
+    monkeypatch.setattr("seiso.memory.gpu_resource_lock.release_gpu_resource_lock", lambda: None)
     monkeypatch.setattr(
         memory_release,
         "release_inference_memory",

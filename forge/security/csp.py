@@ -86,14 +86,10 @@ def apply_response_security_headers(
     """Apply baseline security headers with local-first vs remote-aware CSP."""
     response_headers.setdefault("X-Content-Type-Options", "nosniff")
     response_headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
-    response_headers.setdefault(
-        "Permissions-Policy", "camera=(), microphone=(), geolocation=()"
-    )
+    response_headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 
     if path.startswith("/assets/"):
-        response_headers.setdefault(
-            "Cache-Control", "public, max-age=31536000, immutable"
-        )
+        response_headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
         # Static bundles are public; CORP same-origin is unnecessarily strict for local tooling.
         response_headers.setdefault("Cross-Origin-Resource-Policy", "cross-origin")
         return

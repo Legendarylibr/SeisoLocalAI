@@ -96,9 +96,7 @@ class _RejectingFakeModel:
 
 class _NoCacheFakeModel(_FakeModel):
     def __call__(self, input_ids, past_key_values=None, use_cache=False):
-        out = super().__call__(
-            input_ids, past_key_values=past_key_values, use_cache=use_cache
-        )
+        out = super().__call__(input_ids, past_key_values=past_key_values, use_cache=use_cache)
         return SimpleNamespace(logits=out.logits, past_key_values=None)
 
 
@@ -157,17 +155,13 @@ class _CroppableFakeModel(_FakeModel):
         self.last_cache: _CroppableCache | None = None
 
     def __call__(self, input_ids, past_key_values=None, use_cache=False):
-        out = super().__call__(
-            input_ids, past_key_values=past_key_values, use_cache=False
-        )
+        out = super().__call__(input_ids, past_key_values=past_key_values, use_cache=False)
         if past_key_values is None:
             self.full_replays += 1
             past_len = 0
         else:
             past_len = int(past_key_values)
-        cache = (
-            _CroppableCache(past_len + int(input_ids.shape[1])) if use_cache else None
-        )
+        cache = _CroppableCache(past_len + int(input_ids.shape[1])) if use_cache else None
         self.last_cache = cache
         return SimpleNamespace(logits=out.logits, past_key_values=cache)
 

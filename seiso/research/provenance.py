@@ -176,36 +176,22 @@ def infer_pipeline_and_run_id(
 ) -> tuple[str, str]:
     """Best-effort pipeline/run_id for attestation ``d`` tags."""
     pipeline = str(
-        manifest.get("pipeline")
-        or manifest.get("method")
-        or manifest.get("schema")
-        or "seiso"
+        manifest.get("pipeline") or manifest.get("method") or manifest.get("schema") or "seiso"
     )
-    if pipeline.startswith("seiso.adaptive_quant"):
-        pipeline = "adaptive_quant"
-    elif pipeline in {"lora", "qlora", "full", "slime", "nemo_rl"}:
+    if pipeline in {"lora", "qlora", "full", "slime", "nemo_rl"}:
         pipeline = "training"
     elif "format" in manifest and "file_checksums_sha256" in manifest:
         pipeline = "export"
 
-    run_id = str(
-        manifest.get("run_id")
-        or manifest.get("job_id")
-        or manifest.get("run_name")
-        or ""
-    )
+    run_id = str(manifest.get("run_id") or manifest.get("job_id") or manifest.get("run_name") or "")
     if not run_id and manifest_path is not None:
         # Hash directory names so attestation d-tags do not leak project path labels.
-        run_id = hashlib.sha256(
-            manifest_path.parent.name.encode("utf-8")
-        ).hexdigest()[:16]
+        run_id = hashlib.sha256(manifest_path.parent.name.encode("utf-8")).hexdigest()[:16]
     if not run_id:
         run_id = manifest_sha256_excluding_nostr(manifest)[:16]
     # Keep tag-safe (no whitespace).
     run_id = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in run_id)[:128]
-    pipeline = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in pipeline)[
-        :64
-    ]
+    pipeline = "".join(ch if ch.isalnum() or ch in "-_." else "_" for ch in pipeline)[:64]
     return pipeline, run_id
 
 
@@ -223,11 +209,7 @@ def _chain_or_root_sha256(manifest: dict[str, Any]) -> str | None:
             return content_fingerprint(value)
     stages = manifest.get("stages")
     if isinstance(stages, list) and stages:
-        digests = [
-            str(s.get("sha256"))
-            for s in stages
-            if isinstance(s, dict) and s.get("sha256")
-        ]
+        digests = [str(s.get("sha256")) for s in stages if isinstance(s, dict) and s.get("sha256")]
         if digests:
             return content_fingerprint(digests)
     checksums = manifest.get("file_checksums_sha256")
@@ -261,8 +243,7 @@ def build_attestation_v1(
         "run_id": run_id,
         "manifest_sha256": content_fingerprint(body),
         "config_fingerprint": (
-            str(manifest.get("config_fingerprint") or manifest.get("config_sha256") or "")
-            or None
+            str(manifest.get("config_fingerprint") or manifest.get("config_sha256") or "") or None
         ),
         "chain_or_root_sha256": _chain_or_root_sha256(manifest),
         "dataset_merkle_root": merkle_root,
@@ -294,9 +275,7 @@ def attestation_content_json(attestation: dict[str, Any]) -> str:
     )
 
 
-def merge_nostr_receipt(
-    manifest: dict[str, Any], receipt: dict[str, Any]
-) -> dict[str, Any]:
+def merge_nostr_receipt(manifest: dict[str, Any], receipt: dict[str, Any]) -> dict[str, Any]:
     """Return manifest copy with ``nostr`` receipt merged in."""
     out = dict(manifest)
     out["nostr"] = dict(receipt)

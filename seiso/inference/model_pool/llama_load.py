@@ -815,9 +815,7 @@ def _load_llama_model(
         try:
             from seiso.inference.llama_load_cache import get_cached_load_profile
 
-            cached = get_cached_load_profile(
-                path, n_ctx=effective_n_ctx, load_tier=load_tier
-            )
+            cached = get_cached_load_profile(path, n_ctx=effective_n_ctx, load_tier=load_tier)
         except Exception:
             cached = None
         if cached is not None:

@@ -17,9 +17,9 @@ Helper scripts (repo `scripts/`, not on `PATH`):
 
 | Command / script | Purpose |
 |------------------|---------|
-| `start` | Install or launch Forge — on `PATH` via `~/.local/bin` after install |
+| `start` | Install or launch the Seiso TUI — on `PATH` via `~/.local/bin` after install |
 | `./scripts/install.sh` | Lower-level installer (system deps, venv, pip extras, UI build) |
-| `./scripts/start.sh` | Lower-level launcher (`seiso forge --open`; used by `start`) |
+| `./scripts/start.sh` | Lower-level launcher (`seiso tui`; `SEISO_UI=forge` for the web API) |
 | `./scripts/doctor.sh` | Diagnose install, HF, GPU stack (runs automatically on install/start failure) |
 | `./scripts/precheck.sh` | Fast local CI gate (`make precheck`) |
 | `./scripts/install_flash_attn.sh` | Optional Flash Attention (Linux NVIDIA) |
@@ -32,7 +32,7 @@ Launch the Forge web server (API + built UI).
 
 ```bash
 seiso forge
-seiso forge --open             # open browser when /health is ready (default via start.sh)
+seiso forge --open             # open browser when /health is ready (opt-in; start defaults to TUI)
 seiso forge --reload          # auto-reload Python on code changes
 seiso forge --port 8766       # custom port
 ```
@@ -114,6 +114,22 @@ Terminal chat with a local model.
 seiso chat --model meta-llama/Llama-3.2-3B-Instruct --prompt "Hello"
 seiso chat --model /path/to/model.gguf   # interactive mode (omit --prompt)
 ```
+
+## `seiso tui`
+
+Default **workspace UI**. Copies the Forge sidebar, Chat, Hub, Dashboard, and studio pages — no browser. Hub searches Hugging Face live (not only files already on disk). `start` launches this.
+
+```bash
+seiso tui                 # terminal UI (also what `start` runs)
+seiso tui --list          # local GGUF inventory, smallest first
+seiso tui --model 1       # pick by index / path / name substring
+```
+
+**Move with the keyboard, then press Enter.** `↑`/`↓` or the mouse wheel scroll the highlighted `▸` row — the wheel never types into the box. `←`/`→` or Tab switch the sidebar and the page. Enter opens the highlighted item (a page, a local model, a Hub download, or a studio config). Type to chat, or start a `/command`. While typing, `←`/`→` move the caret; the wheel still scrolls the list.
+
+Same **Nostr account** as Forge: first launch creates a recovery key (`nsec`) or restores one; later sessions unlock from the saved session (24h, same JWT secret as the web UI) or by pasting the key / NIP-49 backup. Settings can rotate, import, sign out, or start a new session (`RESET`). Integrations toggles auto-attest and relays (`/relays wss://…`).
+
+Hub: `/search qwen`, or scroll to a row and press Enter to open (on disk) or download. Chat loads weights on the first message; `/unload` frees RAM/VRAM. Studio pages (`/train`, `/compress`, …) show the CLI — scroll a config and press Enter, or `/run configs/example_lora.yaml`. Optional web API: `SEISO_UI=forge start` or `seiso forge`.
 
 ## `seiso export`
 
@@ -218,72 +234,10 @@ Config references: `configs/distill_rl_smoke.json`, `configs/distill_rl_reproduc
 
 See [compression.md](compression.md).
 
-## `seiso rl-quant`
-
-Adaptive RL quantization + optional CUDA kernel profile co-training (`seiso.adaptive_quant`). **Auto-sweep** (default on) grid-searches learning rates before the full run.
-
-```bash
-# Fast smoke (simulator backend, analytic kernel metrics)
-seiso rl-quant run --preset minimal --training-episodes 256
-
-# Kernel RL — joint quant policy + CUDA launch profiles
-seiso rl-quant run --preset reproducible --kernel-rl --training-episodes 512
-
-# Live CUDA micro-benchmarks (NVIDIA GPU; slower, ground-truth)
-seiso rl-quant run --kernel-rl --kernel-live-benchmark
-
-# Disable hyperparameter sweep
-seiso rl-quant run --preset minimal --no-auto-sweep
-
-# Custom sweep grid (JSON/TOML)
-seiso rl-quant run --preset minimal --sweep-config configs/my_sweep.json
-
-# List tunable kernel profiles
-seiso rl-quant profiles
-
-# Machine-readable summary
-seiso rl-quant run --preset minimal --kernel-rl --json
-```
-
-Presets: `minimal` | `reproducible` | `post_train`. Backends: `simulator` (default) | `llama_cpp`.
-
-Outputs: `{SEISO_DATA_DIR}/rl_quant/cli/<job_id>/` (CLI user `cli`).
-
-Forge equivalent: **RL Quant** page (`/rl-quant`) or `POST /api/rl-quant/jobs`.
-
-Config reference: `configs/rl_quant_smoke.json`.
 
 ## `seiso experiment`
 
-Research benchmarks and regression studies (headless; no Forge server required).
-
-### `seiso experiment quant-regression`
-
-Train one model at several QLoRA quants, export GGUFs, and measure deployment-quant regression (HF merged-weight eval and/or llama.cpp route eval).
-
-```bash
-# Default study config (Qwen 3B + MetaMathQA)
-seiso experiment quant-regression
-
-# Custom base training YAML (quant overridden per run)
-seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml
-
-# Compare training quants and GGUF export variants
-seiso experiment quant-regression \
-  --quants 4bit,8bit,16bit \
-  --gguf-quants q4_k_m,q8_0,f16 \
-  --measurement both
-
-# Reuse checkpoints from a prior study
-seiso experiment quant-regression --study-dir ~/.seiso/experiments/my-study --skip-training
-
-# Machine-readable report
-seiso experiment quant-regression --json
-```
-
-Requires `.[train]` and `llama.cpp` (`LLAMA_CPP_DIR` or system `convert_hf_to_gguf`) for GGUF export / route eval. Outputs land under the study `output_dir` from the base YAML (default example: `~/.seiso/experiments/quant-regression-qwen3b-metamath/`).
-
-Config reference: `configs/examples/quant_regression_study.yaml`.
+Adaptive RL quantization and quant-regression studies moved to the standalone [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization) research repo. The product CLI keeps an `experiment` group that prints a pointer when invoked without subcommands.
 
 ## `seiso provenance`
 
@@ -310,6 +264,118 @@ seiso provenance dataset-verify-proof proof.json --manifest path/to/seiso_manife
 See [provenance-nostr.md](provenance-nostr.md) for Forge UI settings, auto-attest
 (`SEISO_NOSTR_ATTEST=1`), privacy limits / non-goals, and how this relates to
 `seiso compress manifest-verify`.
+
+## `seiso pay` (opt-in marketplace)
+
+> **Not functional yet — do not use.** Scaffolding only. Do not run for production or real funds.
+
+Remote sats marketplace for inference / finetune / RL. **Self-hosted stays free** —
+do not enable this for local-only use. Requires `SEISO_ALLOW_PAY=1`.
+
+Settlement payment methods (all live rails **not functional yet — do not use**):
+**Ark** addresses (`SEISO_OPERATOR_ARK`, `SEISO_PROTOCOL_TREASURY_ARK`) and
+**L402** (Lightning HTTP 402 — see [marketplace.md](pay/marketplace.md) and
+[L402 explained](https://lightningfaucet.com/learn/l402-payments-explained/)).
+Without a treasury Ark and without `SEISO_PAY_FAUCET=1`, paid settles fail closed.
+**Ark chain settlement is not functional currently** — `SEISO_ARK_BACKEND=bark|second`
+is reserved for a future client wire; leave unset or use faucet for smoke tests.
+**L402 is not functional for live Lightning** — use `SEISO_PAY_L402_SIM=1`
+(or faucet) for simulated fund/exchange; see marketplace docs.
+
+```bash
+export SEISO_ALLOW_PAY=1
+export SEISO_PAY_FAUCET=1   # dev only — never on a public market
+# export SEISO_PROTOCOL_TREASURY_ARK=ark1…
+# export SEISO_OPERATOR_ARK=ark1…
+seiso pay quote --type finetune --preset smoke
+seiso pay session create --sats 20000 --scopes inference,finetune,rl
+# seiso pay session fund --session ID --sats 20000 --l402   # sim L402
+seiso pay job start --type finetune --preset smoke --dry-run
+seiso pay serve --host 127.0.0.1 --port 8787   # operator sidecar
+```
+
+Default protocol fee is 5% (`SEISO_PROTOCOL_FEE_BPS=500`) added on top of compute.
+Failed/cancelled jobs refund escrow to the prepaid session balance (not Lightning).
+See [pay/marketplace.md](pay/marketplace.md).
+
+## `seiso mesh` (experimental secondary)
+
+> **Secondary / opt-in.** Local single-node Forge/CLI stays primary. Mesh is
+> Buzz-agent-only multi-node coordination — not available from the Forge UI.
+
+Buzz-**agent**-only multi-node / shared training. Opt-in (`SEISO_ALLOW_MESH=1` +
+valid `BUZZ_PRIVATE_KEY` nsec); plans are **NIP-01 / BIP-340** signed. **No**
+protocol fee. Forge UI keeps full local training config (`nnodes=1`) and refuses
+mesh — see `GET /api/training/surface`. Share `SEISO_MESH_TOKEN` (≥16 chars)
+out-of-band. **Relay only with signing:** the signed `nostr_event` (NIP-01 +
+BIP-340) is channel authority — unsigned receipts are local pointers.
+Seiso does not NIP-98 to the relay. On Buzz, embed `nostr_event` JSON in a
+kind-9 `buzz messages send` (Buzz rejects `--kind 31251–31254`).
+
+```bash
+export SEISO_ALLOW_MESH=1
+export SEISO_MESH_TOKEN=…   # ≥16 chars; out-of-band; never post to Buzz
+export BUZZ_PRIVATE_KEY=nsec1…   # must be a valid Nostr secret (signing key)
+# optional but recommended: export SEISO_MESH_TRUSTED_NPUBS=npub1planner…
+# (required unless SEISO_MESH_ALLOW_ANY_PLANNER=1 for single-operator smoke)
+seiso mesh announce --channel "$CHANNEL" --gpus 2 >announce.json
+jq -c .nostr_event announce.json | buzz messages send --channel "$CHANNEL" --content -
+seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2 --master-addr 10.0.0.1 --gpus-per-node 2 >plan.json
+jq -c .nostr_event plan.json | buzz messages send --channel "$CHANNEL" --content -
+# peers:
+seiso mesh import-plan --event plan_event.json
+seiso mesh worker --plan "$JOB_ID" --rank 0 -c configs/smoke_train_gpu.yaml --dry-run
+seiso mesh worker --plan "$JOB_ID" --rank 1 -c configs/smoke_train_gpu.yaml --launch --confirm-launch
+```
+
+## `seiso route`
+
+Model-aware picker. Prints a `RouteDecision` JSON from local inventory (no GPU).
+
+```bash
+seiso route --task chat --context 8192 --vram-mb 8192 \
+  --inventory-json '[{"model_id":"qwen-7b","backend":"llamacpp","role":"chat","context_tokens":8192,"vram_mb":5000,"downloaded":true,"params_b":7}]'
+# Optional localhost external router when nothing local fits:
+seiso route --task chat --external --router-url http://127.0.0.1:8780 --inventory-json '[]'
+```
+
+See [ROADMAP.md](../ROADMAP.md) pillar 3.
+
+## `seiso agent` (decide / plan / Buzz-facing signed status)
+
+```bash
+# Where should this job run? (local → mesh → pay → ask_human)
+seiso agent decide --job finetune --local-healthy
+seiso agent decide --job slime --no-local-healthy --mesh-peers --route-class local_then_mesh
+
+# One-step harness plan (default --dry-run: no jobs)
+seiso agent plan --dry-run --task chat --goal "smoke chat"
+
+# Optional coding harnesses (Pi / OMP / Hermes / Cline / OpenClaw)
+seiso agent harnesses
+seiso agent endpoint --source auto
+seiso agent swarm --dry-run --harness hermes --goal "smoke"
+seiso agent swarm --dry-run --subagents --preset pair --goal "add tests"
+```
+
+Prefer these over ad-hoc scripts; they call `decide_compute` and `run_harness`.
+
+`seiso agent swarm` stays **dry-run by default**. `--run` starts the selected harness as a headless worker. Seiso subagents (planner / completion / correctness / synthesizer) default **off**. Configure them in `seiso tui` Settings (`/harness`, `/subagents`, `/agent`). See [tui-harnesses.md](tui-harnesses.md).
+
+## `seiso agent status` (Buzz-facing signed status)
+
+Generic agent milestones use the same **relay only with signing** policy as mesh:
+
+```bash
+export BUZZ_PRIVATE_KEY=nsec1…
+seiso agent status --role train --status started --channel "$CHANNEL" --job-id "$JOB" >status.json
+jq -c .nostr_event status.json | buzz messages send --channel "$CHANNEL" --content -
+# buzz_receipt is a local pointer only — not channel authority
+```
+
+Prefer local → mesh → paid marketplace when orchestrating from a Buzz agent
+([seiso-orchestrate skill](../.agents/skills/seiso-orchestrate/SKILL.md)).
+See [training/mesh.md](training/mesh.md).
 
 ## External Smart Router
 
@@ -368,6 +434,4 @@ See [training/multi-gpu.md](training/multi-gpu.md).
 | Knowledge ingest / retrieve | `/knowledge` | `/api/knowledge` |
 | Recipe graph jobs | `/recipes` | `/api/recipes` |
 
-Compression and distill-RL pipelines also have CLI equivalents (`seiso compress run`, `seiso distill-rl run`, `seiso rl-quant run`).
-
-Prefer `seiso rl-quant run` for the integrated pipeline; the bundled `seiso.adaptive_quant` package provides the research internals.
+Compression and distill-RL pipelines also have CLI equivalents (`seiso compress run`, `seiso distill-rl run`).

@@ -29,9 +29,7 @@ _ALLOW_ANY_LOOPBACK_PORT = True
 # Remote multi-GPU chat servers (HTTPS only, no loopback). Canonical + legacy alias.
 _REMOTE_CHAT_TYPES = frozenset({"remote_chat", "vllm_cloud"})
 # CGNAT / shared-address space (RFC 6598) — not covered by ipaddress.is_private.
-_BLOCKED_NETWORKS = (
-    ipaddress.ip_network("100.64.0.0/10"),
-)
+_BLOCKED_NETWORKS = (ipaddress.ip_network("100.64.0.0/10"),)
 
 
 def _literal_ip(host: str) -> ipaddress.IPv4Address | ipaddress.IPv6Address | None:
@@ -52,8 +50,7 @@ def _is_local_host(host: str) -> bool:
     except SecurityError:
         return False
     return bool(addrs) and all(
-        (parsed := _literal_ip(addr)) is not None and parsed.is_loopback
-        for addr in addrs
+        (parsed := _literal_ip(addr)) is not None and parsed.is_loopback for addr in addrs
     )
 
 
@@ -96,9 +93,7 @@ def validate_provider_base_url(url: str, *, provider_type: str = "local_chat") -
         if ptype in _LOCAL_CHAT_TYPES:
             return "http://127.0.0.1:8000"
         if ptype in _REMOTE_CHAT_TYPES:
-            raise SecurityError(
-                "remote_chat base_url is required (HTTPS remote chat server)"
-            )
+            raise SecurityError("remote_chat base_url is required (HTTPS remote chat server)")
         raise SecurityError(f"Unsupported provider_type: {provider_type}")
 
     parsed = urlparse(raw)
@@ -115,10 +110,21 @@ def validate_provider_base_url(url: str, *, provider_type: str = "local_chat") -
         raise SecurityError("base_url host is not allowed")
 
     scheme = parsed.scheme.lower()
-    local_ok = ptype in _LOCAL_CHAT_TYPES and _is_local_host(host)
     remote_chat = ptype in _REMOTE_CHAT_TYPES
+    is_local_type = ptype in _LOCAL_CHAT_TYPES
+    host_is_local = _is_local_host(host)
 
-    if remote_chat and _is_local_host(host):
+    # local_chat/vllm are loopback-only. Public HTTPS belongs on remote_chat
+    # (gated by SEISO_ALLOW_CLOUD_MULTIGPU) — never via the local type.
+    if is_local_type and not host_is_local:
+        raise SecurityError(
+            "local_chat base_url must be a loopback host "
+            "(use type remote_chat for remote HTTPS chat servers)"
+        )
+
+    local_ok = is_local_type and host_is_local
+
+    if remote_chat and host_is_local:
         raise SecurityError(
             "remote_chat base_url must be a remote HTTPS host "
             "(use type local_chat for loopback multi-GPU servers)"
@@ -129,9 +135,7 @@ def validate_provider_base_url(url: str, *, provider_type: str = "local_chat") -
         raise SecurityError("base_url host is not allowed")
 
     if scheme == "http" and not local_ok:
-        raise SecurityError(
-            "base_url must use HTTPS (http allowed only for local chat servers)"
-        )
+        raise SecurityError("base_url must use HTTPS (http allowed only for local chat servers)")
     if scheme not in ("http", "https"):
         raise SecurityError("base_url scheme must be http or https")
     if remote_chat and scheme != "https":
@@ -143,9 +147,7 @@ def validate_provider_base_url(url: str, *, provider_type: str = "local_chat") -
             raise SecurityError("Local chat server base_url port out of range")
         allowed = _LOCAL_DEFAULT_PORTS.get(ptype) or _LOCAL_DEFAULT_PORTS["local_chat"]
         if port not in allowed and not _ALLOW_ANY_LOOPBACK_PORT:
-            raise SecurityError(
-                f"Local chat server base_url must use port {sorted(allowed)}"
-            )
+            raise SecurityError(f"Local chat server base_url must use port {sorted(allowed)}")
     else:
         for addr in _resolve_host(host):
             if _is_blocked_ip(addr):
@@ -173,9 +175,7 @@ class PinnedEndpoint:
     pinned_ip: str | None
 
 
-def resolve_pinned_endpoint(
-    raw_url: str, *, provider_type: str = "local_chat"
-) -> PinnedEndpoint:
+def resolve_pinned_endpoint(raw_url: str, *, provider_type: str = "local_chat") -> PinnedEndpoint:
     """Validate URL, resolve DNS, and return an endpoint pinned to the resolved IP."""
     base = validate_provider_base_url(raw_url, provider_type=provider_type).rstrip("/")
     parsed = urlparse(base)
@@ -187,19 +187,14 @@ def resolve_pinned_endpoint(
     # DNS names that currently resolve to loopback must still be pinned so a
     # later rebinding cannot reach link-local/metadata after registration.
     literal = _literal_ip(host)
-    local_literal = host in _LOCAL_HTTP_HOSTS or (
-        literal is not None and literal.is_loopback
-    )
+    local_literal = host in _LOCAL_HTTP_HOSTS or (literal is not None and literal.is_loopback)
     # Literal loopback / localhost need no DNS pin.
     if ptype in _LOCAL_CHAT_TYPES and local_literal:
-        return PinnedEndpoint(
-            base_url=base, host=host, port=port, scheme=scheme, pinned_ip=None
-        )
+        return PinnedEndpoint(base_url=base, host=host, port=port, scheme=scheme, pinned_ip=None)
 
     addrs = _resolve_host(host)
     all_loopback = bool(addrs) and all(
-        (parsed_ip := _literal_ip(addr)) is not None and parsed_ip.is_loopback
-        for addr in addrs
+        (parsed_ip := _literal_ip(addr)) is not None and parsed_ip.is_loopback for addr in addrs
     )
     # DNS names that resolve only to loopback must still be pinned so a later
     # rebinding cannot reach link-local/metadata after registration.
@@ -212,9 +207,7 @@ def resolve_pinned_endpoint(
         if _is_blocked_ip(addr):
             raise SecurityError("base_url resolves to a blocked network range")
 
-    return PinnedEndpoint(
-        base_url=base, host=host, port=port, scheme=scheme, pinned_ip=addrs[0]
-    )
+    return PinnedEndpoint(base_url=base, host=host, port=port, scheme=scheme, pinned_ip=addrs[0])
 
 
 def validate_nostr_relay_url(
@@ -226,6 +219,4 @@ def validate_nostr_relay_url(
     """Validate a Nostr relay URL (wss / loopback ws) against SSRF policy."""
     from seiso.research.nostr.policy import validate_relay_url
 
-    return validate_relay_url(
-        url, allowlist=allowlist, allow_loopback=allow_loopback
-    )
+    return validate_relay_url(url, allowlist=allowlist, allow_loopback=allow_loopback)

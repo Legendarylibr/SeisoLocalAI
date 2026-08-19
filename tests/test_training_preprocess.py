@@ -54,10 +54,7 @@ def test_normalize_alpaca_strips_and_requires_output():
         DatasetFormat.ALPACA,
     )
     assert row == {"instruction": "hi", "output": "hello"}
-    assert (
-        normalize_sample({"instruction": "x", "output": ""}, DatasetFormat.ALPACA)
-        is None
-    )
+    assert normalize_sample({"instruction": "x", "output": ""}, DatasetFormat.ALPACA) is None
 
 
 def test_normalize_preserves_newlines_and_indentation():
@@ -114,14 +111,7 @@ def test_normalize_trims_single_line_prose_only():
 
 
 def test_parse_human_assistant_preserves_code_blocks():
-    text = (
-        "Human: Fix this\n\n"
-        "Assistant:\n"
-        "```python\n"
-        "def add(a, b):\n"
-        "    return a + b\n"
-        "```"
-    )
+    text = "Human: Fix this\n\nAssistant:\n```python\ndef add(a, b):\n    return a + b\n```"
     messages = parse_human_assistant_dialog(text)
     assert messages[-1]["role"] == "assistant"
     assert "def add(a, b):\n    return a + b" in messages[-1]["content"]
@@ -160,9 +150,7 @@ def test_preprocess_drops_invalid_and_duplicates():
             {"instruction": "b", "output": ""},
         ]
     )
-    cleaned, stats, fmt = preprocess_training_dataset(
-        ds, dataset_format=DatasetFormat.ALPACA
-    )
+    cleaned, stats, fmt = preprocess_training_dataset(ds, dataset_format=DatasetFormat.ALPACA)
     assert fmt == DatasetFormat.ALPACA
     assert len(cleaned) == 1
     assert stats["removed_invalid"] == 1
@@ -176,12 +164,7 @@ def test_compute_eval_split_size_caps_holdout():
 
 
 def test_parse_human_assistant_dialog_multiturn():
-    text = (
-        "\n\nHuman: What is 2+2?\n\n"
-        "Assistant: 4\n\n"
-        "Human: And 3+3?\n\n"
-        "Assistant: 6"
-    )
+    text = "\n\nHuman: What is 2+2?\n\nAssistant: 4\n\nHuman: And 3+3?\n\nAssistant: 6"
     messages = parse_human_assistant_dialog(text)
     assert len(messages) == 4
     assert messages[0] == {"role": "user", "content": "What is 2+2?"}

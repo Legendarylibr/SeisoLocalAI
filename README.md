@@ -1,18 +1,21 @@
 # Seiso Local AI
 
+Going to work on a self hosted mirror then merge large changes (maybe waiting till it's done) to reduce ci/github actions
+
 [![CI](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml)
 
 **Seiso** is a **local-first AI platform** that runs entirely on your machine: chat with open models, fine-tune them (LoRA / QLoRA), post-train, quantize, compress, and export or publish to the Hugging Face Hub — through one Forge web UI and a matching CLI. Weights, prompts, and datasets stay on your hardware unless you choose to share them; no cloud account is required for day-to-day work.
 
 **Repository:** [github.com/Legendarylibr/SeisoLocalAI](https://github.com/Legendarylibr/SeisoLocalAI)  
 **License:** [GPL-3.0](LICENSE) · **Contributing:** [CONTRIBUTING.md](CONTRIBUTING.md)  
-**Docs:** [docs/README.md](docs/README.md)
+**Docs:** [docs/README.md](docs/README.md) · **Roadmap:** [ROADMAP.md](ROADMAP.md)
 
 ---
 
 ## Table of contents
 
 - [What Seiso does](#what-seiso-does)
+- [Roadmap](#roadmap)
 - [Quick start](#quick-start)
 - [Forge UI walkthrough](#forge-ui-walkthrough)
 - [CLI reference](#cli)
@@ -23,6 +26,7 @@
 - [Compat API](#compat-api)
 - [Development](#development)
 - [Security](#security)
+- [Opt-in marketplace & Buzz mesh](#opt-in-marketplace--buzz-mesh)
 - [Reporting vulnerabilities](SECURITY.md)
 - [Documentation index](#documentation-index)
 - [Inference stack](#inference-stack)
@@ -35,7 +39,7 @@ Seiso combines a **web workspace (Forge)** and a **Python core (CLI + library)**
 
 | Workflow | Forge UI | CLI |
 |----------|----------|-----|
-| Download & chat with open models | Model Hub, Chat | `seiso chat` |
+| Download & chat with open models | Model Hub, Chat | `seiso chat` / `seiso tui` |
 | QLoRA / LoRA / full fine-tune | Training Studio | `seiso train` |
 | Single-GPU slime post-training | CLI | `seiso train --config configs/example_training_slime.yaml` |
 | Multi-GPU slime (vLLM rollouts) | CLI | `scripts/run_slime_vllm_ddp.sh 2 configs/example_training_slime_vllm.yaml` |
@@ -43,9 +47,10 @@ Seiso combines a **web workspace (Forge)** and a **Python core (CLI + library)**
 | Merge, GGUF, Hub publish | Export | `seiso export` |
 | LLM distill → prune → quant | Compress | `seiso compress run` |
 | Teacher distill + DPO alignment | Distill-RL | `seiso distill-rl run` |
-| RL quant + CUDA kernel policy | RL Quant | `seiso rl-quant run` |
 | Visual data/recipe pipelines | Recipe Studio | — |
 | RAG knowledge bases | Knowledge | — |
+| Opt-in remote sats marketplace (Ark + L402) — **not functional, do not use yet** | — | `seiso pay` ([docs](docs/pay/marketplace.md)) |
+| Experimental Buzz shared / multi-node train — **not functional, do not use yet** | — | `seiso mesh` ([docs](docs/training/mesh.md)) |
 
 **Why local-first?**
 
@@ -65,10 +70,18 @@ Runs on **Windows**, **Linux**, **WSL2**, and **macOS**. See [docs/platforms/](d
 
 ---
 
+## Roadmap
+
+The goal is a **local agentic operating system**: a harness on your machine, **model-aware routing** (local models plus an optional external router), and an opt-in **marketplace** for distributed inference and training paid in Bitcoin / Lightning / crypto. Self-hosted stays free. There is no Seiso token.
+
+Full write-up: **[ROADMAP.md](ROADMAP.md)**.
+
+---
+
 ## Quick start
 
 **Forge URL (all platforms):** [http://127.0.0.1:8765](http://127.0.0.1:8765)  
-On first launch, **generate a key** in the browser (write down the one-time `nsec` → Continue; `npub` is your public identity), or import an existing `nsec`.
+On first launch, **create a local account** in the browser (save the one-time recovery key → continue; public ID is safe to share), or restore from a saved recovery key.
 
 ### Paths on your system
 
@@ -125,7 +138,7 @@ What the installer does:
 2. Creates `.venv` and installs platform extras (CUDA on Linux + NVIDIA, MLX on macOS, GGUF support)
 3. Copies `.env.example` → `.env` if missing
 4. Builds `forge-ui/dist`
-5. Runs `seiso forge` and opens the browser
+5. Runs `seiso tui` (terminal UI; no browser)
 
 On native Linux + NVIDIA, the `linux-nvidia` profile installs **Ollama**
 (Ollama-first isolated GGUF chat), seeds sidecar `.env` defaults, and verifies
@@ -203,7 +216,7 @@ seiso forge               # http://127.0.0.1:8765
 seiso forge --open        # same, and open the browser
 ```
 
-On first launch, **generate a key** (write down the one-time `nsec` → Continue; `npub` is your public identity) or import an `nsec` in the browser. User data (models, checkpoints, exports) lives in `~/.seiso` unless you set `SEISO_DATA_DIR`.
+On first launch, **create a local account** (save the one-time recovery key → continue; public ID is safe to share) or restore a recovery key in the browser. User data (models, checkpoints, exports) lives in `~/.seiso` unless you set `SEISO_DATA_DIR`.
 
 **Later sessions:** `cd "$HOME/Seiso" && source .venv/bin/activate && seiso forge`, or use `start` from the repo root after `scripts/install.sh` has registered it.
 
@@ -353,7 +366,6 @@ After `seiso forge` (or `start`), browse to **http://127.0.0.1:8765**:
 | Export | `/export` | Merge LoRA, GGUF quant, Hugging Face publish |
 | Compress | `/compress` | LLM distill → prune (Llama-family) → finetune → quant |
 | Distill-RL | `/distill-rl` | Teacher → student distillation + DPO (auto-sweep) |
-| RL Quant | `/rl-quant` | Adaptive GGUF quantization via RL (auto-sweep) |
 | Recipe Studio | `/recipes` | Visual `@xyflow/react` graph editor |
 | Integrations | `/integrations` | Route to OpenAI, Anthropic, vLLM |
 | Knowledge | `/knowledge` | RAG corpus ingest and retrieval |
@@ -375,35 +387,31 @@ Forge details: **[docs/forge.md](docs/forge.md)**
 | `seiso slime` | Single-process slime GRPO post-train (also `seiso train -c … method: slime`) |
 | `seiso nemo-rl` | Launch external [NVIDIA NeMo RL](https://github.com/NVIDIA-NeMo/RL) (`method: nemo_rl`; requires `SEISO_NEMO_RL_ROOT`) |
 | `seiso chat` | Terminal chat with local models |
+| `seiso tui` | Lightweight offline terminal UI that mimics Forge (arrow keys + Enter; no browser) |
 | `seiso export` | Export merged / GGUF / LoRA + Hub push |
 | `seiso compress run` | LLM compression pipeline |
 | `seiso compress manifest-verify` | Verify hash-chained run manifest |
 | `seiso compress speculative` | Speculative decoding (draft + target) |
 | `seiso distill-rl run` | Teacher distill → preference rollouts → DPO |
 | `seiso distill-rl presets` | List distill-RL presets and stages |
-| `seiso rl-quant run` | RL quantization (+ optional `--kernel-rl`) |
-| `seiso rl-quant profiles` | List CUDA kernel RL launch profiles |
-| `seiso experiment quant-regression` | Multi-quant train + GGUF export + deploy-quant regression study |
 | `seiso inference` | One-shot inference |
 | `seiso bench-inference` | Inference load / TTFT / tok/s benchmark |
 | `seiso-bench-kernels` | Benchmark fused GPU training kernels |
 | `seiso-train-worker` | Multi-GPU worker (via `torchrun`, see docs) |
+| `seiso pay` | Opt-in sats marketplace client / operator sidecar (`SEISO_ALLOW_PAY=1`) |
+| `seiso mesh` | Experimental Buzz-coordinated multi-node mesh (`SEISO_ALLOW_MESH=1`) |
+| `seiso provenance` | Nostr digest attestation / membership proofs |
 
 ```bash
 # Example: fine-tune Llama 3.2 3B on sample data (CLI → ./outputs/lora-run/)
 seiso train --config configs/example_lora.yaml
-
 # Example: export CLI checkpoint to GGUF
 seiso export --checkpoint ./outputs/lora-run/checkpoint-<timestamp> --formats merged,gguf
-
-# Example: RL quant with CUDA kernel co-training
-seiso rl-quant run --preset minimal --kernel-rl --training-episodes 256
 
 # Example: distill-RL smoke (teacher → DPO)
 seiso distill-rl run --preset smoke
 
 # Example: quant regression study (train → export → eval)
-seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml
 ```
 
 Full reference: **[docs/cli.md](docs/cli.md)**
@@ -419,8 +427,6 @@ Seiso/
 ├── forge/              # FastAPI backend, auth, orchestrators, SSE job streaming
 ├── forge-ui/           # React 19 + TypeScript + Vite frontend
 ├── seiso/codellama_compress/ # Bundled LLM compression implementation
-├── seiso/adaptive_quant/     # Bundled adaptive RL quant implementation
-├── seiso/analysis/           # RL quant analysis CLI/helpers
 ├── configs/            # Example YAML/JSON configs
 ├── deploy/             # Caddy, nginx, systemd, HTTPS env templates
 ├── docs/               # Documentation
@@ -439,7 +445,7 @@ Backend orchestrators spawn isolated workers with **SSE log streaming**:
 | `forge/orchestrators/knowledge` | RAG ingest and retrieve |
 | `forge/orchestrators/compress` | LLM distillation, pruning, quant |
 | `forge/orchestrators/distill_rl` | Teacher distill + DPO preference alignment |
-| `forge/orchestrators/rl_quant` | Adaptive RL GGUF quant policy |
+| `` | Adaptive RL GGUF quant policy |
 | `forge/orchestrators/hub_publish` | Hugging Face Hub publish jobs (via Export) |
 
 Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused CUDA/Triton kernels**.
@@ -463,7 +469,10 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 
 ---
 
-## Features in depth
+## Features
+
+> Adaptive RL quantization research: [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization).
+ in depth
 
 ### Training
 
@@ -471,6 +480,8 @@ Training stack: **TRL `SFTTrainer`** + **PEFT** (LoRA/QLoRA) + optional **fused 
 - **Formats:** JSONL chat datasets with auto format detection
 - **Optimizations:** gradient checkpointing, packing, RSLoRA, train-on-responses-only
 - **Multi-GPU:** `torchrun` distributed workers; rank-0 checkpoint writes ([multi-gpu](docs/training/multi-gpu.md))
+- **Buzz mesh (experimental) — not functional, do not use yet:** opt-in peer coordination for shared / multi-node jobs ([mesh](docs/training/mesh.md))
+- **Opt-in sats marketplace — not functional, do not use yet:** remote finetune/RL/inference with Ark + L402 settlement + protocol fee ([marketplace](docs/pay/marketplace.md))
 - **Fused kernels:** RMSNorm, SwiGLU MLP, cross-entropy, fused LoRA delta ([kernels](docs/training/kernels.md))
 - **Release-style post-training:** `method: slime` adds rollout rewards, verifier data, best/final checkpoints, and plateau auto-stop; multi-GPU rollouts can use **vLLM** (`rollout_backend: vllm`) or SGLang ([training](docs/training/quickstart.md#slime-post-training))
 - **External NeMo RL:** `method: nemo_rl` shells out to a local [NVIDIA-NeMo/RL](https://github.com/NVIDIA-NeMo/RL) checkout via `uv run` (not vendored); see [NeMo RL](docs/training/quickstart.md#nemo-rl)
@@ -505,7 +516,6 @@ Three integrated pipelines ([compression.md](docs/compression.md)):
 
 1. **LLM compression** — distill → MLP prune (Llama-family) → recovery finetune → GPTQ/AWQ → speculative decoding. Any HF causal LM; override teacher/student via CLI or Forge.
 2. **Distill-RL** — teacher KL distillation → preference rollouts → DPO fine-tuning with auto hyperparameter sweep (`seiso distill-rl run`)
-3. **RL quantization** — train a policy for adaptive GGUF quant levels with auto sweep (`seiso rl-quant run`, optional `--kernel-rl`)
 
 ---
 
@@ -529,7 +539,6 @@ All user data lives under **`SEISO_DATA_DIR`** (default below):
 ├── checkpoints/      # Training outputs (per user)
 ├── exports/          # Merged / GGUF / LoRA exports
 ├── compress/         # LLM compression artifacts
-├── rl_quant/         # RL quant outputs
 ├── distill_rl/       # Distillation / RL artifacts
 ├── recipes/          # Recipe Studio job data
 ├── uploads/          # Datasets and user files
@@ -628,6 +637,8 @@ Deploy configs: [`deploy/`](deploy/) · Guide: [docs/deployment/reverse-proxy.md
 | `SEISO_ALLOW_TOOLS=true` | Web search, artifact writes |
 | `SEISO_ALLOW_CODE_EXEC=true` | Sandboxed `execute_code` tool |
 | `SEISO_ALLOW_COMPAT_TOOLS=true` | Tool calling on Compat API `/v1` (session JWT only; inference API key stays chat-only) |
+| `SEISO_ALLOW_PAY=1` | Opt-in sats marketplace sidecar (remote buyers; self-hosted stays free) |
+| `SEISO_ALLOW_MESH=1` | Experimental Buzz mesh coordination (trusted peers; no protocol fee) |
 
 ### Path sandbox & tenant isolation
 
@@ -652,6 +663,9 @@ export SEISO_ALLOW_TOOLS=false
 export SEISO_ALLOW_CODE_EXEC=false
 export SEISO_ALLOW_COMPAT_TOOLS=false
 export SEISO_SECRET_KEY="$(openssl rand -hex 32)"
+# If you run a public pay sidecar: leave SEISO_PAY_FAUCET unset/off;
+# require SEISO_PROTOCOL_TREASURY_ARK + TLS in front of seiso pay serve.
+# Leave SEISO_ALLOW_PAY / SEISO_ALLOW_MESH unset unless you intentionally opt in.
 ```
 
 ---
@@ -666,6 +680,7 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 
 | Topic | Guide |
 |-------|-------|
+| **Roadmap (agentic OS, harness, routing, marketplace)** | [ROADMAP.md](ROADMAP.md) |
 | **Getting started (full walkthrough)** | [docs/getting-started.md](docs/getting-started.md) |
 | Install & extras | [docs/install.md](docs/install.md) |
 | Documentation hub | [docs/README.md](docs/README.md) |
@@ -676,6 +691,9 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 | NeMo RL (external) | [docs/training/quickstart.md § NeMo RL](docs/training/quickstart.md#nemo-rl) |
 | GPU kernels | [docs/training/kernels.md](docs/training/kernels.md) |
 | Multi-GPU | [docs/training/multi-gpu.md](docs/training/multi-gpu.md) |
+| Opt-in sats marketplace (Ark + L402) | [docs/pay/marketplace.md](docs/pay/marketplace.md) |
+| Buzz mesh shared training | [docs/training/mesh.md](docs/training/mesh.md) |
+| Buzz agent orchestration skill | [`.agents/skills/seiso-orchestrate/`](.agents/skills/seiso-orchestrate/SKILL.md) |
 | Inference backends | [docs/inference/backends.md](docs/inference/backends.md) |
 | Compression | [docs/compression.md](docs/compression.md) |
 | HTTPS deployment | [docs/deployment/reverse-proxy.md](docs/deployment/reverse-proxy.md) |
@@ -683,6 +701,39 @@ Seiso is licensed under the **GNU General Public License v3.0 (GPL-3.0)**. See [
 | Local CI | [docs/CI_LOCAL.md](docs/CI_LOCAL.md) |
 | Security policy / reporting | [SECURITY.md](SECURITY.md) |
 | External Smart Router | [Legendarylibr/SeisoModelRouter](https://github.com/Legendarylibr/SeisoModelRouter) |
+
+---
+
+## Opt-in marketplace & Buzz mesh
+
+Self-hosted Forge/CLI remain **free** and unchanged unless you opt in. Two optional surfaces:
+
+> **Pay not functional yet — do not use for real funds.** Opt-in **Ark / L402 marketplace** (`seiso pay`) is scaffolding / faucet-sim only. **Buzz mesh** (`seiso mesh`) is an **opt-in secondary** multi-node path (Buzz-agent-only; local Forge/CLI stays primary) — coordination, plan import, rank claim, config materialize, and optional `--launch` are wired; real multi-host still needs reachable peers + GPUs. Live Ark pay-in / Bark–Second settlement and live L402 (Lightning HTTP 402) are **not wired**. Use `SEISO_PAY_FAUCET=1` for local pay experiments only — never with real money or a public market.
+
+| Mode | Flag | Settlement | Protocol fee | Docs |
+|------|------|------------|--------------|------|
+| **Self-hosted** (default) | — | None | None | this README |
+| **Sats marketplace** | `SEISO_ALLOW_PAY=1` | Opt-in **Ark** + **L402** (**not functional — do not use yet**; faucet/sim only) | Default **5%** on top of compute | [pay/marketplace.md](docs/pay/marketplace.md) |
+| **Buzz mesh** (experimental secondary) | `SEISO_ALLOW_MESH=1` | Reciprocal peers; `SEISO_MESH_TOKEN` out-of-band | **None** | [training/mesh.md](docs/training/mesh.md) |
+
+```bash
+# Marketplace operator (Forge stays on localhost; expose pay sidecar + TLS only)
+export SEISO_ALLOW_PAY=1
+export SEISO_PROTOCOL_TREASURY_ARK=ark1…   # required for real settles (fail-closed)
+export SEISO_OPERATOR_ARK=ark1…
+# export SEISO_PAY_FAUCET=1               # dev only — never on a public market
+seiso pay serve --host 127.0.0.1 --port 8787
+
+# Buzz shared / multi-node coordination (trusted peers)
+export SEISO_ALLOW_MESH=1
+export SEISO_MESH_TOKEN='…'               # never post to Buzz
+seiso mesh announce --channel "$CHANNEL" --gpus 2
+seiso mesh plan --channel "$CHANNEL" --type finetune --nodes 2
+```
+
+Buzz agents should follow [`.agents/skills/seiso-orchestrate/`](.agents/skills/seiso-orchestrate/SKILL.md): prefer local free compute → mesh peers → paid marketplace → ask a human. Post receipts (job ids, fee split, mesh plan ids) to the channel; never post `SEISO_PAY_TOKEN`, `SEISO_MESH_TOKEN`, or `nsec`.
+
+`SEISO_ARK_BACKEND=bark|second` is **not functional currently** (reserved for a future Bark/Second client wire). L402 is advertised in discovery (`SEISO_PAY_L402`, default on) but **not functional currently** — see [L402 payments explained](https://lightningfaucet.com/learn/l402-payments-explained/). Until either rail is wired, use faucet/simulated settlement or leave backends unset.
 
 ---
 ## RL Stack
@@ -725,6 +776,10 @@ Seiso’s local chat builds on these inference projects:
 
 ## Distributed Training
 
-Distributed training integrates https://github.com/huggingface/accelerate to extend training configurations to multi-gpu distributed training.
+Distributed training integrates https://github.com/huggingface/accelerate to extend training configurations to multi-gpu distributed training. See [docs/training/multi-gpu.md](docs/training/multi-gpu.md).
+
+For **trusted peers** coordinating multi-node jobs over Buzz (opt-in, no marketplace fee), see [docs/training/mesh.md](docs/training/mesh.md) (`SEISO_ALLOW_MESH=1`). Remote paid capacity is separate: [docs/pay/marketplace.md](docs/pay/marketplace.md).
+
+For **Buzz-coordinated multi-node** (trusted peers, no marketplace fee), use experimental [`seiso mesh`](docs/training/mesh.md) with `SEISO_ALLOW_MESH=1`.
 
 Smart Router backend orchestration now lives in [SeisoModelRouter](https://github.com/Legendarylibr/SeisoModelRouter).

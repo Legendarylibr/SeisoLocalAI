@@ -118,7 +118,7 @@ bash start
    - **`chat` / fast** → `[forge,llamacpp]` (+ `mlx` on macOS)
    - Every path above includes `[forge]`, which pulls Nostr provenance relay deps (`websockets`) plus Forge auth crypto. Auth signing itself is pure-Python in-tree.
 4. **Copies** `.env.example` → `.env` if missing
-5. **Builds** the Forge UI with Bun when available (`bun install --frozen-lockfile`), or npm (`npm ci`) when Bun is missing / `SEISO_USE_NPM=1` — both locks live in `forge-ui/` and must stay in sync with `package.json` on **all** OSes
+5. **Builds** the Forge UI: on **Linux**, prefers `npm ci` + `package-lock.json` when Node 18+ is present (avoids the bun.lock drift / hung-`bun install` regression); on **macOS**, prefers Bun (`bun install --frozen-lockfile`) when available. Force either path with `SEISO_USE_NPM=1` or `SEISO_USE_BUN=1`. Both locks live in `forge-ui/` and must stay in sync with `package.json`
 6. **Installs sidecar stack** on native Linux NVIDIA (`linux-nvidia` profile: Ollama + health gate)
 7. **Starts** Forge (unless `SEISO_START=0`)
 
@@ -130,19 +130,24 @@ bash start
 | `SEISO_REPO_URL` | `https://github.com/Legendarylibr/SeisoLocalAI.git` | Git remote |
 | `SEISO_BRANCH` | `main` | Branch to clone |
 | `SEISO_SKIP_UI=1` | off | Skip Forge UI build |
+| `SEISO_FORCE_UI=1` | off | Rebuild `forge-ui` even when `dist/` already exists |
+| `SEISO_BUN_INSTALL_TIMEOUT_SEC` | `90` | Wall-clock timeout for `bun install` (timeout skips unfrozen retry and falls back to `npm ci`) |
 | `SEISO_START=0` | on (starts Forge) | Set to `0` to install without launching Forge |
 | `SEISO_NO_OPEN=1` | off | Do not open the browser after Forge starts |
 | `SEISO_NO_BANNER=1` | off | Skip install animation |
 | `SEISO_VERBOSE=1` | off | Show full pip/Bun output |
-| `SEISO_USE_NPM=1` | off | Use npm instead of Bun for `forge-ui` (Bun is default) |
+| `SEISO_USE_NPM=1` | off | Force npm for `forge-ui` (also auto-set after a Bun→npm fallback in the same process) |
+| `SEISO_USE_BUN=1` | off | On Linux, prefer Bun even when Node/npm 18+ is available |
 | `SEISO_USE_UV=0` | on (use uv if installed) | Use pip instead of uv for Python deps |
 | `SEISO_FAST_INSTALL=1` | off | Forge + GGUF chat only — skip PyTorch/training extras (same as `SEISO_INSTALL_PROFILE=chat`) |
 | `SEISO_INSTALL_PROFILE` | auto | Target stack: `linux-nvidia`, `linux-cpu`, `linux-rocm`, `wsl-nvidia`, `macos`, `chat` |
 | `SEISO_INSTALL_EXTRAS` | auto | Override pip extras directly (e.g. `forge,train,cuda,llamacpp`) |
 | `SEISO_SIDECAR_AUTOSTART=0` | on | Do not auto-start Ollama/llama-swap before Forge |
-| `SEISO_REQUIRE_SIDECAR=1` | on for linux-nvidia | Fail install/start when Ollama/llama-swap unavailable |
+| `SEISO_REQUIRE_SIDECAR=1` | off | Hard-fail install/start when Ollama/llama-swap unavailable (default is soft warn so install still completes) |
 | `SEISO_SKIP_OLLAMA_INSTALL=1` | off | Skip official Ollama installer during bootstrap |
-| `SEISO_SIDECAR_OPTIONAL=1` | off | Warn instead of hard-fail when sidecar missing |
+| `SEISO_SIDECAR_OPTIONAL=1` | off | Force soft-warn even if `SEISO_REQUIRE_SIDECAR=1` |
+| `SEISO_GIT_PULL=1` | off | On `start` / reinstall of an existing clone, `git pull --ff-only` (never force-resets local work) |
+| `SEISO_INSTALL_DEV=1` | off | Include `[dev]` extras (pytest, ruff, mypy, …) |
 | `SEISO_LLAMASWAP_ENGINE` | auto | Sidecar engine: `ollama` or `llamacpp` |
 | `SEISO_LLAMA_ALLOW_INPROCESS_NATIVE_LINUX=1` | off | Explicitly allow unsafe in-process llama.cpp on native Linux NVIDIA |
 
@@ -166,7 +171,7 @@ Run from the repository root:
 start
 ```
 
-Install registers `start` on your PATH (`~/.local/bin`). Open a new terminal if the command is not found yet.
+Install registers `seiso-start` and (when free) `start` on your PATH (`~/.local/bin`). Prefer `seiso-start` if `start` collides with another tool. Open a new terminal if the command is not found yet.
 
 First launch: open **http://127.0.0.1:8765**, **generate a key** (or import an `nsec`), write down the shown `nsec`, then Continue.
 
@@ -245,13 +250,14 @@ Use `npm ci && npm run build` instead when Bun is unavailable. Use `bun install`
 ### Linux + NVIDIA (recommended)
 
 ```bash
-pip install -e ".[forge,train,cuda,dev]"
+pip install -e ".[forge,train,cuda,llamacpp,dev]"
 ```
 
 Requirements:
 - NVIDIA driver (`nvidia-smi` works)
-- CUDA toolkit (`nvcc`) for JIT-compiled fused kernels
+- CUDA toolkit (`nvcc` / pip `cuda-toolkit`) for JIT-compiled fused kernels
 - PyTorch CUDA wheel (installed via `torch` dependency)
+- **Ollama** (or llama-swap) for isolated GGUF chat on bare-metal Linux — use the `linux-nvidia` bootstrap, or install Ollama yourself
 
 Optional Flash Attention 2 (Linux native filesystem only — not `/mnt/c/...` in WSL):
 
@@ -395,7 +401,7 @@ The `--network` option also checks `huggingface.co` reachability.
 
 Model storage notes:
 
-- Catalog chat downloads fetch a GGUF file into Seiso's Hugging Face cache (`$SEISO_DATA_DIR/hf_cache` by default) and register a local inventory link for GGUF chat. Native Linux NVIDIA serves GGUF through the llama-swap sidecar by default.
+- Catalog chat downloads fetch a GGUF file into Seiso's Hugging Face cache (`$SEISO_DATA_DIR/hf_cache` by default) and register a local inventory link for GGUF chat. Native Linux NVIDIA serves GGUF through **Ollama first**, with **llama-swap** as fallback (not in-process llama.cpp).
 - The Hub page shows the expected GGUF download size, usually 2-8 GB for small/medium Q4 models and 10-30+ GB for larger models.
 
 Walkthrough: [getting-started.md](getting-started.md)
@@ -404,24 +410,29 @@ Walkthrough: [getting-started.md](getting-started.md)
 
 ## Upgrade
 
-From an existing clone:
+From an existing clone (code + deps):
 
 ```bash
 cd "$HOME/Seiso"
 git pull origin main
 source .venv/bin/activate
 pip install -U pip
-pip install -e ".[forge,train,cuda,dev]"
-cd forge-ui && npm ci && npm run build && cd ..
+# Match your platform extras (examples):
+#   Linux NVIDIA:  .[forge,train,cuda,llamacpp]
+#   Linux CPU:     .[forge,train,llamacpp]
+#   macOS:         .[forge,train,llamacpp,mlx]
+pip install -e ".[forge,train,cuda,llamacpp]"
+cd forge-ui && bun install --frozen-lockfile && bun run build && cd ..
+# or: npm ci && npm run build
 ```
 
-Adjust the extras for your platform, for example `.[forge,train,mlx,dev]` on Apple Silicon.
-
-Or re-run the installer (idempotent):
+`start` / `seiso-start` alone **does not** pull new commits — it only fills missing venv packages and rebuilds the UI if needed. To upgrade code in one step:
 
 ```bash
-start
+SEISO_GIT_PULL=1 seiso-start   # or: SEISO_GIT_PULL=1 start
 ```
+
+That runs `git pull --ff-only` only (never `reset --hard` on a complete clone).
 
 ---
 

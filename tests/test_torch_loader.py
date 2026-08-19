@@ -297,9 +297,7 @@ def test_load_torch_falls_back_from_flash_attention_to_sdpa(monkeypatch):
         lambda prefer_fa3=True: "flash_attention_2",
     )
     monkeypatch.setattr("seiso.memory.protection.build_hf_max_memory", lambda: None)
-    monkeypatch.setattr(
-        "seiso.memory.protection.release_cached_memory", lambda **_kwargs: None
-    )
+    monkeypatch.setattr("seiso.memory.protection.release_cached_memory", lambda **_kwargs: None)
 
     model, _tokenizer = torch_loader.load_torch(
         LoadOptions(model_id="org/model"),

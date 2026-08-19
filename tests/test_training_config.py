@@ -1,6 +1,9 @@
 from pathlib import Path
 
+import pytest
+
 from seiso.training.config import QuantMode, TrainConfig, TrainMethod
+from seiso.training.trainer import SeisoTrainer
 
 
 def test_train_config_from_dict():
@@ -255,9 +258,7 @@ def test_product_slime_refuses_sub_floor_data_gen_count(tmp_path, monkeypatch):
         )
 
 
-def test_product_slime_refuses_data_gen_count_that_fails_held_out_split(
-    tmp_path, monkeypatch
-):
+def test_product_slime_refuses_data_gen_count_that_fails_held_out_split(tmp_path, monkeypatch):
     """256 validates as the corpus floor but fails after 10% auto-split."""
     monkeypatch.delenv("SEISO_ALLOW_TINY_RL", raising=False)
     import pytest
@@ -385,9 +386,7 @@ def test_train_config_rejects_slime_oversample_below_rollout_batch(tmp_path):
         )
 
 
-def test_train_config_rejects_slime_without_held_out_eval(
-    tmp_path: Path, monkeypatch
-):
+def test_train_config_rejects_slime_without_held_out_eval(tmp_path: Path, monkeypatch):
     import pytest
     from pydantic import ValidationError
 
@@ -467,3 +466,111 @@ def test_cloud_gpu_slime_vllm_accepts_engine_url():
     )
     assert cfg.vllm_base_url.startswith("http")
     cfg.to_single_gpu_slime_config().validate()
+
+
+def test_example_lora_uses_hub_dataset_not_toy_sample():
+    from seiso.training.config import TrainConfig
+
+    cfg = TrainConfig.from_yaml("configs/example_lora.yaml")
+    assert "sample.jsonl" not in str(cfg.dataset)
+    assert "/" in str(cfg.dataset)  # Hub id
+
+
+def test_eval_split_ratio_zero_skips_holdout_even_with_early_stopping(tmp_path):
+    cfg = TrainConfig.model_validate(
+        {
+            "model_id": "test/model",
+            "dataset": tmp_path / "data.jsonl",
+            "eval_split_ratio": 0,
+            "early_stopping": True,
+            "quant": "none",
+        }
+    )
+    trainer = SeisoTrainer(cfg)
+
+    class _DS:
+        def __len__(self):
+            return 100
+
+        def train_test_split(self, *args, **kwargs):
+            raise AssertionError("must not split when eval_split_ratio=0")
+
+    train_ds, eval_ds = trainer._split_train_eval(_DS())
+    assert eval_ds is None
+    assert len(train_ds) == 100
+
+
+def test_latest_checkpoint_dir_picks_highest_step(tmp_path: Path):
+    (tmp_path / "checkpoint-1").mkdir()
+    (tmp_path / "checkpoint-12").mkdir()
+    (tmp_path / "checkpoint-2").mkdir()
+    (tmp_path / "checkpoint-not-a-step").mkdir()
+    latest = SeisoTrainer._latest_checkpoint_dir(tmp_path)
+    assert latest is not None
+    assert latest.name == "checkpoint-12"
+
+
+def test_greater_is_better_for_loss_metrics():
+    from seiso.training.trainer import greater_is_better_for_metric
+
+    assert greater_is_better_for_metric("eval_loss") is False
+    assert greater_is_better_for_metric("loss") is False
+    assert greater_is_better_for_metric("train_loss") is False
+    assert greater_is_better_for_metric("eval_accuracy") is True
+    assert greater_is_better_for_metric("reward") is True
+
+
+def test_resolve_trust_remote_code_reads_top_level(tmp_path: Path):
+    from seiso.training.trainer import resolve_trust_remote_code
+
+    cfg = TrainConfig.model_validate(
+        {
+            "model_id": "test/model",
+            "dataset": tmp_path / "data.jsonl",
+            "quant": "none",
+            "trust_remote_code": True,
+        }
+    )
+    assert resolve_trust_remote_code(cfg) is True
+    cfg_extra = TrainConfig.model_validate(
+        {
+            "model_id": "test/model",
+            "dataset": tmp_path / "data.jsonl",
+            "quant": "none",
+            "trust_remote_code": False,
+            "extra": {"trust_remote_code": True},
+        }
+    )
+    assert resolve_trust_remote_code(cfg_extra) is True
+
+
+def test_train_config_rejects_vllm_weight_dir_escape(tmp_path: Path):
+    with pytest.raises(ValueError, match="\\.\\.|artifact"):
+        TrainConfig.model_validate(
+            {
+                "model_id": "test/model",
+                "dataset": tmp_path / "data.jsonl",
+                "quant": "none",
+                "vllm_weight_dir": "../../escape",
+            }
+        )
+
+
+def test_full_method_default_lr_is_not_lora_2e4():
+    from seiso.training.config import TrainMethod
+    from seiso.training.practices import learning_rate_for_method
+
+    assert learning_rate_for_method(TrainMethod.FULL) == pytest.approx(1e-5)
+    assert learning_rate_for_method(TrainMethod.LORA, explicit=2e-4) == pytest.approx(2e-4)
+
+
+def test_format_eval_prompt_applies_chat_template():
+    pytest.importorskip("torch")
+    from seiso.distill_rl.evaluate import _format_eval_prompt
+
+    class _Tok:
+        def apply_chat_template(self, messages, **kwargs):
+            return f"<user>{messages[0]['content']}</user><assistant>"
+
+    assert _format_eval_prompt(_Tok(), "hi", use_chat_template=True) == "<user>hi</user><assistant>"
+    assert _format_eval_prompt(_Tok(), "hi", use_chat_template=False) == "hi"

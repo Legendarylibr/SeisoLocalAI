@@ -26,7 +26,7 @@ _ACK_WSL_ENV = "SEISO_NVIDIA_WSL_ACK"
 _SKIP_BOUNDARY_ENV = "SEISO_SKIP_NVIDIA_BOUNDARY"
 _ABORT_ENV = "SEISO_ABORT_ON_SECURITY_BYPASS"
 
-# Backward compatibility with adaptive-rl-quant env vars
+# Legacy env var aliases (historical adaptive-rl-quant names)
 _LEGACY_ACK = {
     _ACK_HOST_VENV_ENV: "ADAPTIVE_RL_NVIDIA_HOST_VENV_ACK",
     _ACK_SECURE_VM_ENV: "ADAPTIVE_RL_NVIDIA_SECURE_VM",
@@ -317,9 +317,7 @@ def enforce_nvidia_secure_boundary(*, context: str = "training") -> dict[str, ob
         return report
 
     if _env_enabled(_SKIP_BOUNDARY_ENV):
-        message = (
-            f"NVIDIA secure boundary skipped during {context} ({_SKIP_BOUNDARY_ENV}=1)."
-        )
+        message = f"NVIDIA secure boundary skipped during {context} ({_SKIP_BOUNDARY_ENV}=1)."
         if _env_enabled(_ABORT_ENV):
             raise SystemExit(message)
         print(message, file=sys.stderr)

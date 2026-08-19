@@ -309,9 +309,7 @@ def test_vllm_client_strips_v1_suffix_and_loads_lora(tmp_path: Path):
     assert any(u.endswith("/v1/load_lora_adapter") for u in urls)
     assert any(u.endswith("/v1/completions") for u in urls)
     load_bodies = [
-        json.loads(s["body"])
-        for s in seen
-        if s["url"].endswith("/v1/load_lora_adapter")
+        json.loads(s["body"]) for s in seen if s["url"].endswith("/v1/load_lora_adapter")
     ]
     assert load_bodies[0]["lora_name"] == "policy_lora"
     assert load_bodies[0]["lora_path"] == "/tmp/adapter"
@@ -493,3 +491,68 @@ def test_vllm_full_with_lora_refused(tmp_path: Path, monkeypatch):
     )
     with pytest.raises(ValueError, match="vllm_weight_mode=full"):
         validate_rollout_backend_config(cfg)
+
+
+def test_truncate_prompt_texts_caps_to_max_tokens():
+    from seiso.slime.rollout_generate import truncate_prompt_texts
+
+    class _Tok:
+        def __call__(self, text, **kwargs):
+            # One id per character; honor truncation max_length.
+            max_len = int(kwargs.get("max_length") or 10_000)
+            ids = list(range(min(len(text), max_len)))
+            return {"input_ids": ids}
+
+        def decode(self, ids, **kwargs):
+            return f"T{len(ids)}"
+
+    out = truncate_prompt_texts(_Tok(), ["abcdefghij"], max_prompt_tokens=4)
+    assert out == ["T4"]
+
+
+def test_generate_sglang_chunk_truncates_before_http(tmp_path: Path):
+    """HTTP engines must see the same truncated prompt as build_sequence_tensors."""
+    from seiso.slime.rollout_generate import generate_sglang_chunk
+
+    seen: list[str] = []
+
+    class _Tok:
+        def __call__(self, text, **kwargs):
+            max_len = int(kwargs.get("max_length") or 10_000)
+            ids = list(range(min(len(text), max_len)))
+            return {"input_ids": ids}
+
+        def decode(self, ids, **kwargs):
+            return f"trunc:{len(ids)}"
+
+    class _Client:
+        base_url = "http://127.0.0.1:30000"
+
+        @classmethod
+        def from_config(cls, config):
+            return cls()
+
+        def complete_http(self, prompt: str):
+            seen.append(prompt)
+            return type("R", (), {"text": "ok", "token_ids": [1], "finish_reason": "stop"})()
+
+    cfg = _cfg(
+        tmp_path,
+        rollout_backend="sglang",
+        sglang_base_url="http://127.0.0.1:30000",
+        max_prompt_tokens=3,
+        rollouts_per_prompt=1,
+    )
+    with (
+        patch("seiso.slime.rollout_generate.SGLangRolloutClient", _Client),
+        patch(
+            "seiso.slime.rollout_http.sglang_engine_urls", return_value=["http://127.0.0.1:30000"]
+        ),
+    ):
+        gen = generate_sglang_chunk(
+            tokenizer=_Tok(),
+            prompts=["abcdef"],
+            config=cfg,
+        )
+    assert seen == ["trunc:3"]
+    assert gen.prompts == ["trunc:3"]

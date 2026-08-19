@@ -11,7 +11,6 @@ if TYPE_CHECKING:
     )
     from seiso.memory.protection import (
         MemoryLoadBlockedError,
-        apply_rl_memory_guards,
         apply_training_memory_guards,
         assess_path_memory_fit,
         build_hf_max_memory,
@@ -28,7 +27,6 @@ if TYPE_CHECKING:
 __all__ = [
     "MemoryLoadBlockedError",
     "apply_platform_memory_profile",
-    "apply_rl_memory_guards",
     "apply_training_memory_guards",
     "assess_path_memory_fit",
     "build_hf_max_memory",

@@ -17,7 +17,6 @@ describe("API payloads", () => {
   it("sends onboarding storage mode when registering", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(() =>
       mockJsonResponse({
-        access_token: "token",
         user: { id: "u1", display_name: "Admin", npub: "npub1test" },
         nsec: "nsec1test",
       }),
@@ -44,7 +43,6 @@ describe("API payloads", () => {
       ["gguf"],
       undefined,
       undefined,
-      undefined,
       ["q4_k_m", "q8_0"],
     );
 
@@ -58,7 +56,6 @@ describe("API payloads", () => {
           profile: null,
           gguf_quantizations: ["q4_k_m", "q8_0"],
           hub: null,
-          rl_quant_job_id: null,
         }),
       }),
     );

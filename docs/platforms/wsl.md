@@ -22,7 +22,7 @@ SEISO_INSTALL_PROFILE=wsl-nvidia curl -fsSL https://raw.githubusercontent.com/Le
 cd "$HOME/Seiso"
 python3 -m venv .venv && source .venv/bin/activate
 pip install -U pip
-pip install -e ".[forge,train,cuda,dev]"
+pip install -e ".[forge,train,cuda,llamacpp,dev]"
 ./scripts/install_flash_attn.sh   # optional
 ```
 

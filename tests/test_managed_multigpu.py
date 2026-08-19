@@ -10,6 +10,7 @@ from httpx import ASGITransport, AsyncClient
 from forge.main import create_app
 from forge.security.url_policy import validate_provider_base_url
 from seiso.security import SecurityError
+from tests.conftest import RETURN_TOKEN_HEADERS
 
 
 @pytest.fixture
@@ -24,6 +25,7 @@ async def authed_client(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         token = reg.json()["access_token"]
         client.headers["Authorization"] = f"Bearer {token}"
@@ -137,15 +139,11 @@ async def test_vllm_cloud_alias_normalizes_to_remote_chat(authed_client, monkeyp
 
 def test_remote_chat_rejects_loopback():
     with pytest.raises(SecurityError):
-        validate_provider_base_url(
-            "https://127.0.0.1:8000/v1", provider_type="remote_chat"
-        )
+        validate_provider_base_url("https://127.0.0.1:8000/v1", provider_type="remote_chat")
 
 
 def test_local_chat_still_allows_loopback():
-    url = validate_provider_base_url(
-        "http://127.0.0.1:8000/v1", provider_type="local_chat"
-    )
+    url = validate_provider_base_url("http://127.0.0.1:8000/v1", provider_type="local_chat")
     assert "127.0.0.1" in url
 
 
@@ -276,3 +274,19 @@ def test_managed_vllm_enable_lora_flag(monkeypatch):
     ):
         launch = mv.build_launch_command(model="org/model", tensor_parallel_size=2)
     assert "--enable-lora" in launch["command"]
+
+
+def test_managed_vllm_tp_respects_cuda_visible_devices(monkeypatch):
+    from seiso.inference import managed_vllm
+
+    monkeypatch.setattr(
+        managed_vllm,
+        "resolve_vllm_command",
+        lambda: ["python3", "-m", "vllm.entrypoints.openai.api_server"],
+    )
+    with pytest.raises(ValueError, match="CUDA_VISIBLE_DEVICES"):
+        managed_vllm.build_launch_command(
+            model="org/model",
+            tensor_parallel_size=8,
+            cuda_visible_devices="0,1",
+        )

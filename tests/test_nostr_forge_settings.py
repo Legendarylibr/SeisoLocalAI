@@ -24,6 +24,7 @@ from forge.services.nostr_settings import (
 )
 from seiso.research.nostr.keys import generate_keypair, load_keypair, load_npub
 from seiso.security import SecurityError
+from tests.conftest import RETURN_TOKEN_HEADERS
 
 
 @pytest.fixture
@@ -33,9 +34,7 @@ def public_dns(monkeypatch):
     def fake_getaddrinfo(host, *args, **kwargs):
         return [(None, None, None, None, ("8.8.8.8", 0))]
 
-    monkeypatch.setattr(
-        "seiso.research.nostr.policy.socket.getaddrinfo", fake_getaddrinfo
-    )
+    monkeypatch.setattr("seiso.research.nostr.policy.socket.getaddrinfo", fake_getaddrinfo)
 
 
 def test_prefs_roundtrip_and_relay_validation(tmp_path: Path, public_dns):
@@ -187,9 +186,7 @@ def test_forge_maybe_attest_gates_and_success(tmp_path: Path, monkeypatch, publi
             "manifest_path": str(path),
         }
 
-    with patch(
-        "seiso.research.nostr.attest.attest_manifest", side_effect=fake_attest
-    ):
+    with patch("seiso.research.nostr.attest.attest_manifest", side_effect=fake_attest):
         report = forge_maybe_attest(
             data_dir=tmp_path,
             user_id="u1",
@@ -207,7 +204,9 @@ async def test_settings_nostr_api_roundtrip(tmp_path: Path, monkeypatch, public_
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"generate": True})
+        reg = await client.post(
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
         assert reg.status_code == 201, reg.text
         headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
         auth_npub = reg.json()["user"]["npub"]
@@ -278,7 +277,9 @@ async def test_login_refreshes_signing_key(tmp_path: Path):
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"nsec": pair.nsec})
+        reg = await client.post(
+            "/api/auth/register", json={"nsec": pair.nsec}, headers=RETURN_TOKEN_HEADERS
+        )
         assert reg.status_code == 201
         user_id = reg.json()["user"]["id"]
         clear_user_nostr_key(tmp_path, user_id)
@@ -293,7 +294,9 @@ async def test_reset_session_wipes_nostr_keys(tmp_path: Path):
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"generate": True})
+        reg = await client.post(
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
         assert reg.status_code == 201
         user_id = reg.json()["user"]["id"]
         assert load_npub(identity=user_id, data_dir=tmp_path) is not None
@@ -312,6 +315,30 @@ async def test_reset_session_wipes_nostr_keys(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_reset_session_refuses_env_bound_inference_key(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("SEISO_INFERENCE_API_KEY", "seiso_sk_env_bound_cannot_rotate_xx")
+    from forge.api.deps import clear_dependency_caches
+
+    clear_dependency_caches()
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post(
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
+        assert reg.status_code == 201
+        csrf = client.cookies.get("seiso_csrf")
+        assert csrf
+        reset = await client.post(
+            "/api/auth/reset-session",
+            json={"confirmation": "RESET"},
+            headers={"X-CSRF-Token": csrf},
+        )
+        assert reset.status_code == 409
+        assert "env-bound" in reset.json()["detail"]
+
+
+@pytest.mark.asyncio
 async def test_ephemeral_mode_skips_nostr_key_persist(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("SEISO_DB_EPHEMERAL", "true")
     from forge.api.deps import clear_dependency_caches
@@ -320,7 +347,9 @@ async def test_ephemeral_mode_skips_nostr_key_persist(tmp_path: Path, monkeypatc
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"generate": True})
+        reg = await client.post(
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
         assert reg.status_code == 201, reg.text
         user_id = reg.json()["user"]["id"]
         assert load_npub(identity=user_id, data_dir=tmp_path) is None
@@ -345,7 +374,9 @@ async def test_clear_nostr_key_leaves_auth_pubkey_and_login_works(tmp_path: Path
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"nsec": pair.nsec})
+        reg = await client.post(
+            "/api/auth/register", json={"nsec": pair.nsec}, headers=RETURN_TOKEN_HEADERS
+        )
         assert reg.status_code == 201
         headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
         user_id = reg.json()["user"]["id"]
@@ -371,7 +402,9 @@ async def test_settings_keygen_updates_auth_and_me_never_echoes_nsec(tmp_path: P
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"generate": True})
+        reg = await client.post(
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
         assert reg.status_code == 201
         headers = {"Authorization": f"Bearer {reg.json()['access_token']}"}
         old_npub = reg.json()["user"]["npub"]
@@ -393,9 +426,7 @@ async def test_settings_keygen_updates_auth_and_me_never_echoes_nsec(tmp_path: P
         assert status.json()["npub"] == new_npub
 
 
-def test_wipe_nostr_identity_removes_prefs_and_encryption_key(
-    tmp_path: Path, public_dns
-):
+def test_wipe_nostr_identity_removes_prefs_and_encryption_key(tmp_path: Path, public_dns):
     from seiso.research.nostr.keys import encryption_key_path
 
     gen = generate_user_nostr_key(tmp_path, "u1")
@@ -424,7 +455,9 @@ async def test_update_user_nostr_pubkey_rejects_non_hex(tmp_path: Path):
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"generate": True})
+        reg = await client.post(
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
         assert reg.status_code == 201
         user_id = reg.json()["user"]["id"]
         db = get_db()

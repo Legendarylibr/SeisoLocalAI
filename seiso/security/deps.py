@@ -26,8 +26,12 @@ _LOCKED_VERSION = re.compile(
 # Declared floors for CVEs that must stay aligned across pyproject + lock.
 # (package, minimum version, where the floor must be declared)
 SECURITY_FLOOR_CHECKS: tuple[tuple[str, str, str], ...] = (
-    # CVE-2026-59885 / CVE-2026-59886 — pyasn1 REAL/OID DoS
-    ("pyasn1", "0.6.4", "forge"),
+    # CVE-2026-59881 / CVE-2026-69243 / CVE-2026-69244 — aiohttp HTTP/WS issues
+    ("aiohttp", "3.14.3", "forge"),
+    # CVE-2026-69247 — cryptography PKCS#7 Bleichenbacher oracle
+    ("cryptography", "50.0.0", "forge"),
+    # PyJWT 2.13+ clears known HS/JWK/crit advisories; replaces python-jose+ecdsa.
+    ("pyjwt", "2.13.0", "forge"),
     # CVE-2026-59890 — setuptools MANIFEST.in exclusion bypass
     ("setuptools", "83.0.0", "build-system"),
 )
@@ -69,9 +73,7 @@ def load_digest_manifest(path: Path) -> dict[str, Any]:
         raise LockDigestError("Digest manifest must be a JSON object")
     data: dict[str, Any] = raw
     if data.get("algorithm") != "sha256":
-        raise LockDigestError(
-            f"Unsupported digest algorithm: {data.get('algorithm')!r}"
-        )
+        raise LockDigestError(f"Unsupported digest algorithm: {data.get('algorithm')!r}")
     artifacts = data.get("artifacts")
     if not isinstance(artifacts, dict) or not artifacts:
         raise LockDigestError("Digest manifest missing non-empty 'artifacts' object")
@@ -240,13 +242,9 @@ def verify_security_floors(
         if location == "build-system":
             declared = [r for r in build_requires if _requirement_name(r) == package]
             if not declared:
-                raise LockDigestError(
-                    f"{package}>={minimum} missing from [build-system].requires"
-                )
+                raise LockDigestError(f"{package}>={minimum} missing from [build-system].requires")
         else:
-            declared = [
-                r for r in extras.get(location, []) if _requirement_name(r) == package
-            ]
+            declared = [r for r in extras.get(location, []) if _requirement_name(r) == package]
             if not declared:
                 raise LockDigestError(
                     f"{package}>={minimum} missing from optional-dependencies.{location}"
@@ -254,8 +252,7 @@ def verify_security_floors(
 
         declared_mins = [_requirement_min_version(r) for r in declared]
         if not any(
-            dm is not None and _version_gte(_version_tuple(dm), min_tuple)
-            for dm in declared_mins
+            dm is not None and _version_gte(_version_tuple(dm), min_tuple) for dm in declared_mins
         ):
             raise LockDigestError(
                 f"{package} floor in {location} must be >={minimum}; found {declared!r}"
@@ -302,8 +299,7 @@ def verify_lock_covers_pyproject(
     checked: list[str] = []
 
     req_strings: list[tuple[str, str]] = [
-        ("dependencies", value)
-        for value in cfg.get("project", {}).get("dependencies", [])
+        ("dependencies", value) for value in cfg.get("project", {}).get("dependencies", [])
     ]
     for extra in LOCKED_EXTRAS:
         for value in extras.get(extra, []):
@@ -317,9 +313,7 @@ def verify_lock_covers_pyproject(
             # Platform-gated extras may be absent until a universal lock refresh.
             if req.marker is not None:
                 continue
-            raise LockDigestError(
-                f"{req.name} from {location} missing from {python_lock.name}"
-            )
+            raise LockDigestError(f"{req.name} from {location} missing from {python_lock.name}")
         if req.marker is not None and not req.marker.evaluate(_LOCK_MARKER_ENV):
             # Present in a universal lock but inactive on this platform — still OK.
             checked.append(f"{req.name}=={locked_version} ({location}, inactive-marker)")
@@ -334,9 +328,7 @@ def verify_lock_covers_pyproject(
     return checked
 
 
-def build_digest_manifest(
-    repo_root: Path, artifacts: dict[str, Path]
-) -> dict[str, Any]:
+def build_digest_manifest(repo_root: Path, artifacts: dict[str, Path]) -> dict[str, Any]:
     manifest_artifacts: dict[str, str] = {}
     for rel_path, absolute_path in artifacts.items():
         manifest_artifacts[rel_path] = sha256_file(absolute_path)

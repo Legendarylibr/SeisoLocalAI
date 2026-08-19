@@ -30,9 +30,7 @@ def test_save_and_get_cached_profile(tmp_path: Path, monkeypatch):
         layers=-1,
         load_tier="normal",
     )
-    save_cached_load_profile(
-        str(model), n_ctx=4096, load_tier="normal", profile=profile
-    )
+    save_cached_load_profile(str(model), n_ctx=4096, load_tier="normal", profile=profile)
 
     cached = get_cached_load_profile(str(model), n_ctx=4096, load_tier="normal")
     assert cached is not None

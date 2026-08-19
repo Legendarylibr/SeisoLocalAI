@@ -47,9 +47,7 @@ def _dataset_format_hint(dataset: str) -> str:
         return "alpaca"
     if any(marker in name for marker in ("chat", "sharegpt", "ultrachat", "no_robots")):
         return "chat"
-    if any(
-        marker in name for marker in ("preference", "dpo", "orpo", "chosen", "rejected")
-    ):
+    if any(marker in name for marker in ("preference", "dpo", "orpo", "chosen", "rejected")):
         return "preference"
     return "auto"
 
@@ -91,24 +89,18 @@ def _apply_hardware_caps(
         cfg.setdefault("lora_alpha", 32)
     elif params_b <= 7.0:
         cfg["batch_size"] = min(int(cfg.get("batch_size", 1)), 1)
-        cfg["gradient_accumulation_steps"] = max(
-            int(cfg.get("gradient_accumulation_steps", 4)), 8
-        )
+        cfg["gradient_accumulation_steps"] = max(int(cfg.get("gradient_accumulation_steps", 4)), 8)
         cfg.setdefault("lora_r", 16)
         cfg.setdefault("lora_alpha", 32)
     elif params_b <= 14.0:
         cfg["batch_size"] = 1
-        cfg["gradient_accumulation_steps"] = max(
-            int(cfg.get("gradient_accumulation_steps", 4)), 16
-        )
+        cfg["gradient_accumulation_steps"] = max(int(cfg.get("gradient_accumulation_steps", 4)), 16)
         cfg.setdefault("lora_r", 8)
         cfg.setdefault("lora_alpha", 16)
         cfg.setdefault("quant", "4bit")
     else:
         cfg["batch_size"] = 1
-        cfg["gradient_accumulation_steps"] = max(
-            int(cfg.get("gradient_accumulation_steps", 4)), 32
-        )
+        cfg["gradient_accumulation_steps"] = max(int(cfg.get("gradient_accumulation_steps", 4)), 32)
         cfg.setdefault("lora_r", 8)
         cfg.setdefault("lora_alpha", 16)
         cfg.setdefault("quant", "4bit")
@@ -160,11 +152,7 @@ def recommend_training_config(
     analysis = _try_analyze_dataset(
         dataset, sandbox_root=sandbox_root, sandbox_user_id=sandbox_user_id
     )
-    ds = (
-        analysis.get("recommended_config", {})
-        if analysis
-        else _default_dataset_config()
-    )
+    ds = analysis.get("recommended_config", {}) if analysis else _default_dataset_config()
     if not analysis and ds.get("dataset_format", "auto") == "auto":
         ds["dataset_format"] = _dataset_format_hint(dataset)
     warnings: list[str] = []
@@ -173,9 +161,7 @@ def recommend_training_config(
     trainable = not model_id or not is_gguf_only_repo_id(model_id)
     if model_id and not trainable:
         warnings.append(GGUF_ONLY_REPO_MESSAGE)
-    native_quant_block = (
-        native_quant_training_block_reason(model_id) if model_id else None
-    )
+    native_quant_block = native_quant_training_block_reason(model_id) if model_id else None
     if native_quant_block:
         trainable = False
         warnings.append(native_quant_block)

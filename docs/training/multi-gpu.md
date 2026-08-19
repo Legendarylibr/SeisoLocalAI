@@ -25,13 +25,20 @@ training continues to use the normal setup tab values.
 seiso train --config configs/example_lora.yaml
 ```
 
-When `multi_gpu: true` or `distributed_strategy: ddp` is set, the CLI launches
-Accelerate for you. You can still invoke the worker directly for custom schedulers:
+When `multi_gpu: true` or `distributed_strategy: ddp` is set **and**
+`distributed_num_nodes: 1`, the CLI launches Accelerate for you on this host.
+You can still invoke the worker directly for custom schedulers:
 
 ```bash
 accelerate launch --multi_gpu --num_processes=2 --module seiso.training.worker --config configs/example_lora.yaml
 ```
 
+**Multi-node (`distributed_num_nodes>1`):** bare `seiso train` refuses to emit
+Accelerate `--num_machines=N` unless `SEISO_MESH_JOB_ID` is set (mesh worker
+context). One CLI process does **not** spawn remote machines — start a worker on
+**each** node via [`mesh.md`](mesh.md) (`seiso mesh worker … --launch
+--confirm-launch`). That matches [PyTorch torchrun](https://docs.pytorch.org/docs/stable/elastic/run.md)
+practice: every node launches; homogeneous local world size; pin ranks.
 ## Config
 
 ```yaml
@@ -120,8 +127,9 @@ Keep cloud API keys, SSH material, and bootstrap commands in the **Cloud access*
 tab. They are never echoed back to the UI after save, and they are not copied into
 training job history.
 
-**Important:** `cloud_gpu_*` is provisioning metadata only. It does **not** start
-a remote vLLM server. For slime on cloud multi-GPU:
+**Important:** `cloud_gpu_*` is **provisioning metadata only**. Enabling the
+Cloud tab in Forge does **not** create instances, start remote DDP, or launch a
+remote vLLM server. For slime on cloud multi-GPU:
 
 1. Provision the instance (or use your orchestrator / bootstrap command)
 2. Start vLLM with tensor parallel + `--enable-lora` on that host
@@ -134,3 +142,12 @@ must still provide `vllm_base_url`.
 ## macOS / single GPU
 
 Multi-GPU checkbox is disabled when `training_defaults.multi_gpu_available` is false.
+
+## Buzz mesh (experimental secondary)
+
+Opt-in Buzz-agent multi-node path (`SEISO_ALLOW_MESH=1`). Local `nnodes=1`
+remains the default. See [mesh.md](mesh.md) — plans map onto the same
+`distributed_*` / Accelerate knobs documented above.
+
+**NeMo-RL:** `nemo_rl_num_nodes>1` is external Hydra/cluster config, not Buzz mesh
+rendezvous. Do not treat NeMo multi-node as mesh-validated.

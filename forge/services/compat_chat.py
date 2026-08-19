@@ -64,9 +64,7 @@ def prompt_token_estimate(messages: list[ChatMessage]) -> int:
     )
 
 
-_SEISO_COMPAT_TOOL_NAMES = frozenset(
-    {"web_search", "write_artifact", "execute_code"}
-)
+_SEISO_COMPAT_TOOL_NAMES = frozenset({"web_search", "write_artifact", "execute_code"})
 
 
 def _assert_compat_tools_honesty(body: ChatCompletionRequest) -> None:
@@ -119,9 +117,7 @@ async def prepare_compat_chat_payload(
         if m.get("name"):
             local_ids.add(str(m["name"]))
 
-    provider = await resolve_compat_provider(
-        db, user_id, body.model, local_model_ids=local_ids
-    )
+    provider = await resolve_compat_provider(db, user_id, body.model, local_model_ids=local_ids)
     if provider is not None:
         if body.tools:
             raise HTTPException(

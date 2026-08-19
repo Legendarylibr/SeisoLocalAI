@@ -27,9 +27,7 @@ def test_residual_patches_only_fused_decoder_classes(monkeypatch):
         patched_decoders.append(type(decoder).__name__)
         return True
 
-    monkeypatch.setattr(
-        "seiso.kernels.hooks._patch_post_attention_residual_norm", _fake_norm_patch
-    )
+    monkeypatch.setattr("seiso.kernels.hooks._patch_post_attention_residual_norm", _fake_norm_patch)
     monkeypatch.setattr(
         "seiso.kernels.hooks._patch_fused_residual_decoder_forward", _fake_decoder_patch
     )
@@ -111,6 +109,9 @@ def test_residual_fusion_matches_llama_decoder_semantics():
             attention_mask=None,
             position_ids=position_ids,
         )
+    if isinstance(out_patched, tuple):
+        # Patched decoder mirrors the HF contract: extras follow hidden_states.
+        out_patched = out_patched[0]
 
     residual = x
     h = layer.input_layernorm(residual)
@@ -125,6 +126,130 @@ def test_residual_fusion_matches_llama_decoder_semantics():
     h = layer.mlp(h)
     ref = post_skip + h
 
-    assert torch.allclose(
-        out_patched, ref, rtol=0.05, atol=0.2
-    ), f"residual fusion mismatch: max diff {(out_patched - ref).abs().max().item()}"
+    assert torch.allclose(out_patched, ref, rtol=0.05, atol=0.2), (
+        f"residual fusion mismatch: max diff {(out_patched - ref).abs().max().item()}"
+    )
+
+
+def test_decoder_forward_preserves_cache_and_attentions():
+    """#3: patched decoder forward must not drop use_cache/output_attentions extras."""
+    torch = pytest.importorskip("torch")
+    from torch import nn
+
+    from seiso.kernels.hooks import _patch_fused_residual_decoder_forward
+    from seiso.kernels.lifecycle import restore_kernel_patches
+
+    class FakeAttention(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.seen: dict = {}
+
+        def forward(self, hidden_states, output_attentions=False, use_cache=False, **kwargs):
+            self.seen = {
+                "output_attentions": output_attentions,
+                "use_cache": use_cache,
+                **kwargs,
+            }
+            out = hidden_states * 2
+            extras = []
+            if output_attentions:
+                extras.append("attn-weights")
+            if use_cache:
+                extras.append("past-kv")
+            return (out, *extras) if extras else out
+
+    class LlamaDecoderLayer(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.input_layernorm = nn.Identity()
+            self.post_attention_layernorm = nn.Identity()
+            self.self_attn = FakeAttention()
+            self.mlp = nn.Identity()
+
+        def forward(self, hidden_states, **kwargs):
+            return hidden_states
+
+    model = nn.Module()
+    decoder = LlamaDecoderLayer()
+    try:
+        assert _patch_fused_residual_decoder_forward(model, decoder) is True
+        x = torch.randn(2, 3, 4)
+
+        bare = decoder(x)
+        assert isinstance(bare, torch.Tensor)
+
+        out = decoder(x, output_attentions=True, use_cache=True, past_key_values="old-kv")
+        assert isinstance(out, tuple)
+        assert torch.equal(out[0], bare)
+        # Cache and attention outputs survive the patched forward.
+        assert out[1] == "attn-weights"
+        assert out[2] == "past-kv"
+        # Flags are still forwarded to the attention module.
+        assert decoder.self_attn.seen["past_key_values"] == "old-kv"
+        assert decoder.self_attn.seen["output_attentions"] is True
+        assert decoder.self_attn.seen["use_cache"] is True
+    finally:
+        restore_kernel_patches()
+
+
+def test_norm_patch_rollback_restores_entry_active_forward(monkeypatch):
+    """#9: failed re-patch must keep the previously installed patch forward active."""
+    from seiso.kernels.hooks import _patch_post_attention_residual_norm
+    from seiso.kernels.lifecycle import restore_kernel_patches
+
+    def _original(self, hidden_states):
+        return hidden_states
+
+    def _previous_patch(self, hidden_states):
+        return hidden_states
+
+    # Simulate an earlier kernel patch: _seiso_orig_forward pre-exists and the
+    # entry-active forward is the previously installed patch.
+    norm = SimpleNamespace()
+    norm.forward = _previous_patch
+    norm._seiso_orig_forward = _original
+    decoder = SimpleNamespace(post_attention_layernorm=norm)
+    model = SimpleNamespace()
+
+    def _boom(_model, _module):
+        raise RuntimeError("register failed")
+
+    monkeypatch.setattr("seiso.kernels.hooks.register_patch", _boom)
+    try:
+        with pytest.raises(RuntimeError, match="register failed"):
+            _patch_post_attention_residual_norm(model, decoder)
+        assert norm.forward is _previous_patch
+        assert norm._seiso_orig_forward is _original
+        assert not hasattr(norm, "_seiso_residual_norm_forward")
+    finally:
+        restore_kernel_patches()
+
+
+def test_decoder_patch_rollback_restores_entry_active_forward(monkeypatch):
+    """#9: failed re-patch must keep the previously installed patch forward active."""
+    from seiso.kernels.hooks import _patch_fused_residual_decoder_forward
+    from seiso.kernels.lifecycle import restore_kernel_patches
+
+    def _original(self, hidden_states, **kwargs):
+        return hidden_states
+
+    def _previous_patch(self, hidden_states, **kwargs):
+        return hidden_states
+
+    decoder = SimpleNamespace()
+    decoder.forward = _previous_patch
+    decoder._seiso_orig_forward = _original
+    model = SimpleNamespace()
+
+    def _boom(_model, _module):
+        raise RuntimeError("register failed")
+
+    monkeypatch.setattr("seiso.kernels.hooks.register_patch", _boom)
+    try:
+        with pytest.raises(RuntimeError, match="register failed"):
+            _patch_fused_residual_decoder_forward(model, decoder)
+        assert decoder.forward is _previous_patch
+        assert decoder._seiso_orig_forward is _original
+        assert not hasattr(decoder, "_seiso_residual_decoder_forward")
+    finally:
+        restore_kernel_patches()

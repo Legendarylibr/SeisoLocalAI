@@ -78,9 +78,7 @@ def resolve_training_dataset_path(
 
     rel_parts = [p for p in path.parts if p not in (".",)]
     # Prefer uploads for bare filenames (historical CLI UX).
-    search_roots = ("uploads",) + tuple(
-        sorted(r for r in USER_SCOPED_DATA_ROOTS if r != "uploads")
-    )
+    search_roots = ("uploads",) + tuple(sorted(r for r in USER_SCOPED_DATA_ROOTS if r != "uploads"))
     for category in search_roots:
         try:
             root = user_dir(sandbox_root, user_id, category)
@@ -155,9 +153,7 @@ def _assert_resolved_scope(
             and log_rel.parts[1] == user_id
         ):
             return
-        raise SecurityError(
-            "Shared cache paths are only reachable via your model inventory"
-        )
+        raise SecurityError("Shared cache paths are only reachable via your model inventory")
 
     raise SecurityError(f"Access denied to path root: {root!r}")
 
@@ -188,9 +184,7 @@ def assert_user_path(sandbox_root: Path, user_id: str, target: str | Path) -> Pa
 
     resolved = assert_within(base, source.resolve())
     if source.is_symlink() and not resolved.exists():
-        raise SecurityError(
-            f"Model cache link is broken — re-download from Hub: {logical.name}"
-        )
+        raise SecurityError(f"Model cache link is broken — re-download from Hub: {logical.name}")
     _assert_resolved_scope(base, user_id, logical, resolved)
     return resolved
 
@@ -216,9 +210,7 @@ def assert_user_download_file(
         try:
             candidate.relative_to(container.resolve())
         except ValueError as exc:
-            raise SecurityError(
-                "Download file must be inside the model directory"
-            ) from exc
+            raise SecurityError("Download file must be inside the model directory") from exc
         source = candidate
     return assert_user_path(sandbox_root, user_id, source)
 
@@ -251,49 +243,6 @@ def pick_user_download_file(
     for match in iter_matching_files(container, pattern):
         return assert_user_path(sandbox_root, user_id, match)
     raise SecurityError(f"No downloadable file matching {pattern!r}")
-
-
-def assert_rl_quant_input_paths(
-    sandbox_root: Path,
-    user_id: str,
-    paths: dict[str, str],
-) -> None:
-    """Validate merged RL-quant filesystem inputs after config_file/preset load.
-
-    ``prompt_library_path`` may live under the adaptive_quant bundle (presets) or
-    the caller's user tree. Binaries use :func:`assert_llama_cpp_binary`.
-    """
-    from seiso.rl_quant.bootstrap import bundle_root
-    from seiso.rl_quant.config_builder import (
-        RL_QUANT_BINARY_PATH_KEYS,
-        RL_QUANT_DATA_PATH_KEYS,
-    )
-    from seiso.security import assert_user_scoped_path, assert_within
-
-    bundle = bundle_root().resolve()
-    for key, raw in paths.items():
-        if key in RL_QUANT_BINARY_PATH_KEYS:
-            assert_llama_cpp_binary(raw)
-            continue
-        if key not in RL_QUANT_DATA_PATH_KEYS:
-            continue
-        path = Path(raw).expanduser()
-        if key == "prompt_library_path":
-            candidate = path if path.is_absolute() else bundle / path
-            try:
-                assert_within(bundle, candidate.resolve())
-                continue
-            except (OSError, SecurityError):
-                pass
-        if path.exists() or path.is_symlink():
-            assert_user_path(sandbox_root, user_id, path)
-        elif path.is_absolute():
-            assert_user_scoped_path(sandbox_root, user_id, path)
-        else:
-            raise SecurityError(
-                f"{key} must be an absolute path under your data directory "
-                f"or a bundle-relative prompt library"
-            )
 
 
 def assert_llama_cpp_binary(target: str | Path) -> Path:

@@ -39,9 +39,7 @@ def train(
             return
 
         if distributed_requested(cfg) and not plan.enabled:
-            console.print(
-                f"[yellow]distributed launch skipped:[/] {plan.reason}"
-            )
+            console.print(f"[yellow]distributed launch skipped:[/] {plan.reason}")
 
         out = run_training(cfg)
     console.print(f"[green]Done:[/] {out}")

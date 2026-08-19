@@ -61,12 +61,20 @@ def _policy_loss(
     else:
         # Length-normalize sequence log-probs before the importance ratio so
         # variable response lengths do not dominate exp(ΣΔlogπ).
+        # Exclude wiped (length/empty) and zero-token rows from the mean so they
+        # do not dilute the surrogate / KL denominator.
         lengths = response_token_counts.clamp_min(1.0)
+        valid = torch.tensor(
+            [r.status not in _INVALID_ADVANTAGE_STATUS for r in rollouts],
+            device=config.device,
+            dtype=torch.float32,
+        )
+        valid = valid * (response_token_counts > 0).float()
         policy_loss = _clipped_policy_loss(
             new_logprobs / lengths,
             old_logprobs / lengths,
             advantages,
-            torch.ones_like(new_logprobs),
+            valid,
             config.clip_ratio,
             torch,
             clip_ratio_high=config.clip_ratio_high,
@@ -94,8 +102,15 @@ def _policy_loss(
             ref_logprobs = torch.stack([r.ref_logprobs for r in rollouts]).to(config.device)
             lengths = response_token_counts.clamp_min(1.0)
             log_ratio = (new_logprobs - ref_logprobs) / lengths
-            kl_k1 = log_ratio.mean()
-            kl_loss = _kl_k3_from_log_ratio(log_ratio, torch)
+            valid = torch.tensor(
+                [r.status not in _INVALID_ADVANTAGE_STATUS for r in rollouts],
+                device=config.device,
+                dtype=torch.float32,
+            )
+            valid = valid * (response_token_counts > 0).float()
+            weight = valid.sum().clamp_min(1.0)
+            kl_k1 = (log_ratio * valid).sum() / weight
+            kl_loss = _kl_k3_from_log_ratio(log_ratio, torch, mask=valid)
 
     rewards = [r.reward for r in rollouts]
     loss = policy_loss + config.kl_coef * kl_loss
@@ -529,8 +544,8 @@ def _group_verifier_stats(rollouts: list[Rollout], group_size: int) -> dict[str,
         outcome_spread = max(outcomes) - min(outcomes)
         spreads.append(spread)
         outcome_spreads.append(outcome_spread)
+        nonzero_spread.append(1.0 if spread > 1e-8 else 0.0)
         # Primary health metric: outcome diversity (matches dynamic sampling).
-        nonzero_spread.append(1.0 if outcome_spread > 1e-8 else 0.0)
         nonzero_outcome_spread.append(1.0 if outcome_spread > 1e-8 else 0.0)
         group_passes.append(1.0 if any(r.outcome_passed for r in group) else 0.0)
     return {

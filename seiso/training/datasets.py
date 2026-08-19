@@ -61,12 +61,8 @@ def load_training_dataset(
                 data = json.loads(p.read_text())
                 return Dataset.from_list(data if isinstance(data, list) else [data])
         if p.is_dir():
-            return load_dataset(
-                str(p), split=split, revision=hub_revision
-            )  # nosec B615: local path; revision for hub-style dirs
-    return load_dataset(
-        str(path), split=split, revision=hub_revision
-    )  # nosec B615: revision from caller (default main)
+            return load_dataset(str(p), split=split, revision=hub_revision)  # nosec B615: local path; revision for hub-style dirs
+    return load_dataset(str(path), split=split, revision=hub_revision)  # nosec B615: revision from caller (default main)
 
 
 # Causal-LM / code-corpus body fields (order = preference when several present).
@@ -80,9 +76,7 @@ TEXT_BODY_KEYS: tuple[str, ...] = (
 
 
 def detect_format(sample: dict) -> DatasetFormat:
-    if ("chosen" in sample and "rejected" in sample) or (
-        "chosen" in sample and "prompt" in sample
-    ):
+    if ("chosen" in sample and "rejected" in sample) or ("chosen" in sample and "prompt" in sample):
         return DatasetFormat.PREFERENCE
     if ("query" in sample and "response" in sample) or (
         "question" in sample and "answer" in sample
@@ -93,9 +87,7 @@ def detect_format(sample: dict) -> DatasetFormat:
     ):
         return DatasetFormat.ALPACA
     if "conversations" in sample or "messages" in sample:
-        return (
-            DatasetFormat.SHAREGPT if "conversations" in sample else DatasetFormat.CHAT
-        )
+        return DatasetFormat.SHAREGPT if "conversations" in sample else DatasetFormat.CHAT
     if ("instruction" in sample and "output" in sample) or (
         "instruction" in sample and "response" in sample
     ):
@@ -111,9 +103,7 @@ def should_disable_packing_for_response_mask(
     fmt: DatasetFormat,
 ) -> bool:
     """Packing is for large text corpora; response-only chat needs Seiso masks."""
-    return bool(
-        packing and train_on_responses_only and fmt != DatasetFormat.TEXT
-    )
+    return bool(packing and train_on_responses_only and fmt != DatasetFormat.TEXT)
 
 
 def format_sample(sample: dict, fmt: DatasetFormat, tokenizer) -> str:
@@ -139,8 +129,7 @@ def _build_labels(input_ids: list[int], prompt_len: int) -> list[int]:
 
 def _rows_from_batch(batch: dict[str, list[Any]]) -> list[dict[str, Any]]:
     return [
-        dict(zip(batch.keys(), values, strict=True))
-        for values in zip(*batch.values(), strict=True)
+        dict(zip(batch.keys(), values, strict=True)) for values in zip(*batch.values(), strict=True)
     ]
 
 
@@ -198,9 +187,7 @@ def _encode_chat_ids(
     return list(ids)
 
 
-def _labels_from_assistant_mask(
-    ids: list[int], mask: list[Any]
-) -> list[int] | None:
+def _labels_from_assistant_mask(ids: list[int], mask: list[Any]) -> list[int] | None:
     if not ids or mask is None:
         return None
     mask_list = list(mask)[: len(ids)]
@@ -223,12 +210,8 @@ def _labels_from_assistant_spans(
     for i, msg in enumerate(messages):
         if msg.get("role") != "assistant":
             continue
-        prefix_ids = _encode_chat_ids(
-            tokenizer, messages[:i], add_generation_prompt=True
-        )
-        with_asst = _encode_chat_ids(
-            tokenizer, messages[: i + 1], add_generation_prompt=False
-        )
+        prefix_ids = _encode_chat_ids(tokenizer, messages[:i], add_generation_prompt=True)
+        with_asst = _encode_chat_ids(tokenizer, messages[: i + 1], add_generation_prompt=False)
         if prefix_ids is None or with_asst is None:
             logger.debug(
                 "Assistant span encode failed at turn %d; trying last-turn fallback",
@@ -268,9 +251,7 @@ def _labels_last_assistant_turn(
     """Fallback: supervise only the final assistant turn via template lengths."""
     if not messages or messages[-1].get("role") != "assistant":
         return None
-    prompt_ids = _encode_chat_ids(
-        tokenizer, messages[:-1], add_generation_prompt=True
-    )
+    prompt_ids = _encode_chat_ids(tokenizer, messages[:-1], add_generation_prompt=True)
     if prompt_ids is None:
         return None
     # Refuse inconsistent templates (same guard as multi-turn spans).
@@ -381,13 +362,9 @@ def _tokenize_string_row(
     attention = list(encoded.get("attention_mask") or [1] * len(ids))
     labels = list(ids)
     if keep_end:
-        ids, labels, attention = _truncate_keep_end(
-            ids, labels, attention, max_seq_length
-        )
+        ids, labels, attention = _truncate_keep_end(ids, labels, attention, max_seq_length)
     else:
-        ids, labels, attention = _truncate_keep_start(
-            ids, labels, attention, max_seq_length
-        )
+        ids, labels, attention = _truncate_keep_start(ids, labels, attention, max_seq_length)
     ids, labels, attention = _ensure_eos(
         ids, labels, attention, _eos_token_id(tokenizer), max_len=max_seq_length
     )
@@ -423,9 +400,7 @@ def _tokenize_chat_row(
                 "or use dataset_format=text for continued pretraining."
             )
         text = format_sample(sample, fmt, tokenizer)
-        return _tokenize_string_row(
-            text, tokenizer, max_seq_length, keep_end=False
-        )
+        return _tokenize_string_row(text, tokenizer, max_seq_length, keep_end=False)
 
     # Prefer a single template encode for input_ids.
     full_ids: list[int] | None = None
@@ -436,17 +411,13 @@ def _tokenize_chat_row(
         if masked is not None:
             full_ids, labels = masked
         if full_ids is None:
-            full_ids = _encode_chat_ids(
-                tokenizer, messages, add_generation_prompt=False
-            )
+            full_ids = _encode_chat_ids(tokenizer, messages, add_generation_prompt=False)
         if full_ids is not None and labels is None:
             labels = _labels_from_assistant_spans(tokenizer, messages, full_ids)
         if full_ids is not None and labels is None:
             # Last-turn fallback is only safe for single-assistant samples.
             # Multi-turn would silently drop earlier assistant turns.
-            n_asst = sum(
-                1 for m in messages if str(m.get("role", "")).lower() == "assistant"
-            )
+            n_asst = sum(1 for m in messages if str(m.get("role", "")).lower() == "assistant")
             if n_asst <= 1:
                 labels = _labels_last_assistant_turn(tokenizer, messages, full_ids)
     else:
@@ -466,9 +437,7 @@ def _tokenize_chat_row(
             )
         # Full-sequence supervision path (train_on_inputs / responses-only off).
         text = format_sample(sample, fmt, tokenizer)
-        return _tokenize_string_row(
-            text, tokenizer, max_seq_length, keep_end=False
-        )
+        return _tokenize_string_row(text, tokenizer, max_seq_length, keep_end=False)
 
     attention = [1] * len(full_ids)
     if mask_assistant_only:
@@ -507,10 +476,7 @@ def _tokenize_text_row(
     from seiso.training.preprocess import text_body_from_sample
 
     text = (
-        text_body_from_sample(sample)
-        or sample.get("text")
-        or sample.get("content")
-        or str(sample)
+        text_body_from_sample(sample) or sample.get("text") or sample.get("content") or str(sample)
     )
     return _tokenize_string_row(text, tokenizer, max_seq_length, keep_end=False)
 

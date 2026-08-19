@@ -17,9 +17,7 @@ GGUF_ONLY_REPO_MESSAGE = (
 )
 
 
-def is_gguf_only_repo_id(
-    repo_id: str, tags: list[str] | tuple[str, ...] | None = None
-) -> bool:
+def is_gguf_only_repo_id(repo_id: str, tags: list[str] | tuple[str, ...] | None = None) -> bool:
     """True when *repo_id* points at a GGUF inference mirror, not a trainable checkpoint."""
     lowered = repo_id.strip().lower()
     if not lowered:
@@ -27,9 +25,7 @@ def is_gguf_only_repo_id(
     if _GGUF_REPO_RE.search(lowered) or lowered.endswith("-gguf"):
         return True
     tag_set = {t.lower() for t in (tags or ())}
-    return bool(
-        "gguf" in tag_set and "safetensors" not in tag_set and "pytorch" not in tag_set
-    )
+    return bool("gguf" in tag_set and "safetensors" not in tag_set and "pytorch" not in tag_set)
 
 
 def snapshot_has_trainable_weights(root: Path) -> bool:

@@ -52,6 +52,7 @@ from seiso.training.multi_gpu import (
 )
 from seiso.training.practices import (
     default_pad_to_multiple_of,
+    learning_rate_for_method,
     resolve_compute_dtype,
     resolve_dataloader_settings,
     resolve_map_workers,
@@ -66,6 +67,20 @@ from seiso.training.preprocess import (
 from seiso.training.sft import build_sft_trainer
 
 logger = logging.getLogger(__name__)
+
+
+def greater_is_better_for_metric(metric: str | None) -> bool:
+    """HuggingFace convention: minimize metrics ending in ``loss``.
+
+    Comparing only to the exact string ``eval_loss`` mishandles names like
+    ``loss`` and incorrectly maximizes them under early stopping.
+    """
+    return not str(metric or "eval_loss").endswith("loss")
+
+
+def resolve_trust_remote_code(cfg: TrainConfig) -> bool:
+    """Top-level ``trust_remote_code`` wins; ``extra`` remains a legacy override."""
+    return bool(cfg.trust_remote_code) or bool(cfg.extra.get("trust_remote_code", False))
 
 
 @dataclass
@@ -293,31 +308,44 @@ class SeisoTrainer:
 
             from seiso.training.metrics import is_main_process
 
-            if not is_main_process():
-                logger.info("Non-main rank finished training (no checkpoint write)")
-                return cfg.output_dir
+            def _ddp_barrier() -> None:
+                """Sync ranks so non-main teardown cannot race main's final save.
 
-            out = (
-                cfg.output_dir
-                / f"checkpoint-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
-            )
-            trainer.save_model(str(out))
-            tokenizer.save_pretrained(str(out))
-            if cfg.method == TrainMethod.LORA:
-                self._patch_adapter_metadata(out)
-            self._write_manifest(
-                out,
-                layout,
-                multi_gpu,
-                distributed_plan.strategy,
-                prepared.detected_format.value,
-                preprocess_stats=prepared.preprocess_stats,
-                train_samples=len(prepared.train_ds),
-                eval_samples=len(prepared.eval_ds) if prepared.eval_ds is not None else 0,
-                train_fingerprints=prepared.train_fingerprints,
-                dataset_merkle_skipped=prepared.dataset_merkle_skipped,
-            )
-            logger.info("Training complete: %s", out)
+                Fail closed when the process group is initialized — swallowing
+                all exceptions hid teardown races the barrier exists to prevent.
+                """
+                import torch.distributed as dist
+
+                if dist.is_available() and dist.is_initialized():
+                    dist.barrier()
+
+            _ddp_barrier()
+            out = cfg.output_dir
+            if is_main_process():
+                out = (
+                    cfg.output_dir
+                    / f"checkpoint-{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}"
+                )
+                trainer.save_model(str(out))
+                tokenizer.save_pretrained(str(out))
+                if cfg.method == TrainMethod.LORA:
+                    self._patch_adapter_metadata(out)
+                self._write_manifest(
+                    out,
+                    layout,
+                    multi_gpu,
+                    distributed_plan.strategy,
+                    prepared.detected_format.value,
+                    preprocess_stats=prepared.preprocess_stats,
+                    train_samples=len(prepared.train_ds),
+                    eval_samples=len(prepared.eval_ds) if prepared.eval_ds is not None else 0,
+                    train_fingerprints=prepared.train_fingerprints,
+                    dataset_merkle_skipped=prepared.dataset_merkle_skipped,
+                )
+                logger.info("Training complete: %s", out)
+            else:
+                logger.info("Non-main rank finished training (no checkpoint write)")
+            _ddp_barrier()
             return out
         finally:
             try:
@@ -419,9 +447,7 @@ class SeisoTrainer:
             return env
         return bool(getattr(self.config, "dataset_merkle", True))
 
-    def _collect_train_fingerprints(
-        self, train_ds: Any
-    ) -> tuple[list[str] | None, str | None]:
+    def _collect_train_fingerprints(self, train_ds: Any) -> tuple[list[str] | None, str | None]:
         """Fingerprint final train rows before tokenization (for merkle commit)."""
         if not self._dataset_merkle_wanted():
             return None, "disabled"
@@ -598,14 +624,13 @@ class SeisoTrainer:
             # Opt-in packing upgrades only (never force-disable user packing=true).
             # Never auto-enable packing when response-only chat masking is required —
             # packing + Seiso assistant masks are incompatible (TEXT CPT is OK).
-            packing_ok = (
-                not cfg.train_on_responses_only
-                or cfg.dataset_format == DatasetFormat.TEXT
-            )
+            packing_ok = not cfg.train_on_responses_only or cfg.dataset_format == DatasetFormat.TEXT
             if profile.get("packing") and not cfg.packing and packing_ok:
                 updates["packing"] = True
-            if profile.get("padding_free") and packing_ok and (
-                updates.get("packing", cfg.packing) and not cfg.padding_free
+            if (
+                profile.get("padding_free")
+                and packing_ok
+                and (updates.get("packing", cfg.packing) and not cfg.padding_free)
             ):
                 updates["padding_free"] = True
             # use_cuda_graphs lives in extra (not a top-level TrainConfig field).
@@ -708,9 +733,7 @@ class SeisoTrainer:
                 latest = self._latest_checkpoint_dir(cfg.output_dir)
                 if latest is not None:
                     resume_from_checkpoint = str(latest)
-                    self._log(
-                        f"OOM recovery: resuming from latest checkpoint {latest}"
-                    )
+                    self._log(f"OOM recovery: resuming from latest checkpoint {latest}")
                 else:
                     self._log(
                         "OOM recovery: no checkpoint found under output_dir; "
@@ -764,7 +787,9 @@ class SeisoTrainer:
         try:
             from seiso.models.hub_quant import is_native_hub_quant_model
 
-            trust_remote_code = bool(cfg.extra.get("trust_remote_code", False))
+            # Prefer top-level TrainConfig.trust_remote_code; allow extra as
+            # a legacy/advanced override so either path enables custom code.
+            trust_remote_code = resolve_trust_remote_code(cfg)
             native_hub_quant = is_native_hub_quant_model(
                 str(cfg.model_id),
                 trust_remote_code=trust_remote_code,
@@ -780,7 +805,7 @@ class SeisoTrainer:
                 load_in_4bit=load_4bit,
                 load_in_8bit=load_8bit,
                 dtype=load_dtype,
-                trust_remote_code=bool(cfg.extra.get("trust_remote_code", False)),
+                trust_remote_code=trust_remote_code,
                 use_flash_attention=use_flash,
             )
         except OSError as exc:
@@ -806,11 +831,11 @@ class SeisoTrainer:
                         gradient_checkpointing_kwargs={"use_reentrant": False}
                     )
                 self._loaded.model = model
-            except ImportError:
-                logger.warning(
-                    "prepare_model_for_kbit_training unavailable — install peft>=0.11; "
-                    "QLoRA may train without k-bit preparation"
-                )
+            except ImportError as exc:
+                raise ImportError(
+                    "prepare_model_for_kbit_training requires peft>=0.11 for QLoRA; "
+                    "refusing to continue without k-bit preparation"
+                ) from exc
 
         return model, tokenizer
 
@@ -914,13 +939,22 @@ class SeisoTrainer:
 
         _ta_fields = set(inspect.signature(_TA.__init__).parameters.keys())
 
+        # Field default 2e-4 is the LoRA default. For FULL/embedding/RL methods,
+        # treat that sentinel as "unset" so learning_rate_for_method applies.
+        _lora_default_lr = 2e-4
+        explicit_lr = float(cfg.learning_rate)
+        if cfg.method != TrainMethod.LORA and abs(explicit_lr - _lora_default_lr) < 1e-15:
+            effective_lr = learning_rate_for_method(cfg.method)
+        else:
+            effective_lr = learning_rate_for_method(cfg.method, explicit=explicit_lr)
+
         base = {
             "output_dir": str(cfg.output_dir),
             "num_train_epochs": cfg.epochs,
             "per_device_train_batch_size": cfg.batch_size,
             "per_device_eval_batch_size": cfg.batch_size,
             "gradient_accumulation_steps": cfg.gradient_accumulation_steps,
-            "learning_rate": cfg.learning_rate,
+            "learning_rate": effective_lr,
             "warmup_ratio": cfg.warmup_ratio,
             "weight_decay": cfg.weight_decay,
             "max_grad_norm": cfg.max_grad_norm,
@@ -944,9 +978,13 @@ class SeisoTrainer:
             "dataloader_persistent_workers": persistent_workers,
             "gradient_checkpointing": cfg.gradient_checkpointing,
         }
+        if cfg.max_steps is not None and "max_steps" in _ta_fields:
+            base["max_steps"] = int(cfg.max_steps)
         if eval_ds is not None and cfg.early_stopping and "metric_for_best_model" in _ta_fields:
-            base["metric_for_best_model"] = cfg.metric_for_best_model
-            base["greater_is_better"] = cfg.metric_for_best_model != "eval_loss"
+            # Match HuggingFace: minimize any *loss metric, maximize others.
+            metric = str(cfg.metric_for_best_model or "eval_loss")
+            base["metric_for_best_model"] = metric
+            base["greater_is_better"] = greater_is_better_for_metric(metric)
         # save_safetensors was removed in transformers 5.x — only add when available
         if "save_safetensors" in _ta_fields:
             base["save_safetensors"] = cfg.save_safetensors
@@ -1162,9 +1200,7 @@ class SeisoTrainer:
                 }
             except Exception as exc:
                 logger.warning("dataset merkle commit failed: %s", exc)
-                merkle_fields = {
-                    "dataset_merkle_skipped": f"commit_error:{type(exc).__name__}"
-                }
+                merkle_fields = {"dataset_merkle_skipped": f"commit_error:{type(exc).__name__}"}
         elif dataset_merkle_skipped:
             merkle_fields = {"dataset_merkle_skipped": dataset_merkle_skipped}
 

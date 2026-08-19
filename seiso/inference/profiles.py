@@ -40,7 +40,11 @@ _PROFILE_DEFAULTS: dict[str, dict[str, str]] = {
 
 
 def resolve_inference_profile(raw: str | None = None) -> InferenceProfile:
-    text = (raw if raw is not None else env_str("SEISO_INFERENCE_PROFILE", "interactive")).strip().lower()
+    text = (
+        (raw if raw is not None else env_str("SEISO_INFERENCE_PROFILE", "interactive"))
+        .strip()
+        .lower()
+    )
     if text in {"safe", "interactive", "throughput"}:
         return text  # type: ignore[return-value]
     return "interactive"

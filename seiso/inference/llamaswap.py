@@ -996,9 +996,7 @@ class OllamaClient:
                                 )
                                 runtime_stats["sidecar_resident_confirmed"] = True
                             if not should_stop():
-                                yield StreamToken(
-                                    "", new_tokens=0, finish_reason="length"
-                                )
+                                yield StreamToken("", new_tokens=0, finish_reason="length")
                             break
                     tool_text = tool_buffer.add(message.get("tool_calls"))
                     if tool_text:
@@ -1062,10 +1060,7 @@ class OllamaClient:
                                 and guard.thinking_tokens > 0
                                 and (
                                     hit_length
-                                    or (
-                                        think_cap > 0
-                                        and eval_count >= max(1, think_cap)
-                                    )
+                                    or (think_cap > 0 and eval_count >= max(1, think_cap))
                                 )
                             ):
                                 hit_length = True
@@ -1188,9 +1183,7 @@ class OllamaClient:
         content_max = max(1, int(max_tokens))
         policy = resolve_thinking_policy(
             content_max_tokens=content_max,
-            messages=planned.get("messages")
-            if isinstance(planned.get("messages"), list)
-            else None,
+            messages=planned.get("messages") if isinstance(planned.get("messages"), list) else None,
             model_key=str(
                 planned.get("model_name")
                 or planned.get("model_id")
@@ -1239,11 +1232,7 @@ class OllamaClient:
         target = urllib.parse.urljoin(f"{self.url}/", path.lstrip("/"))
         # Drop Seiso-only planning keys; Ollama rejects unknown top-level fields
         # on some builds and they must never hit the wire.
-        wire = {
-            key: value
-            for key, value in body.items()
-            if not str(key).startswith("_seiso_")
-        }
+        wire = {key: value for key, value in body.items() if not str(key).startswith("_seiso_")}
         data = json.dumps(wire).encode("utf-8")
         return urllib.request.Request(
             target,

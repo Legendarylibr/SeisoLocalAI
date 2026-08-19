@@ -4,8 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
-from collections.abc import AsyncIterator, Callable
-from typing import Any
+from collections.abc import AsyncIterator
 
 from forge.db.store import Database
 from forge.orchestrators.base import Orchestrator
@@ -32,7 +31,6 @@ async def job_log_event_gen(
     *,
     db: Database | None = None,
     user_id: str | None = None,
-    before_result: Callable[[dict[str, Any]], list[dict[str, str]]] | None = None,
 ) -> AsyncIterator[dict[str, str]]:
     live_job = orchestrator.get_job(job_id)
     replay_durable = db is not None and user_id is not None and live_job is None
@@ -46,14 +44,7 @@ async def job_log_event_gen(
         yield {"event": "error", "data": job.error}
     # Never stream a success payload for cancelled/failed jobs (cancel can win
     # after execute() returns a full result dict).
-    if (
-        job
-        and job.result
-        and job.status.value == "completed"
-    ):
-        if before_result:
-            for event in before_result(job.result):
-                yield event
+    if job and job.result and job.status.value == "completed":
         yield {"event": "result", "data": json.dumps(job.result, default=str)}
 
 
@@ -81,11 +72,7 @@ async def durable_job_events(
         if str(row.get("event_type") or "") != "status":
             continue
         payload = row.get("payload") or {}
-        status = (
-            payload.get("status", "unknown")
-            if isinstance(payload, dict)
-            else payload
-        )
+        status = payload.get("status", "unknown") if isinstance(payload, dict) else payload
         terminal_status = str(status).lower()
     for row in rows:
         event_type = str(row.get("event_type") or "message")
@@ -96,11 +83,7 @@ async def durable_job_events(
             yield {"event": "metric", "data": json.dumps(payload, default=str)}
         elif event_type == "status":
             # Match live training SSE: plain status string (F4-10).
-            status = (
-                payload.get("status", "unknown")
-                if isinstance(payload, dict)
-                else payload
-            )
+            status = payload.get("status", "unknown") if isinstance(payload, dict) else payload
             yield {"event": "status", "data": str(status)}
         elif event_type == "result":
             if terminal_status and terminal_status != "completed":

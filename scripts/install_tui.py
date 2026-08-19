@@ -242,14 +242,11 @@ def cmd_outro(args: argparse.Namespace) -> int:
     try:
         _draw(
             _FORMATTED_SUN_SCENE,
-            subtitle=f"install complete · open {args.url}",
+            subtitle="install complete · TUI starting",
             brand_line=f"{C_SUN}{BOLD}{BRAND}{RESET}",
             glitch=0.0,
         )
-        sys.stdout.write(
-            f"\n{C_SUN}{BOLD}Install complete.{RESET}\n"
-            f"Open Forge: {BOLD}{args.url}{RESET}\n\n"
-        )
+        sys.stdout.write(f"\n{C_SUN}{BOLD}Install complete.{RESET}\nTUI starting\n\n")
         sys.stdout.flush()
     finally:
         sys.stdout.write(SHOW)

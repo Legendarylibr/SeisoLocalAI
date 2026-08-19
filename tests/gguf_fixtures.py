@@ -77,6 +77,4 @@ def write_gguf_u32_metadata(path: Path, pairs: list[tuple[bytes, int]]) -> None:
                 struct.pack("<I", value),
             ]
         )
-    path.write_bytes(
-        b"GGUF" + struct.pack("<IQQ", 3, 0, 1 + len(pairs)) + b"".join(payload)
-    )
+    path.write_bytes(b"GGUF" + struct.pack("<IQQ", 3, 0, 1 + len(pairs)) + b"".join(payload))

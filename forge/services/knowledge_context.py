@@ -163,9 +163,7 @@ def count_knowledge_chunks(
     if not index_path.is_file():
         return 0
     # Prefer the filtered loader so quarantined / corrupt rows are not counted.
-    chunks, _ = _load_index_chunks(
-        data_dir, user_id=user_id, knowledge_base_id=knowledge_base_id
-    )
+    chunks, _ = _load_index_chunks(data_dir, user_id=user_id, knowledge_base_id=knowledge_base_id)
     return len(chunks)
 
 
@@ -226,9 +224,7 @@ def retrieve_knowledge_chunks(
 
     results = [
         chunk
-        for _score, _index, chunk in sorted(
-            top, key=lambda item: (item[0], item[1]), reverse=True
-        )
+        for _score, _index, chunk in sorted(top, key=lambda item: (item[0], item[1]), reverse=True)
     ]
     _cache_put(
         _retrieve_cache,

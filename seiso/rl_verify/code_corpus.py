@@ -85,9 +85,7 @@ def literal_repr(value: Any) -> str:
             return "(" + literal_repr(value[0]) + ",)"
         return "(" + ", ".join(literal_repr(v) for v in value) + ")"
     if isinstance(value, dict):
-        items = ", ".join(
-            f"{literal_repr(k)}: {literal_repr(v)}" for k, v in value.items()
-        )
+        items = ", ".join(f"{literal_repr(k)}: {literal_repr(v)}" for k, v in value.items())
         return "{" + items + "}"
     if isinstance(value, set):
         if not value:
@@ -149,7 +147,9 @@ def _rand_int(rng: random.Random, lo: int = -20, hi: int = 40) -> int:
     return rng.randint(lo, hi)
 
 
-def _rand_list(rng: random.Random, *, n: int | None = None, lo: int = -9, hi: int = 20) -> list[int]:
+def _rand_list(
+    rng: random.Random, *, n: int | None = None, lo: int = -9, hi: int = 20
+) -> list[int]:
     length = n if n is not None else rng.randint(0, 6)
     return [_rand_int(rng, lo, hi) for _ in range(length)]
 
@@ -244,7 +244,9 @@ def _f_predicate(rng: random.Random, idx: int) -> tuple[str, str, list[str], str
     return prompt, sol, calls, "is", ("bool", "easy", "generated")
 
 
-def _f_string_easy(rng: random.Random, idx: int) -> tuple[str, str, list[str], str, tuple[str, ...]]:
+def _f_string_easy(
+    rng: random.Random, idx: int
+) -> tuple[str, str, list[str], str, tuple[str, ...]]:
     kind = rng.choice(["strlen", "reverse", "upper", "lower", "first_char"])
     fname = f"{kind}_g{idx}"
     bodies = {
@@ -331,7 +333,9 @@ def _f_filter_map(rng: random.Random, idx: int) -> tuple[str, str, list[str], st
     return prompt, sol, calls, "==", ("list", "medium", "generated")
 
 
-def _f_string_medium(rng: random.Random, idx: int) -> tuple[str, str, list[str], str, tuple[str, ...]]:
+def _f_string_medium(
+    rng: random.Random, idx: int
+) -> tuple[str, str, list[str], str, tuple[str, ...]]:
     kind = rng.choice(
         ["count_vowels", "is_palindrome", "word_count", "strip_spaces", "title_words"]
     )
@@ -377,7 +381,9 @@ def _f_dict_count(rng: random.Random, idx: int) -> tuple[str, str, list[str], st
     return prompt, sol, calls, "==", ("dict", "medium", "generated")
 
 
-def _f_unique_order(rng: random.Random, idx: int) -> tuple[str, str, list[str], str, tuple[str, ...]]:
+def _f_unique_order(
+    rng: random.Random, idx: int
+) -> tuple[str, str, list[str], str, tuple[str, ...]]:
     fname = f"unique_preserve_g{idx}"
     sol = (
         f"def {fname}(items):\n"
@@ -398,7 +404,9 @@ def _f_unique_order(rng: random.Random, idx: int) -> tuple[str, str, list[str], 
     return prompt, sol, calls, "==", ("list", "medium", "generated")
 
 
-def _f_running_sum(rng: random.Random, idx: int) -> tuple[str, str, list[str], str, tuple[str, ...]]:
+def _f_running_sum(
+    rng: random.Random, idx: int
+) -> tuple[str, str, list[str], str, tuple[str, ...]]:
     fname = f"running_sum_g{idx}"
     sol = (
         f"def {fname}(nums):\n"
@@ -515,7 +523,9 @@ def _f_two_sum(rng: random.Random, idx: int) -> tuple[str, str, list[str], str, 
     return prompt, sol, calls, "==", ("list", "algo", "hard", "generated")
 
 
-def _f_binary_search(rng: random.Random, idx: int) -> tuple[str, str, list[str], str, tuple[str, ...]]:
+def _f_binary_search(
+    rng: random.Random, idx: int
+) -> tuple[str, str, list[str], str, tuple[str, ...]]:
     fname = f"binary_search_g{idx}"
     sol = (
         f"def {fname}(nums, target):\n"
@@ -540,7 +550,9 @@ def _f_binary_search(rng: random.Random, idx: int) -> tuple[str, str, list[str],
     return prompt, sol, calls, "==", ("algo", "hard", "generated")
 
 
-def _f_merge_sorted(rng: random.Random, idx: int) -> tuple[str, str, list[str], str, tuple[str, ...]]:
+def _f_merge_sorted(
+    rng: random.Random, idx: int
+) -> tuple[str, str, list[str], str, tuple[str, ...]]:
     fname = f"merge_sorted_g{idx}"
     sol = (
         f"def {fname}(a, b):\n"
@@ -566,7 +578,9 @@ def _f_merge_sorted(rng: random.Random, idx: int) -> tuple[str, str, list[str], 
     return prompt, sol, calls, "==", ("algo", "list", "hard", "generated")
 
 
-def _f_mini_codebase_stats(rng: random.Random, idx: int) -> tuple[str, str, list[str], str, tuple[str, ...]]:
+def _f_mini_codebase_stats(
+    rng: random.Random, idx: int
+) -> tuple[str, str, list[str], str, tuple[str, ...]]:
     """Multi-function mini module: helpers + public API (codebase-like)."""
     api = f"summarize_g{idx}"
     sol = (
@@ -583,7 +597,7 @@ def _f_mini_codebase_stats(rng: random.Random, idx: int) -> tuple[str, str, list
         f"    return x\n"
         f"\n"
         f"def {api}(nums, lo=0, hi=100):\n"
-        f"    \"\"\"Return dict with count, mean (clamped into [lo,hi]), and max.\"\"\"\n"
+        f'    """Return dict with count, mean (clamped into [lo,hi]), and max."""\n'
         f"    if not nums:\n"
         f"        return {{'count': 0, 'mean': 0, 'max': None}}\n"
         f"    m = _mean_{idx}(nums)\n"
@@ -607,7 +621,9 @@ def _f_mini_codebase_stats(rng: random.Random, idx: int) -> tuple[str, str, list
     return prompt, sol, calls, "==", ("codebase", "dict", "hard", "generated")
 
 
-def _f_mini_codebase_text(rng: random.Random, idx: int) -> tuple[str, str, list[str], str, tuple[str, ...]]:
+def _f_mini_codebase_text(
+    rng: random.Random, idx: int
+) -> tuple[str, str, list[str], str, tuple[str, ...]]:
     api = f"normalize_tokens_g{idx}"
     sol = (
         f"def _split_words_{idx}(text):\n"
@@ -646,7 +662,9 @@ def _f_mini_codebase_text(rng: random.Random, idx: int) -> tuple[str, str, list[
     return prompt, sol, calls, "==", ("codebase", "string", "hard", "generated")
 
 
-def _f_matrix_flatten(rng: random.Random, idx: int) -> tuple[str, str, list[str], str, tuple[str, ...]]:
+def _f_matrix_flatten(
+    rng: random.Random, idx: int
+) -> tuple[str, str, list[str], str, tuple[str, ...]]:
     fname = f"flatten_g{idx}"
     sol = (
         f"def {fname}(matrix):\n"

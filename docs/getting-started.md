@@ -19,7 +19,7 @@ This guide walks you from a fresh machine to your first chat, training run, and 
 
 ### Linux, macOS, and WSL2 (fastest)
 
-One command installs dependencies (including native Linux build tools), builds the UI, and **starts Forge** (browser opens automatically):
+One command installs dependencies (including native Linux build tools), builds optional extras, and **starts the Seiso TUI** (no browser):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
@@ -93,17 +93,17 @@ See [install.md](install.md) for AMD ROCm, pip extras, and upgrade steps.
 ## Step 2 — Onboarding
 
 1. Open **http://127.0.0.1:8765**
-2. Choose **Generate key and continue** (default), or import an existing `nsec`
-3. If you generated a key: **write down the `nsec1…` shown on screen**, optionally **Download encrypted .txt** (NIP-49 `ncryptsec` + passphrase), then press **Continue** (the `npub` is your public identity)
-4. Later sessions: sign in by pasting the instance `nsec` (lost key → start a new local session)
+2. Choose **Create account and continue** (default). To restore an existing account, open **Already have a recovery key?** and paste it
+3. If you created an account: **save the recovery key** shown on screen (store it in a password manager), optionally **Download encrypted .txt** with a passphrase, then press **I saved my recovery key — continue**. The public ID shown is safe to share
+4. Later sessions: sign in by pasting that recovery key (lost key → start a new local session)
 5. Optionally paste a [Hugging Face token](https://huggingface.co/settings/tokens) in **Settings** for gated models and faster downloads
 
-| Key | Role |
-|-----|------|
-| **nsec** | Private — backup on generate; paste to sign in later |
-| **npub** | Public identity for this instance (shown in UI; cannot unlock alone) |
+| What the UI says | Technical name | Role |
+|------------------|----------------|------|
+| **Recovery key** | `nsec` | Private — save on create; paste to sign in later |
+| **Public ID** | `npub` | Public owner identity (safe to share; cannot unlock alone) |
 
-Seiso binds to `127.0.0.1` by default — keys stay on your machine (encrypted under `nostr_keys/`).
+You do not need a Nostr app. Same key formats under the hood. Seiso binds to `127.0.0.1` by default — the owner pair is the instance identity (encrypted under `nostr_keys/`; Compat `/v1` key is bound to the same public ID / npub).
 
 ## Step 3 — Download a model
 
@@ -118,9 +118,15 @@ Before loading a larger model, use **Free memory** in Chat or Model Hub to unloa
 
 ## Step 4 — Chat with a local model
 
-1. Open **Chat** (`/chat`)
-2. Select a downloaded model or a GGUF backend
-3. Send a message — responses stream in real time
+Default path (`start` / `seiso tui`) is the terminal UI:
+
+1. Create a local account (**Enter** on Create account) or restore a recovery key — same `nsec` / `npub` as Forge
+2. Hub lists **local GGUFs** and **live Hugging Face** results
+3. `↑`/`↓` to a model, **Enter** to open it (already on disk) or download it (`/search qwen` still works)
+4. Type a message in Chat — weights load on the first send
+5. `/unload` (or Settings → Enter) frees RAM/VRAM without deleting downloads
+
+`seiso forge` remains the optional HTTP API / React app (`SEISO_UI=forge start`).
 
 **Backend auto-selection:**
 
@@ -223,13 +229,11 @@ GGUF export requires `llama.cpp` (set `LLAMA_CPP_DIR` or install system `convert
 |---------|-------|-------|
 | Model compression (any HF causal LM; Llama-family prune) | `/compress` | [compression.md](compression.md) · `seiso compress run` |
 | Teacher distill + DPO alignment | `/distill-rl` | [compression.md](compression.md) · `seiso distill-rl run` |
-| RL adaptive GGUF quantization | `/rl-quant` | [compression.md](compression.md) · `seiso rl-quant run` |
 | Local RAG corpus | `/knowledge` | [forge.md](forge.md) |
 | Visual recipe graphs | `/recipes` | [forge.md](forge.md) |
 | External providers (OpenAI, vLLM) | `/integrations` | [forge.md](forge.md) |
 | Multi-GPU training | Training Studio checkbox | [training/multi-gpu.md](training/multi-gpu.md) |
 | Fused GPU kernels | Training config / Studio | [training/kernels.md](training/kernels.md) |
-| Quant regression study (CLI) | `seiso experiment quant-regression` | [cli.md](cli.md#seiso-experiment) |
 | HTTPS / LAN access | `deploy/` + `.env` | [deployment/reverse-proxy.md](deployment/reverse-proxy.md) |
 
 ## Data directory layout
@@ -251,7 +255,6 @@ Default data directory (override with `SEISO_DATA_DIR`):
 ├── checkpoints/      # Training outputs (per user)
 ├── exports/          # Merged / GGUF / LoRA exports
 ├── compress/         # LLM compression artifacts ({user_id}/{job_id}/runs/<run_id>/)
-├── rl_quant/         # RL quant policy outputs
 ├── distill_rl/       # Distillation / RL artifacts
 ├── recipes/          # Recipe Studio job data
 ├── knowledge/        # RAG vector stores
@@ -274,3 +277,7 @@ See also the canonical tree in [README.md](../README.md#data--storage).
 - **Problems:** [troubleshooting.md](troubleshooting.md)
 - **Full CLI:** [cli.md](cli.md)
 - **Security hardening:** [README.md](../README.md#security) and [forge.md](forge.md)
+- **Opt-in remote marketplace (Ark + L402) — not functional yet, do not use:** [pay/marketplace.md](pay/marketplace.md) — self-hosted stays free
+- **Buzz shared / multi-node training (secondary / opt-in):** [training/mesh.md](training/mesh.md) · skill [seiso-orchestrate](../.agents/skills/seiso-orchestrate/SKILL.md)
+
+Adaptive RL quantization research: [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization).

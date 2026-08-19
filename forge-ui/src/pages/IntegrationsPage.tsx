@@ -366,10 +366,11 @@ export function IntegrationsPage() {
             <IconIntegrations size={18} />
           </span>
           <div className="card-head-text">
-            <h3>Nostr provenance</h3>
+            <h3>Account identity &amp; provenance</h3>
             <p>
-              External attestation of run manifest digests (not weights). Default path is on;
-              disable with <code>SEISO_ALLOW_NOSTR=0</code>. Optional deps:{" "}
+              Same local account key as sign-in (public ID / npub). Optional: publish run
+              digest attestations to Nostr relays — not weights. Disable with{" "}
+              <code>SEISO_ALLOW_NOSTR=0</code>. Optional deps:{" "}
               <code>pip install &apos;seiso[nostr]&apos;</code>.
             </p>
           </div>
@@ -390,14 +391,14 @@ export function IntegrationsPage() {
               <td>Identity match</td>
               <td>
                 {nostr?.identity_match === false
-                  ? "No — re-login or import account nsec to restore attest key"
+                  ? "No — sign in again or restore the account recovery key"
                   : nostr?.identity_match === true
                     ? "Yes"
                     : "—"}
               </td>
             </tr>
             <tr>
-              <td>npub</td>
+              <td>Public ID (npub)</td>
               <td className="mono">{nostr?.npub || "—"}</td>
             </tr>
           </tbody>
@@ -414,7 +415,7 @@ export function IntegrationsPage() {
             checked={nostrAuto}
             onChange={(e) => setNostrAuto(e.target.checked)}
           />
-          Auto-attest completed pipeline / export / RL-quant jobs
+          Auto-attest completed pipeline / export jobs
         </label>
         <label style={{ display: "flex", gap: "0.5rem", alignItems: "center", marginTop: "0.5rem" }}>
           <input
@@ -459,7 +460,7 @@ export function IntegrationsPage() {
                   if (res.nsec) {
                     setRotatedKey({ npub: res.npub, nsec: res.nsec });
                     setNostrMsg(
-                      `Rotated account key · ${res.npub}. Write down the nsec below — it is shown once.`,
+                      `Rotated account key · ${res.npub}. Save the recovery key below — shown once.`,
                     );
                   } else {
                     setNostrMsg(`Key created · ${res.npub}`);
@@ -481,7 +482,7 @@ export function IntegrationsPage() {
                   .clearNostrKey()
                   .then(() => {
                     setNostrMsg(
-                      "Signing key cleared from disk. Account npub unchanged — login with your nsec restores attest material.",
+                      "Signing key cleared from disk. Public ID unchanged — sign in with your recovery key to restore attest material.",
                     );
                     return refresh();
                   })

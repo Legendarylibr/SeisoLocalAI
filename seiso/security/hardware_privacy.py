@@ -56,9 +56,7 @@ def sanitize_system_metric_point(point: dict[str, Any]) -> dict[str, Any]:
     out = dict(point)
     gpus = out.get("gpus")
     if isinstance(gpus, list):
-        out["gpus"] = [
-            sanitize_gpu_record(g) if isinstance(g, dict) else g for g in gpus
-        ]
+        out["gpus"] = [sanitize_gpu_record(g) if isinstance(g, dict) else g for g in gpus]
     return out
 
 

@@ -70,9 +70,7 @@ def _generate_completions(
 
 
 def _humaneval_program(prompt: str, completion: str, test: str) -> str:
-    return (
-        "# Generated solution\n" + prompt + completion + "\n\n# Tests\n" + test + "\n"
-    )
+    return "# Generated solution\n" + prompt + completion + "\n\n# Tests\n" + test + "\n"
 
 
 def _mbpp_program(prompt: str, completion: str, tests: list[str]) -> str:

@@ -7,6 +7,7 @@ from httpx import ASGITransport, AsyncClient
 
 from forge.api.deps import clear_dependency_caches
 from forge.main import create_app
+from tests.conftest import RETURN_TOKEN_HEADERS
 
 
 @pytest.fixture
@@ -28,6 +29,7 @@ async def test_csrf_blocks_cookie_mutation_without_header(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201
 
@@ -44,6 +46,7 @@ async def test_csrf_allows_cookie_mutation_with_header(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201
 
@@ -62,6 +65,7 @@ async def test_bearer_auth_bypasses_csrf(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         token = reg.json()["access_token"]
 
@@ -81,6 +85,7 @@ async def test_empty_bearer_does_not_bypass_csrf(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201
 
@@ -101,6 +106,7 @@ async def test_junk_bearer_does_not_bypass_csrf(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201
 
@@ -118,14 +124,16 @@ async def test_inference_api_key_bypasses_csrf_on_v1(app):
     """Configured inference API key is a real Bearer credential (not junk)."""
     from forge.config import get_settings
 
-    key = get_settings().inference_api_key
-    assert key
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
+        # Register binds/rotates the Compat key to the owner npub — read after.
+        key = get_settings().inference_api_key
+        assert key
         res = await client.post(
             "/v1/chat/completions",
             headers={"Authorization": f"Bearer {key}"},
@@ -147,6 +155,7 @@ async def test_csrf_blocks_v1_without_header(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201
 
@@ -159,12 +168,56 @@ async def test_csrf_blocks_v1_without_header(app):
 
 
 @pytest.mark.asyncio
+async def test_csrf_rejects_mutation_outside_api_prefixes(app):
+    """Default-deny: mutating requests outside /api and /v1 fail CSRF."""
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post(
+            "/api/auth/register",
+            json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
+        )
+        assert reg.status_code == 201
+
+        res = await client.post("/other")
+        assert res.status_code == 403
+        assert "CSRF" in res.json()["detail"]
+
+
+def test_validate_csrf_denies_mutation_outside_api_unit():
+    from unittest.mock import MagicMock
+
+    from forge.security.csrf import validate_csrf
+
+    request = MagicMock()
+    request.method = "POST"
+    request.url.path = "/other"
+    request.headers = {}
+    request.cookies = {}
+    assert not validate_csrf(request)
+
+
+def test_validate_csrf_allows_safe_method_outside_api_unit():
+    from unittest.mock import MagicMock
+
+    from forge.security.csrf import validate_csrf
+
+    request = MagicMock()
+    request.method = "GET"
+    request.url.path = "/other"
+    request.headers = {}
+    request.cookies = {}
+    assert validate_csrf(request)
+
+
+@pytest.mark.asyncio
 async def test_cookie_session_auth(app):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201
         assert client.cookies.get("seiso_token")
@@ -187,6 +240,7 @@ async def test_login_rate_limit(monkeypatch):
         await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
 
         saw_unauthorized = False
@@ -241,12 +295,11 @@ async def test_settings_includes_security_posture(app):
         reg = await client.post(
             "/api/auth/register",
             json={"generate": True},
+            headers=RETURN_TOKEN_HEADERS,
         )
         token = reg.json()["access_token"]
 
-        res = await client.get(
-            "/api/settings", headers={"Authorization": f"Bearer {token}"}
-        )
+        res = await client.get("/api/settings", headers={"Authorization": f"Bearer {token}"})
         assert res.status_code == 200
         sec = res.json()["security"]
         assert sec["bind_localhost"] is True
@@ -279,3 +332,24 @@ def test_jti_revocation_store_enforces_cap(monkeypatch):
         tr.revoke_jti(f"jti-{idx}", now + 3600 + idx)
     assert len(tr._revoked) <= 100
     tr.clear_revocations_for_tests()
+
+
+def test_csrf_empty_bearer_helper():
+    from starlette.requests import Request
+
+    from forge.security.csrf import validate_csrf
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/inference/threads",
+        "raw_path": b"/api/inference/threads",
+        "query_string": b"",
+        "headers": [(b"authorization", b"Bearer ")],
+        "client": ("127.0.0.1", 123),
+        "server": ("test", 80),
+    }
+    assert validate_csrf(Request(scope)) is False

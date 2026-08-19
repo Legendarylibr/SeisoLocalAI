@@ -28,10 +28,7 @@ def iter_dataset_texts(
             continue
         yield normalize_training_text(txt)
         n += 1
-        if (
-            dataset_cfg.max_train_samples is not None
-            and n >= dataset_cfg.max_train_samples
-        ):
+        if dataset_cfg.max_train_samples is not None and n >= dataset_cfg.max_train_samples:
             break
 
 

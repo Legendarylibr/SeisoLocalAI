@@ -128,9 +128,7 @@ async def test_training_job_http_cancel(app, auth_client, monkeypatch):
 
 
 @pytest.mark.asyncio
-async def test_training_job_stream_emits_log_metric_status(
-    app, auth_client, monkeypatch
-):
+async def test_training_job_stream_emits_log_metric_status(app, auth_client, monkeypatch):
     client, _token, headers, data_dir = auth_client
     from forge.api.deps import get_db, get_training_orchestrator
 
@@ -153,9 +151,7 @@ async def test_training_job_stream_emits_log_metric_status(
             )
         out = Path(config.output_dir) / "checkpoint-stream"
         out.mkdir(parents=True, exist_ok=True)
-        (out / "adapter_config.json").write_text(
-            '{"base_model_name_or_path": "test/model"}'
-        )
+        (out / "adapter_config.json").write_text('{"base_model_name_or_path": "test/model"}')
         return out
 
     _install_fake_training(monkeypatch, fake_run_training)
@@ -202,9 +198,7 @@ async def test_training_job_stream_emits_log_metric_status(
 
 
 @pytest.mark.asyncio
-async def test_training_api_rejects_preference_slime_and_packing_mask(
-    app, auth_client
-):
+async def test_training_api_rejects_preference_slime_and_packing_mask(app, auth_client):
     client, _token, headers, data_dir = auth_client
     from forge.api.deps import get_db
 

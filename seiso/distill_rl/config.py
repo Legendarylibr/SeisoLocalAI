@@ -142,9 +142,7 @@ class DistillRLConfig(BaseModel):
     user_id: str
     output_root: Path
     preset: str = "smoke"
-    stages: list[str] = Field(
-        default_factory=lambda: ["distill", "rollout", "dpo", "evaluate"]
-    )
+    stages: list[str] = Field(default_factory=lambda: ["distill", "rollout", "dpo", "evaluate"])
     teacher_model: str
     student_model: str
     teacher_revision: str | None = None
@@ -220,9 +218,7 @@ class DistillRLConfig(BaseModel):
     eval_max_prompts: int = 8
     evaluate_teacher: bool = False
     benchmark_verifiable: bool = True
-    benchmark_tasks: list[str] = Field(
-        default_factory=lambda: ["gsm8k", "gpqa", "aime"]
-    )
+    benchmark_tasks: list[str] = Field(default_factory=lambda: ["gsm8k", "gpqa", "aime"])
 
     @field_validator("preference_source", mode="before")
     @classmethod
@@ -313,18 +309,14 @@ class DistillRLConfig(BaseModel):
                 "dpo_beta must be > 0 (β≤0 zeros or flips the DPO preference direction)"
             )
         if float(self.dpo_beta) > 1.0:
-            raise ValueError(
-                "dpo_beta must be <= 1.0 (very large β approaches hard preferences)"
-            )
+            raise ValueError("dpo_beta must be <= 1.0 (very large β approaches hard preferences)")
         if float(self.rollout_temperature) <= 0:
             raise ValueError(
-                "rollout_temperature must be > 0 so GRPO preference mining has "
-                "sampling diversity"
+                "rollout_temperature must be > 0 so GRPO preference mining has sampling diversity"
             )
         if int(self.grpo_group_size) < 2:
             raise ValueError(
-                "grpo_group_size must be >= 2 (DeepSeek GRPO needs a group of "
-                "samples per prompt)"
+                "grpo_group_size must be >= 2 (DeepSeek GRPO needs a group of samples per prompt)"
             )
         return self
 
@@ -392,10 +384,14 @@ def resolve_preference_source(
         source = str(raw).strip().lower()
         if source == "hf_dataset":
             source = "dataset"
-    elif merged.get("dataset_ref") or merged.get("hf_dataset") or (
-        prompt_path is None
-        and merged.get("prompt_library")
-        and not Path(str(merged.get("prompt_library"))).expanduser().is_file()
+    elif (
+        merged.get("dataset_ref")
+        or merged.get("hf_dataset")
+        or (
+            prompt_path is None
+            and merged.get("prompt_library")
+            and not Path(str(merged.get("prompt_library"))).expanduser().is_file()
+        )
     ):
         source = "dataset"
     elif prompt_path is not None and not bool(
@@ -417,9 +413,7 @@ def resolve_preference_source(
             "Use dataset, data_designer, grounded_library, or teacher_style."
         )
     if source not in PREFERENCE_SOURCES:
-        raise ValueError(
-            f"preference_source must be one of {PREFERENCE_SOURCES}; got {source!r}"
-        )
+        raise ValueError(f"preference_source must be one of {PREFERENCE_SOURCES}; got {source!r}")
     return cast(PreferenceSource, source)
 
 
@@ -478,9 +472,7 @@ def infer_use_chat_template(model_id: str, explicit: bool | None) -> bool:
     if explicit is not None:
         return explicit
     lowered = model_id.lower()
-    return any(
-        marker in lowered for marker in ("instruct", "chat", "-it", "_it", "gemma")
-    )
+    return any(marker in lowered for marker in ("instruct", "chat", "-it", "_it", "gemma"))
 
 
 def build_distill_rl_config(
@@ -492,9 +484,7 @@ def build_distill_rl_config(
 ) -> DistillRLConfig:
     merged = _merged_payload(payload)
     preset_name, preset = resolve_preset(PRESETS, str(merged.get("preset", "smoke")))
-    stages = list(
-        merged.get("stages") or preset.get("stages") or PRESETS["smoke"]["stages"]
-    )
+    stages = list(merged.get("stages") or preset.get("stages") or PRESETS["smoke"]["stages"])
     validate_stage_sequence(stages)
 
     hash_run_id = bool(merged.get("hash_run_id", False))
@@ -517,16 +507,12 @@ def build_distill_rl_config(
     if (
         preset_name == "smoke"
         and prompt_path is None
-        and str(
-            merged.get("preference_source", preset.get("preference_source"))
-        ).strip().lower()
+        and str(merged.get("preference_source", preset.get("preference_source"))).strip().lower()
         in {"", "grounded_library"}
     ):
         prompt_path = smoke_fixture_prompt_library()
 
-    preference_source = resolve_preference_source(
-        merged, preset, prompt_path=prompt_path
-    )
+    preference_source = resolve_preference_source(merged, preset, prompt_path=prompt_path)
     floor = _data_gen_floor_for_preset(preset_name)
     data_gen_count = int(
         merged.get(
@@ -573,9 +559,7 @@ def build_distill_rl_config(
         deterministic=bool(merged.get("deterministic", True)),
         hash_run_id=bool(merged.get("hash_run_id", False)),
         distill_steps=int(merged.get("distill_steps", preset.get("distill_steps", 2))),
-        max_train_samples=merged.get(
-            "max_train_samples", preset.get("max_train_samples")
-        ),
+        max_train_samples=merged.get("max_train_samples", preset.get("max_train_samples")),
         distill_alpha=float(merged.get("distill_alpha", 0.5)),
         distill_temperature=float(merged.get("distill_temperature", 2.0)),
         align_distill_with_prompts=bool(
@@ -595,17 +579,12 @@ def build_distill_rl_config(
         data_gen_count=data_gen_count,
         prompt_library_path=prompt_path,
         dataset_ref=(
-            str(merged.get("dataset_ref") or merged.get("hf_dataset") or "").strip()
-            or None
+            str(merged.get("dataset_ref") or merged.get("hf_dataset") or "").strip() or None
         ),
         dataset_split=str(merged.get("dataset_split", "train")),
         dataset_revision=str(merged.get("dataset_revision", "main")),
-        prompt_field=(
-            str(merged["prompt_field"]) if merged.get("prompt_field") else None
-        ),
-        answer_field=(
-            str(merged["answer_field"]) if merged.get("answer_field") else None
-        ),
+        prompt_field=(str(merged["prompt_field"]) if merged.get("prompt_field") else None),
+        answer_field=(str(merged["answer_field"]) if merged.get("answer_field") else None),
         tests_field=(str(merged["tests_field"]) if merged.get("tests_field") else None),
         preprocess_dataset=bool(merged.get("preprocess_dataset", True)),
         deduplicate_dataset=bool(merged.get("deduplicate_dataset", True)),
@@ -620,9 +599,7 @@ def build_distill_rl_config(
             )
         ),
         rollout_max_new_tokens=int(
-            merged.get(
-                "rollout_max_new_tokens", preset.get("rollout_max_new_tokens", 32)
-            )
+            merged.get("rollout_max_new_tokens", preset.get("rollout_max_new_tokens", 32))
         ),
         rollout_temperature=float(merged.get("rollout_temperature", 0.7)),
         verifiable_outcome_rewards=bool(
@@ -652,9 +629,7 @@ def build_distill_rl_config(
         dpo_learning_rate=float(
             merged.get("dpo_learning_rate", preset.get("dpo_learning_rate", 5e-6))
         ),
-        dpo_batch_size=int(
-            merged.get("dpo_batch_size", preset.get("dpo_batch_size", 1))
-        ),
+        dpo_batch_size=int(merged.get("dpo_batch_size", preset.get("dpo_batch_size", 1))),
         dpo_gradient_accumulation_steps=int(
             merged.get(
                 "dpo_gradient_accumulation_steps",
@@ -662,30 +637,23 @@ def build_distill_rl_config(
             )
         ),
         dpo_max_steps=merged.get("dpo_max_steps", preset.get("dpo_max_steps")),
-        dpo_save_steps=int(
-            merged.get("dpo_save_steps", preset.get("dpo_save_steps", 200))
-        ),
+        dpo_save_steps=int(merged.get("dpo_save_steps", preset.get("dpo_save_steps", 200))),
         dpo_use_lora=bool(merged.get("dpo_use_lora", True)),
         dpo_use_qlora=bool(merged.get("dpo_use_qlora", False)),
         dpo_average_log_prob=bool(
             merged.get("dpo_average_log_prob", preset.get("dpo_average_log_prob", False))
         ),
-        dpo_warmup_ratio=float(
-            merged.get("dpo_warmup_ratio", preset.get("dpo_warmup_ratio", 0.1))
-        ),
+        dpo_warmup_ratio=float(merged.get("dpo_warmup_ratio", preset.get("dpo_warmup_ratio", 0.1))),
         dpo_weight_decay=float(
             merged.get("dpo_weight_decay", preset.get("dpo_weight_decay", 0.01))
         ),
         dpo_max_grad_norm=float(
             merged.get("dpo_max_grad_norm", preset.get("dpo_max_grad_norm", 0.3))
         ),
-        eval_max_prompts=int(
-            merged.get("eval_max_prompts", preset.get("eval_max_prompts", 8))
-        ),
+        eval_max_prompts=int(merged.get("eval_max_prompts", preset.get("eval_max_prompts", 8))),
         evaluate_teacher=bool(merged.get("evaluate_teacher", False)),
         benchmark_verifiable=bool(merged.get("benchmark_verifiable", True)),
         benchmark_tasks=[
-            str(task).lower()
-            for task in merged.get("benchmark_tasks", ["gsm8k", "gpqa", "aime"])
+            str(task).lower() for task in merged.get("benchmark_tasks", ["gsm8k", "gpqa", "aime"])
         ],
     )

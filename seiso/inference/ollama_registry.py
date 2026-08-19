@@ -103,9 +103,7 @@ def default_ollama_tag(
         repo_slug = _slug(repo_id.replace("/", "-"), max_len=72)
         tag = f"seiso-{repo_slug}-{quant}" if quant else f"seiso-{repo_slug}"
     else:
-        digest = hashlib.sha256(_normalize_key(model_path).encode("utf-8")).hexdigest()[
-            :12
-        ]
+        digest = hashlib.sha256(_normalize_key(model_path).encode("utf-8")).hexdigest()[:12]
         tag = f"seiso-{quant}-{digest}" if quant else f"seiso-{digest}"
     return tag[:_MAX_TAG_LEN]
 
@@ -232,8 +230,10 @@ def resolve_ollama_artifact(
 
     fmt = (model_format or meta.get("format") or "").lower()
     path = Path(model_path).expanduser()
-    if fmt == "gguf" or path.suffix.lower() == ".gguf" or _path_has_creatable_gguf(
-        model_path, meta, model_format
+    if (
+        fmt == "gguf"
+        or path.suffix.lower() == ".gguf"
+        or _path_has_creatable_gguf(model_path, meta, model_format)
     ):
         gguf_path = _resolve_gguf_path(model_path, meta)
         if gguf_path is not None:
@@ -250,7 +250,12 @@ def _path_has_creatable_gguf(
     metadata: dict[str, Any] | None,
     model_format: str | None,
 ) -> bool:
-    return _resolve_gguf_path(model_path, _merge_metadata(metadata, model_path=model_path, model_format=model_format)) is not None
+    return (
+        _resolve_gguf_path(
+            model_path, _merge_metadata(metadata, model_path=model_path, model_format=model_format)
+        )
+        is not None
+    )
 
 
 def _resolve_gguf_path(model_path: str, metadata: dict[str, Any]) -> Path | None:
@@ -307,13 +312,17 @@ def _ollama_model_exists(tag: str) -> bool:
 def _run_ollama_create(tag: str, modelfile: Path) -> None:
     cmd = ["ollama", "create", tag, "-f", str(modelfile)]
     logger.info("Registering model with Ollama: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True, timeout=900, capture_output=True, text=True, env=_ollama_subprocess_env())
+    subprocess.run(
+        cmd, check=True, timeout=900, capture_output=True, text=True, env=_ollama_subprocess_env()
+    )
 
 
 def _run_ollama_pull(pull_name: str) -> None:
     cmd = ["ollama", "pull", pull_name]
     logger.info("Pulling Ollama model: %s", " ".join(cmd))
-    subprocess.run(cmd, check=True, timeout=1800, capture_output=True, text=True, env=_ollama_subprocess_env())
+    subprocess.run(
+        cmd, check=True, timeout=1800, capture_output=True, text=True, env=_ollama_subprocess_env()
+    )
 
 
 def register_model_with_ollama(
@@ -351,9 +360,7 @@ def register_model_with_ollama(
 
         if artifact.kind == "reference":
             if not _ollama_model_exists(tag):
-                logger.warning(
-                    "Ollama model %s is referenced but not present locally", tag
-                )
+                logger.warning("Ollama model %s is referenced but not present locally", tag)
             _persist_entry(model_path, tag, meta, create_skipped=False)
             return tag
 
@@ -407,10 +414,7 @@ def ensure_model_registered(
     if key in entries and entries[key].get("tag"):
         tag = str(entries[key]["tag"])
         if _ollama_available() and not entries[key].get("create_skipped"):
-            needs_retry = (
-                entries[key].get("format") == "gguf"
-                and not _ollama_model_exists(tag)
-            )
+            needs_retry = entries[key].get("format") == "gguf" and not _ollama_model_exists(tag)
             if not needs_retry:
                 return tag
         if _ollama_available():

@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
+import logging
 import os
 from functools import lru_cache
 from pathlib import Path
@@ -22,8 +24,12 @@ from seiso.security import generate_secret_key, resolve_data_dir
 
 StorageMode = Literal["persistent", "ephemeral"]
 
+logger = logging.getLogger(__name__)
+
 # Local Forge + Vite dev — 127.0.0.1 and localhost are different browser origins.
-DEFAULT_CORS_ORIGINS = "http://127.0.0.1:8765,http://localhost:8765,http://127.0.0.1:5173,http://localhost:5173"
+DEFAULT_CORS_ORIGINS = (
+    "http://127.0.0.1:8765,http://localhost:8765,http://127.0.0.1:5173,http://localhost:5173"
+)
 
 
 class ForgeSettings(BaseSettings):
@@ -84,7 +90,14 @@ class ForgeSettings(BaseSettings):
             else:
                 self.secret_key = generate_secret_key()
                 key_file.write_text(self.secret_key)
+            with contextlib.suppress(OSError):
                 key_file.chmod(0o600)
+        # JWT signing material — refuse trivially short env/file values.
+        if len(self.secret_key.encode("utf-8")) < 32:
+            raise RuntimeError(
+                "SEISO_SECRET_KEY (or data_dir/.secret_key) must be at least "
+                "32 bytes — regenerate with a strong random value"
+            )
 
         self._session_db_key = self._resolve_db_encryption_key()
 
@@ -108,18 +121,81 @@ class ForgeSettings(BaseSettings):
         configure_revocation_store(self.data_dir)
         validate_security_settings(self)
 
+    def rotate_inference_api_key(self) -> bool:
+        """Regenerate Compat ``/v1`` key on disk.
+
+        Returns False when ``SEISO_INFERENCE_API_KEY`` is env-bound (cannot
+        rotate without changing the process environment).
+        """
+        if "SEISO_INFERENCE_API_KEY" in os.environ:
+            return False
+        import secrets
+
+        key_file = self.data_dir / ".inference_api_key"
+        key_file.parent.mkdir(parents=True, exist_ok=True)
+        new_key = f"seiso_sk_{secrets.token_urlsafe(32)}"
+        key_file.write_text(new_key, encoding="utf-8")
+        key_file.chmod(0o600)
+        self.inference_api_key = new_key
+        return True
+
+    @property
+    def inference_api_key_owner_file(self) -> Path:
+        return self.data_dir / ".inference_api_key.owner"
+
+    def get_inference_api_key_owner(self) -> str | None:
+        """Pubkey hex of the npub that owns the Compat ``/v1`` key, if bound."""
+        path = self.inference_api_key_owner_file
+        if not path.is_file():
+            return None
+        raw = path.read_text(encoding="utf-8").strip().lower()
+        return raw if len(raw) == 64 and all(c in "0123456789abcdef" for c in raw) else None
+
+    def bind_inference_api_key_owner(self, pubkey_hex: str) -> None:
+        """Record that the Compat key belongs to this owner npub (pubkey hex)."""
+        pubkey = pubkey_hex.strip().lower()
+        if len(pubkey) != 64 or not all(c in "0123456789abcdef" for c in pubkey):
+            raise ValueError("inference key owner must be a 64-char hex pubkey")
+        path = self.inference_api_key_owner_file
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(pubkey, encoding="utf-8")
+        path.chmod(0o600)
+
+    def clear_inference_api_key_owner(self) -> None:
+        self.inference_api_key_owner_file.unlink(missing_ok=True)
+
+    def sync_inference_api_key_owner(self, pubkey_hex: str) -> bool:
+        """Bind Compat key to ``pubkey_hex``; rotate when the owner changes.
+
+        Returns whether the key was rotated.
+
+        When the Compat key is env-bound (``SEISO_INFERENCE_API_KEY``), rotation
+        is impossible. First bind (no prior owner) is allowed; rebinding to a
+        different owner is refused so a stale key cannot silently follow the
+        next npub.
+        """
+        pubkey = pubkey_hex.strip().lower()
+        current = self.get_inference_api_key_owner()
+        if current == pubkey:
+            return False
+        if current is not None and "SEISO_INFERENCE_API_KEY" in os.environ:
+            raise RuntimeError(
+                "Cannot rebind Compat /v1 key owner while SEISO_INFERENCE_API_KEY "
+                "is env-bound (rotation impossible). Unset the env var or rotate "
+                "the key out-of-band before changing owners."
+            )
+        rotated = self.rotate_inference_api_key()
+        self.bind_inference_api_key_owner(pubkey)
+        return rotated
+
     def _resolve_storage_mode(self) -> None:
         marker = self.data_dir / ".storage_mode"
-        env_configured = (
-            "SEISO_DB_EPHEMERAL" in os.environ or "SEISO_DB_STORAGE_MODE" in os.environ
-        )
+        env_configured = "SEISO_DB_EPHEMERAL" in os.environ or "SEISO_DB_STORAGE_MODE" in os.environ
         if env_configured:
             raw_mode = os.environ.get("SEISO_DB_STORAGE_MODE", "").strip().lower()
             if raw_mode:
                 if raw_mode not in {"persistent", "ephemeral"}:
-                    raise ValueError(
-                        "SEISO_DB_STORAGE_MODE must be 'persistent' or 'ephemeral'"
-                    )
+                    raise ValueError("SEISO_DB_STORAGE_MODE must be 'persistent' or 'ephemeral'")
                 self.db_ephemeral = raw_mode == "ephemeral"
             elif self.db_ephemeral is None:
                 self.db_ephemeral = False
@@ -173,7 +249,6 @@ class ForgeSettings(BaseSettings):
             "artifacts",
             "recipes",
             "uploads",
-            "rl_quant",
             "compress",
             "distill_rl",
             "hf_cache",
@@ -223,13 +298,41 @@ class ForgeSettings(BaseSettings):
 
     @property
     def hf_token_encryption_key(self) -> bytes:
-        """Dedicated key for HF token files, stored separately from JWT secret."""
+        """Dedicated random key for HF token files, stored separately from JWT secret."""
         key_file = self.data_dir / ".hf_token_encryption_key"
         if key_file.exists():
-            return load_encryption_key_file(key_file)
-        legacy = hashlib.sha256(f"seiso:hf-token:{self.secret_key}".encode()).digest()
-        persist_encryption_key_file(key_file, legacy)
-        return legacy
+            key = load_encryption_key_file(key_file)
+            legacy = hashlib.sha256(f"seiso:hf-token:{self.secret_key}".encode()).digest()
+            if key != legacy:
+                return key
+            # Legacy installs derived the key from the JWT secret (no key
+            # separation): rotate to a random key and re-encrypt stored tokens.
+            new_key = generate_encryption_key()
+            self._reencrypt_hf_tokens(legacy, new_key)
+            persist_encryption_key_file(key_file, new_key)
+            return new_key
+        key = generate_encryption_key()
+        persist_encryption_key_file(key_file, key)
+        return key
+
+    def _reencrypt_hf_tokens(self, old_key: bytes, new_key: bytes) -> None:
+        from forge.db.crypto import decrypt_field, encrypt_field
+
+        token_dir = self.data_dir / "hf_tokens"
+        if not token_dir.is_dir():
+            return
+        for path in token_dir.iterdir():
+            if not path.is_file():
+                continue
+            try:
+                raw = path.read_text(encoding="utf-8").strip()
+                if not raw:
+                    continue
+                token = decrypt_field(raw, old_key)
+                path.write_text(encrypt_field(token, new_key), encoding="utf-8")
+                path.chmod(0o600)
+            except Exception:
+                logger.warning("Could not re-encrypt HF token file: %s", path.name)
 
     @property
     def models_dir(self) -> Path:

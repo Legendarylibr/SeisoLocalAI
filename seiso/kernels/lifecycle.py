@@ -3,30 +3,61 @@
 from __future__ import annotations
 
 import gc
+import weakref
 from contextvars import ContextVar, Token
 from typing import Any
 
-# model_id -> weakref to model (for validation) + list of modules patched
-_PATCH_REGISTRY: dict[int, list[Any]] = {}
+# model_id -> (weakref to model for validation, list of modules patched).
+# The weakref is validated on every keyed access so a garbage-collected model's
+# id cannot be reused by a different live model and resurrect stale entries.
+_PATCH_REGISTRY: dict[int, tuple[weakref.ReferenceType | None, list[Any]]] = {}
 _ACTIVE_PATCH_SESSION: ContextVar[KernelPatchSession | None] = ContextVar(
     "seiso_kernel_patch_session", default=None
 )
 
 
+def _model_ref(model: Any) -> weakref.ReferenceType | None:
+    """Weakref to ``model`` for registry validation; None when not weakref-able."""
+    try:
+        return weakref.ref(model)
+    except TypeError:
+        return None
+
+
+def _entry_is_stale(entry: tuple[Any, list[Any]], model: Any | None = None) -> bool:
+    """True when the entry's model was garbage-collected (or is another object)."""
+    ref, _modules = entry
+    if ref is None:
+        return False  # Non-weakref-able model: id keying is all we have.
+    live = ref()
+    if live is None:
+        return True
+    return model is not None and live is not model
+
+
 def register_patch(model: Any, module: Any) -> None:
     """Track a module whose forward was replaced."""
     model_id = id(model)
-    if model_id not in _PATCH_REGISTRY:
-        _PATCH_REGISTRY[model_id] = []
-    _PATCH_REGISTRY[model_id].append(module)
+    entry = _PATCH_REGISTRY.get(model_id)
+    if entry is not None and _entry_is_stale(entry, model):
+        # Stale entry from a garbage-collected model whose id was reused:
+        # release its modules before tracking the new model under this id.
+        _restore_registry_key(model_id)
+        entry = None
+    if entry is None:
+        entry = (_model_ref(model), [])
+        _PATCH_REGISTRY[model_id] = entry
+    entry[1].append(module)
     if session := _ACTIVE_PATCH_SESSION.get():
         session.record(module)
 
 
 def _unregister_module(module: Any) -> None:
-    for model_id, modules in list(_PATCH_REGISTRY.items()):
-        _PATCH_REGISTRY[model_id] = [m for m in modules if m is not module]
-        if not _PATCH_REGISTRY[model_id]:
+    for model_id, (ref, modules) in list(_PATCH_REGISTRY.items()):
+        remaining = [m for m in modules if m is not module]
+        if remaining:
+            _PATCH_REGISTRY[model_id] = (ref, remaining)
+        else:
             _PATCH_REGISTRY.pop(model_id, None)
 
 
@@ -116,12 +147,18 @@ def restore_kernel_patches(model: Any | None = None) -> int:
     restored = 0
 
     if model is not None:
-        restored += _restore_registry_key(id(model))
+        model_id = id(model)
+        entry = _PATCH_REGISTRY.get(model_id)
+        if entry is not None and _entry_is_stale(entry, model):
+            # id reused after the original model was garbage-collected — the
+            # entry is not this model's; release it without touching this model.
+            _restore_registry_key(model_id)
+        restored += _restore_registry_key(model_id)
         # PeftModel / compile wrappers use a different id than register_patch —
         # restore only registry entries whose modules belong to this model tree.
         orphan_keys = [
             mid
-            for mid, modules in list(_PATCH_REGISTRY.items())
+            for mid, (_ref, modules) in list(_PATCH_REGISTRY.items())
             if any(_module_belongs_to_model(model, module) for module in modules)
         ]
         for mid in orphan_keys:
@@ -150,7 +187,10 @@ def _restore_registry_key(model_id: int) -> int:
     If restoring module *k* fails, modules ``k…N`` stay registered so a later
     ``restore_kernel_patches`` can retry.
     """
-    modules = list(_PATCH_REGISTRY.get(model_id, []))
+    entry = _PATCH_REGISTRY.get(model_id)
+    if entry is None:
+        return 0
+    ref, modules = entry
     restored = 0
     for idx, module in enumerate(modules):
         try:
@@ -159,7 +199,7 @@ def _restore_registry_key(model_id: int) -> int:
                 restored += 1
             _clear_patch_markers(module)
         except Exception:
-            _PATCH_REGISTRY[model_id] = modules[idx:]
+            _PATCH_REGISTRY[model_id] = (ref, modules[idx:])
             raise
     _PATCH_REGISTRY.pop(model_id, None)
     return restored

@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import pytest
 
-from seiso.distill_rl.outcome import ensure_thinking_completion, outcome_reward
+from seiso.distill_rl.outcome import outcome_reward
 from seiso.rl_verify import (
     final_answer_text,
     format_thinking_prompt,
@@ -19,10 +21,6 @@ def test_format_thinking_prompt_appends_instruction():
     text = format_thinking_prompt("Solve.", "Show work.")
     assert "Show work." in text
     assert text.endswith("<think>")
-
-
-def test_ensure_thinking_completion_is_noop():
-    assert ensure_thinking_completion("answer", enabled=True) == "answer"
 
 
 def test_closed_thinking_trace_detection():
@@ -62,9 +60,7 @@ def test_extract_choice_prefers_final_letter():
     assert extract_choice("I pick D.") == "d"
     # Unique free-form letter still works.
     assert extract_choice("Definitely B only.") == "b"
-    assert verify_outcome(
-        "A is wrong; the answer is B", "B", checker="choice"
-    )[0] == 1.0
+    assert verify_outcome("A is wrong; the answer is B", "B", checker="choice")[0] == 1.0
 
 
 def test_last_number_ignores_confidence_noise():
@@ -74,9 +70,7 @@ def test_last_number_ignores_confidence_noise():
     assert last_number("answer 42 after checking 3 cases") == 42.0
     assert last_number("Final answer: 7") == 7.0
     assert last_number("\\boxed{99}") == 99.0
-    assert verify_outcome(
-        "The answer is 42, confidence 100", "42", checker="numeric"
-    )[0] == 1.0
+    assert verify_outcome("The answer is 42, confidence 100", "42", checker="numeric")[0] == 1.0
 
 
 def test_outcome_reward_distill_api():
@@ -230,16 +224,12 @@ def test_code_partial_credit_does_not_mark_passed():
     assert result.passed is False
     assert result.reward == 0.0
 
-    dense = score_completion(
-        partial, sample, checker="code", code_reward_mode="dense"
-    )
+    dense = score_completion(partial, sample, checker="code", code_reward_mode="dense")
     assert dense.outcome == pytest.approx(2.0 / 3.0)
     assert dense.passed is False
     assert dense.reward == pytest.approx(2.0 / 3.0)
 
-    auto = score_completion(
-        partial, sample, checker="code", code_reward_mode="auto"
-    )
+    auto = score_completion(partial, sample, checker="code", code_reward_mode="auto")
     # auto is provisional dense until the trainer promotes a group to binary.
     assert auto.outcome == pytest.approx(2.0 / 3.0)
 
@@ -250,3 +240,14 @@ def test_slime_named_rewards_prefer_final_answer():
     assert numeric_reward(think_only, sample) == 0.0
     assert contains_answer_reward(think_only, sample) == 0.0
     assert numeric_reward("<think>x</think>\n42", sample) == 1.0
+
+
+def test_emit_standard_artifacts_skips_orphan_distill_by_default(tmp_path: Path):
+    from seiso.rl_verify.synth_code import emit_standard_artifacts
+
+    stats = emit_standard_artifacts(
+        data_dir=tmp_path, seed=0, verify=True, limit=2, include_variants=False
+    )
+    assert "distill_code_synth" not in stats
+    assert not (tmp_path / "distill_code_synth.jsonl").exists()
+    assert (tmp_path / "slime_code_sample.jsonl").is_file()

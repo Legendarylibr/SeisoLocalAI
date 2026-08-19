@@ -41,7 +41,6 @@ export function usePipelineJobStream() {
           const line = `ERROR: ${data}`;
           setLogs((prev) => appendBoundedLog(prev, line));
           handlers.onError?.(data);
-          handlers.onResult?.(data);
         }
         if (event === "result") {
           handlers.onResult?.(data);
@@ -56,7 +55,6 @@ export function usePipelineJobStream() {
         const line = `ERROR: ${err.message}`;
         setLogs((prev) => appendBoundedLog(prev, line));
         handlers.onStreamError?.(err.message);
-        handlers.onResult?.(err.message);
       },
     );
   }, [stopStream]);

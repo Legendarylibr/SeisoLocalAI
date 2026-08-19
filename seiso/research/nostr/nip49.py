@@ -18,6 +18,10 @@ from seiso.research.nostr.bech32 import bech32_decode, bech32_encode
 
 _PAYLOAD_LEN: Final = 91
 _VERSION: Final = 0x02
+# Spec allows up to 22; cap lower so crafted ncryptsec cannot DoS decrypt paths.
+_MAX_LOG_N: Final = 18
+# New backups must use a scrypt cost floor (~64 MiB); weaker log_n still decrypts.
+_MIN_LOG_N_ENCRYPT: Final = 16
 
 
 def _normalize_password(password: str) -> bytes:
@@ -25,8 +29,8 @@ def _normalize_password(password: str) -> bytes:
 
 
 def _scrypt_key(password: str, salt: bytes, log_n: int) -> bytes:
-    if not (1 <= log_n <= 22):
-        raise ValueError("log_n must be between 1 and 22")
+    if not (1 <= log_n <= _MAX_LOG_N):
+        raise ValueError(f"log_n must be between 1 and {_MAX_LOG_N}")
     kdf = Scrypt(
         salt=salt,
         length=32,
@@ -71,9 +75,7 @@ def _hchacha20(key: bytes, nonce16: bytes) -> bytes:
     return struct.pack("<8I", *out)
 
 
-def _xchacha20poly1305_encrypt(
-    key: bytes, nonce24: bytes, plaintext: bytes, aad: bytes
-) -> bytes:
+def _xchacha20poly1305_encrypt(key: bytes, nonce24: bytes, plaintext: bytes, aad: bytes) -> bytes:
     if len(nonce24) != 24:
         raise ValueError("XChaCha20-Poly1305 nonce must be 24 bytes")
     subkey = _hchacha20(key, nonce24[:16])
@@ -82,9 +84,7 @@ def _xchacha20poly1305_encrypt(
     return ChaCha20Poly1305(subkey).encrypt(chacha_nonce, plaintext, aad)
 
 
-def _xchacha20poly1305_decrypt(
-    key: bytes, nonce24: bytes, ciphertext: bytes, aad: bytes
-) -> bytes:
+def _xchacha20poly1305_decrypt(key: bytes, nonce24: bytes, ciphertext: bytes, aad: bytes) -> bytes:
     if len(nonce24) != 24:
         raise ValueError("XChaCha20-Poly1305 nonce must be 24 bytes")
     subkey = _hchacha20(key, nonce24[:16])
@@ -106,6 +106,8 @@ def encrypt_ncryptsec(
         raise ValueError("password is required")
     if key_security not in (0x00, 0x01, 0x02):
         raise ValueError("key_security must be 0x00, 0x01, or 0x02")
+    if not (_MIN_LOG_N_ENCRYPT <= log_n <= _MAX_LOG_N):
+        raise ValueError(f"log_n for encrypt must be between {_MIN_LOG_N_ENCRYPT} and {_MAX_LOG_N}")
     salt = os.urandom(16)
     key = _scrypt_key(password, salt, log_n)
     nonce = os.urandom(24)
@@ -129,8 +131,8 @@ def decrypt_ncryptsec(ncryptsec: str, password: str) -> bytes:
     if data[0] != _VERSION:
         raise ValueError(f"unsupported ncryptsec version {data[0]}")
     log_n = int(data[1])
-    if not (1 <= log_n <= 22):
-        raise ValueError("log_n must be between 1 and 22")
+    if not (1 <= log_n <= _MAX_LOG_N):
+        raise ValueError(f"log_n must be between 1 and {_MAX_LOG_N}")
     salt = data[2:18]
     nonce = data[18:42]
     aad = data[42:43]

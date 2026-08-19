@@ -24,7 +24,10 @@ async def test_release_all_inference_memory_unloads_local(monkeypatch, tmp_path)
         "forge.services.memory_release.release_external_inference_memory",
         lambda **kwargs: (
             calls.append("external"),
-            {"release_notes": ["Released Ollama resident models (keep_alive=0)"], "managed_vllm_stopped": True},
+            {
+                "release_notes": ["Released Ollama resident models (keep_alive=0)"],
+                "managed_vllm_stopped": True,
+            },
         )[1],
     )
     monkeypatch.setattr(
@@ -183,9 +186,7 @@ async def test_preload_excludes_local_chat(monkeypatch, tmp_path):
 
     monkeypatch.setattr(orchestrator._runner, "warm_model", blocking_warm)
     monkeypatch.setattr(orchestrator._runner, "chat", fake_chat)
-    preload = asyncio.create_task(
-        orchestrator.preload_model({"model_path": "x"})
-    )
+    preload = asyncio.create_task(orchestrator.preload_model({"model_path": "x"}))
     await asyncio.to_thread(started.wait, 1)
     chat = asyncio.create_task(orchestrator._local_chat({"model_path": "x"}))
     await asyncio.sleep(0)

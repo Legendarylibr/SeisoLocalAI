@@ -24,9 +24,7 @@ class _FakeModel:
         *,
         modules: list[tuple[str, object]] | None = None,
     ) -> None:
-        self.config = (
-            types.SimpleNamespace(model_type=model_type) if model_type else None
-        )
+        self.config = types.SimpleNamespace(model_type=model_type) if model_type else None
         self._names = names
         self._modules = modules or []
 
@@ -104,9 +102,9 @@ def test_multimodal_language_model_targets_use_language_model_regex():
     assert get_lora_target_modules("google/gemma-4-E4B-it", model) == (
         r".*language_model\..*\.(q_proj|v_proj)"
     )
-    assert modules_exist_in_model(
-        model, r".*language_model\..*\.(q_proj|v_proj)"
-    ) == (r".*language_model\..*\.(q_proj|v_proj)")
+    assert modules_exist_in_model(model, r".*language_model\..*\.(q_proj|v_proj)") == (
+        r".*language_model\..*\.(q_proj|v_proj)"
+    )
 
 
 def test_generic_multimodal_wrapper_uses_language_model_regex():

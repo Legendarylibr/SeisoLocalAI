@@ -71,7 +71,6 @@ def check_static_ui(client: httpx.Client, report: Report) -> None:
         "/export",
         "/compress",
         "/distill-rl",
-        "/rl-quant",
     ):
         r = client.get(f"{BASE}{path}")
         report.add(
@@ -123,9 +122,7 @@ def check_training_flow(
         f"/training/recommendations?model_id={model_id}&dataset=./data/sample.jsonl",
         headers,
     )
-    report.add(
-        "GET /training/recommendations", r.status_code == 200, f"status={r.status_code}"
-    )
+    report.add("GET /training/recommendations", r.status_code == 200, f"status={r.status_code}")
 
     r = api_post(
         client,
@@ -236,9 +233,7 @@ def check_training_flow(
     return job_id
 
 
-def check_other_pages(
-    client: httpx.Client, headers: dict[str, str], report: Report
-) -> None:
+def check_other_pages(client: httpx.Client, headers: dict[str, str], report: Report) -> None:
     endpoints: list[tuple[str, str]] = [
         ("GET /auth/status", "GET", "/auth/status"),
         ("GET /auth/me", "GET", "/auth/me"),
@@ -256,8 +251,6 @@ def check_other_pages(
         ("GET /compress/jobs", "GET", "/compress/jobs"),
         ("GET /distill-rl/presets", "GET", "/distill-rl/presets"),
         ("GET /distill-rl/jobs", "GET", "/distill-rl/jobs"),
-        ("GET /rl-quant/presets", "GET", "/rl-quant/presets"),
-        ("GET /rl-quant/jobs", "GET", "/rl-quant/jobs"),
         ("POST /recipes/jobs (empty recipe)", "POST", "/recipes/jobs"),
         ("GET /knowledge/bases", "GET", "/knowledge/bases"),
         ("GET /providers", "GET", "/providers"),

@@ -43,9 +43,7 @@ def sort_stages(stages: list[str], stage_order: tuple[str, ...]) -> list[str]:
     return sorted(stages, key=lambda stage: order_index[stage])
 
 
-def resolve_config_file_path(
-    config_file: str | None, *, bundle_root: Path
-) -> Path | None:
+def resolve_config_file_path(config_file: str | None, *, bundle_root: Path) -> Path | None:
     """Resolve a config file path from an absolute path or bundled configs dir."""
     if not config_file:
         return None

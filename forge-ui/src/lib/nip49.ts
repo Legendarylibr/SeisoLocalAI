@@ -3,12 +3,16 @@
  * @see https://github.com/nostr-protocol/nips/blob/master/49.md
  */
 import { bech32 } from "@scure/base";
-import { scrypt } from "@noble/hashes/scrypt";
-import { xchacha20poly1305 } from "@noble/ciphers/chacha";
-import { concatBytes, randomBytes } from "@noble/hashes/utils";
+import { scrypt } from "@noble/hashes/scrypt.js";
+import { xchacha20poly1305 } from "@noble/ciphers/chacha.js";
+import { concatBytes, randomBytes, utf8ToBytes } from "@noble/hashes/utils.js";
 
 const BECH32_LIMIT = 5000;
 const PAYLOAD_LEN = 91;
+/** Spec allows up to 22; cap lower so crafted ncryptsec cannot freeze the tab. */
+const MAX_LOG_N = 18;
+/** New backups must use a scrypt cost floor (~64 MiB); weaker log_n still decrypts. */
+const MIN_LOG_N_ENCRYPT = 16;
 
 export type KeySecurityByte = 0x00 | 0x01 | 0x02;
 
@@ -43,14 +47,16 @@ export function encryptNip49(
   if (secret.length !== 32) {
     throw new Error("secret must be 32 bytes");
   }
-  if (logn < 1 || logn > 22) {
-    throw new Error("log_n must be between 1 and 22");
+  if (logn < MIN_LOG_N_ENCRYPT || logn > MAX_LOG_N) {
+    throw new Error(
+      `log_n for encrypt must be between ${MIN_LOG_N_ENCRYPT} and ${MAX_LOG_N}`,
+    );
   }
   if (!password || !password.trim()) {
     throw new Error("passphrase is required");
   }
   const salt = randomBytes(16);
-  const key = scrypt(password.normalize("NFKC"), salt, {
+  const key = scrypt(utf8ToBytes(password.normalize("NFKC")), salt, {
     N: 2 ** logn,
     r: 8,
     p: 1,
@@ -90,8 +96,8 @@ export function decryptNip49(ncryptsec: string, password: string): Uint8Array {
     throw new Error(`invalid ncryptsec version ${b[0]}`);
   }
   const logn = b[1]!;
-  if (logn < 1 || logn > 22) {
-    throw new Error("log_n must be between 1 and 22");
+  if (logn < 1 || logn > MAX_LOG_N) {
+    throw new Error(`log_n must be between 1 and ${MAX_LOG_N}`);
   }
   if (!password.trim()) {
     throw new Error("passphrase is required");
@@ -100,7 +106,7 @@ export function decryptNip49(ncryptsec: string, password: string): Uint8Array {
   const nonce = b.slice(18, 42);
   const ksb = b[42]!;
   const ciphertext = b.slice(43);
-  const key = scrypt(password.normalize("NFKC"), salt, {
+  const key = scrypt(utf8ToBytes(password.normalize("NFKC")), salt, {
     N: 2 ** logn,
     r: 8,
     p: 1,

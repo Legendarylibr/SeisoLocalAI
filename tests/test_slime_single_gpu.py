@@ -10,6 +10,7 @@ from pathlib import Path
 import pytest
 
 from seiso.models.lora_targets import resolve_lora_target_modules
+from seiso.rl_verify.extract import split_thinking_trace
 from seiso.slime.config import SingleGpuSlimeConfig
 from seiso.slime.rewards import (
     contains_answer_reward,
@@ -17,6 +18,7 @@ from seiso.slime.rewards import (
     numeric_reward,
     resolve_reward,
 )
+from seiso.slime.rollout_generate import format_generation_prompt
 from seiso.slime.trainer import (
     Rollout,
     _append_jsonl_records,
@@ -34,13 +36,14 @@ from seiso.slime.trainer import (
     _empty_stats,
     _filter_rollout_groups,
     _final_output_dir,
-    _format_rollout_prompt,
+    _flush_accumulated_gradients,
     _freeze_multimodal_backbones,
     _group_reward_spread_mean,
     _group_verifier_stats,
     _iter_distributed_sample_batches,
     _iter_sample_batches,
     _load_samples,
+    _merge_rollout_collection_stats,
     _merge_stats,
     _metric_record,
     _process_reward,
@@ -53,7 +56,6 @@ from seiso.slime.trainer import (
     _sample_metadata,
     _sampling_batch_size,
     _score_completion,
-    _split_thinking_trace,
     _truncate_text,
 )
 
@@ -505,7 +507,13 @@ def test_thinking_prompt_is_appended_but_completion_is_not_rewritten(tmp_path: P
         output_dir=tmp_path / "out",
     )
 
-    prompt = _format_rollout_prompt("Solve it.", cfg)
+    class _Tok:
+        @staticmethod
+        def apply_chat_template(messages, tokenize=False, add_generation_prompt=True):
+            del tokenize, add_generation_prompt
+            return messages[0]["content"]
+
+    prompt = format_generation_prompt(_Tok(), "Solve it.", cfg)
 
     assert cfg.thinking_instruction in prompt
     assert prompt.endswith("<think>")
@@ -570,7 +578,7 @@ def test_experimental_process_reward_only_when_weighted(tmp_path: Path):
         min_thinking_tokens=4,
     )
 
-    trace, final, complete = _split_thinking_trace(
+    trace, final, complete = split_thinking_trace(
         "<think>First check. Actually revise.</think>The answer is 7."
     )
 
@@ -1339,3 +1347,303 @@ def test_response_mask_drops_pad_when_pad_differs_from_eos():
         torch=torch,
     )
     assert mask.tolist() == [False, False, True, True, False, False]
+
+
+def test_smoke_slime_max_steps_projects_via_train_config(monkeypatch):
+    monkeypatch.setenv("SEISO_ALLOW_TINY_RL", "1")
+    from seiso.training.config import TrainConfig
+
+    cfg = TrainConfig.from_yaml("configs/smoke_slime_cpu.yaml")
+    assert cfg.max_steps == 1
+    slime = cfg.to_single_gpu_slime_config()
+    assert slime.max_steps == 1
+
+
+def test_slime_distributed_context_ignores_stale_world_size(monkeypatch):
+    monkeypatch.setenv("WORLD_SIZE", "8")
+    monkeypatch.setenv("LOCAL_RANK", "3")
+    monkeypatch.setenv("RANK", "3")
+    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
+
+    class _Cuda:
+        @staticmethod
+        def is_available():
+            return True
+
+        @staticmethod
+        def device_count():
+            return 1
+
+        @staticmethod
+        def set_device(_idx):
+            raise AssertionError("stale DDP must not set_device")
+
+    class _Torch:
+        cuda = _Cuda()
+        distributed = None
+
+    from seiso.slime.config import SingleGpuSlimeConfig
+    from seiso.slime.distributed import _distributed_context
+
+    cfg = SingleGpuSlimeConfig(
+        model_id="m",
+        dataset=Path("data/slime_sample.jsonl"),
+        output_dir=Path("/tmp/out"),
+        device="cuda",
+        rollouts_per_prompt=2,
+        policy_micro_batch_size=2,
+        require_held_out_eval=False,
+    )
+    ctx = _distributed_context(_Torch(), cfg)
+    assert ctx.enabled is False
+    assert ctx.world_size == 1
+
+
+def test_slime_manifest_uses_runtime_world_size(monkeypatch, tmp_path: Path):
+    for key in (
+        "WORLD_SIZE",
+        "LOCAL_RANK",
+        "RANK",
+        "MASTER_ADDR",
+        "MASTER_PORT",
+        "LOCAL_WORLD_SIZE",
+        "SEISO_DISTRIBUTED_WORKER",
+        "GROUP_RANK",
+        "TORCHELASTIC_RUN_ID",
+    ):
+        monkeypatch.delenv(key, raising=False)
+    from seiso.training.config import TrainConfig, _write_slime_manifest
+
+    cfg = TrainConfig.model_validate(
+        {
+            "model_id": "m",
+            "dataset": "open-r1/OpenR1-Math-220k",
+            "output_dir": tmp_path / "out",
+            "method": "slime",
+            "multi_gpu": True,
+            "distributed_strategy": "ddp",
+            "data_gen": True,
+            "data_gen_source": "dataset",
+            "dataset_ref": "open-r1/OpenR1-Math-220k",
+            "data_gen_count": 2048,
+            "require_held_out_eval": True,
+        }
+    )
+    _write_slime_manifest(cfg, tmp_path)
+    payload = json.loads((tmp_path / "seiso_manifest.json").read_text(encoding="utf-8"))
+    assert payload["post_training_algorithm"] == "single_gpu_slime_grpo"
+
+    monkeypatch.setenv("SEISO_DISTRIBUTED_WORKER", "1")
+    monkeypatch.setenv("WORLD_SIZE", "2")
+    monkeypatch.setenv("LOCAL_RANK", "0")
+    monkeypatch.setenv("RANK", "0")
+    monkeypatch.setenv("LOCAL_WORLD_SIZE", "2")
+    monkeypatch.setenv("MASTER_ADDR", "127.0.0.1")
+    monkeypatch.setenv("MASTER_PORT", "29500")
+    _write_slime_manifest(cfg, tmp_path)
+    payload = json.loads((tmp_path / "seiso_manifest.json").read_text(encoding="utf-8"))
+    assert payload["post_training_algorithm"] == "distributed_slime_grpo"
+
+
+def test_broadcast_vllm_full_resumes_after_update_failure(monkeypatch):
+    from seiso.slime import rollout_sync
+    from seiso.slime.config import SingleGpuSlimeConfig
+
+    events: list[str] = []
+
+    class FakeClient:
+        def __init__(self) -> None:
+            self.base_url = ""
+
+        @classmethod
+        def from_config(cls, _config):
+            return cls()
+
+        def pause(self) -> None:
+            events.append("pause")
+
+        def update_weights_from_disk(self, *_a, **_k) -> None:
+            events.append("update")
+            raise RuntimeError("disk sync failed")
+
+        def resume(self) -> None:
+            events.append("resume")
+
+    monkeypatch.setattr(rollout_sync, "VLLMRolloutClient", FakeClient)
+    monkeypatch.setattr(
+        rollout_sync, "vllm_engine_urls", lambda *_a, **_k: ["http://127.0.0.1:8000"]
+    )
+    monkeypatch.setattr(rollout_sync, "resolve_vllm_base_url", lambda *_a, **_k: None)
+
+    cfg = SingleGpuSlimeConfig(
+        model_id="m",
+        dataset="d.jsonl",
+        output_dir="/tmp/out",
+        vllm_base_url="http://127.0.0.1:8000",
+    )
+    with pytest.raises(RuntimeError, match="vLLM full weight sync failed"):
+        rollout_sync._broadcast_vllm_full(cfg, model_path="/tmp/w", weight_version="v1")
+    assert events == ["pause", "update", "resume"]
+
+
+def test_keep_rollout_group_uses_sample_std():
+    """Filter std must match GRPO advantage unbiased std (n-1)."""
+    from seiso.slime.config import SingleGpuSlimeConfig
+    from seiso.slime.policy import _keep_rollout_group
+    from seiso.slime.types import Rollout
+
+    # Two rewards: mean 0.5, sample std = sqrt(0.5) ≈ 0.707; population ≈ 0.5.
+    cfg = SingleGpuSlimeConfig(
+        model_id="m",
+        dataset="d.jsonl",
+        output_dir="/tmp/out",
+        dynamic_sampling_filter="reward_nonzero_std",
+        dynamic_sampling_min_reward_std=0.6,
+        rollouts_per_prompt=2,
+    )
+
+    def _r(reward: float) -> Rollout:
+        return Rollout(
+            None,
+            None,
+            None,
+            None,
+            None,
+            reward=reward,
+            outcome_reward=reward,
+            status="stop",
+        )
+
+    assert _keep_rollout_group([_r(0.0), _r(1.0)], cfg) is True
+
+
+def test_slime_multi_epoch_auto_kl(monkeypatch, tmp_path: Path):
+    monkeypatch.delenv("SEISO_SLIME_ALLOW_ZERO_KL", raising=False)
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "slime.jsonl",
+        output_dir=tmp_path / "out",
+        epochs=3,
+        kl_coef=0.0,
+    )
+    cfg.validate()
+    assert cfg.kl_coef == pytest.approx(0.02)
+
+
+def test_slime_allow_zero_kl_env(monkeypatch, tmp_path: Path):
+    monkeypatch.setenv("SEISO_SLIME_ALLOW_ZERO_KL", "1")
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "slime.jsonl",
+        output_dir=tmp_path / "out",
+        epochs=3,
+        kl_coef=0.0,
+    )
+    cfg.validate()
+    assert cfg.kl_coef == 0.0
+
+
+def test_slime_rejects_weight_dir_path_escape(tmp_path: Path):
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=tmp_path / "slime.jsonl",
+        output_dir=tmp_path / "out",
+        sglang_weight_dir="../../../escape",
+    )
+    with pytest.raises(ValueError, match="sglang_weight_dir|\\.\\."):
+        cfg.validate()
+
+
+def test_group_verifier_stats_distinguishes_reward_and_outcome_spread():
+    """Composite reward spread (e.g. format-only) must not count as outcome spread."""
+    rollouts = [
+        Rollout(None, None, None, None, None, 0.0, outcome_reward=0.5),
+        Rollout(None, None, None, None, None, 1.0, outcome_reward=0.5),
+    ]
+
+    stats = _group_verifier_stats(rollouts, group_size=2)
+
+    assert stats["group_reward_spread_mean"] == 1.0
+    assert stats["group_outcome_spread_mean"] == 0.0
+    assert stats["group_nonzero_spread_frac"] == 1.0
+    assert stats["group_nonzero_outcome_spread_frac"] == 0.0
+
+
+def test_merge_rollout_collection_stats_maxes_one_hot_backend_flags():
+    """Refill merges must not sum one-hot backend flags to N+1."""
+    target = {
+        "rollout_backend_is_sglang": 1.0,
+        "rollout_backend_is_vllm": 0.0,
+        "rollout_groups_total": 2.0,
+    }
+    update = {
+        "rollout_backend_is_sglang": 1.0,
+        "rollout_backend_is_vllm": 0.0,
+        "rollout_groups_total": 3.0,
+    }
+
+    _merge_rollout_collection_stats(target, update)
+
+    assert target["rollout_backend_is_sglang"] == 1.0
+    assert target["rollout_backend_is_vllm"] == 0.0
+    assert target["rollout_groups_total"] == 5.0
+
+
+def test_flush_accumulated_gradients_rescales_partial_window():
+    """A partial grad-accum window flushes at full gradient magnitude."""
+    torch = pytest.importorskip("torch")
+    model = torch.nn.Linear(2, 1)
+    dist_ctx = _DistributedSlimeContext(enabled=False, world_size=1, rank=0)
+    for param in model.parameters():
+        # One micro-batch of a 2-step window: grads carry the fixed 1/N scale.
+        param.grad = torch.full_like(param, 0.5)
+
+    _flush_accumulated_gradients(model, dist_ctx, torch, pending_steps=1, configured_steps=2)
+
+    for param in model.parameters():
+        assert torch.allclose(param.grad, torch.ones_like(param))
+
+
+def test_flush_accumulated_gradients_full_window_is_identity():
+    """A full accumulation window flushes with no rescale."""
+    torch = pytest.importorskip("torch")
+    model = torch.nn.Linear(2, 1)
+    dist_ctx = _DistributedSlimeContext(enabled=False, world_size=1, rank=0)
+    for param in model.parameters():
+        param.grad = torch.full_like(param, 0.5)
+
+    _flush_accumulated_gradients(model, dist_ctx, torch, pending_steps=2, configured_steps=2)
+
+    for param in model.parameters():
+        assert torch.allclose(param.grad, torch.full_like(param, 0.5))
+
+
+def test_balanced_rank_samples_preserves_greedy_assignment_order(tmp_path: Path):
+    """Rank slices keep the descending-work greedy assignment order."""
+    data = tmp_path / "data.jsonl"
+    prompts = ["x" * 100, "x" * 90, "x" * 20, "x" * 10]
+    data.write_text(
+        "\n".join(json.dumps({"prompt": prompt, "answer": "a"}) for prompt in prompts),
+        encoding="utf-8",
+    )
+    cfg = SingleGpuSlimeConfig(
+        model_id="test/model",
+        dataset=data,
+        output_dir=tmp_path / "out",
+        train_batch_size=1,
+        balance_data=True,
+    )
+
+    rank0 = _DistributedSlimeContext(enabled=True, world_size=2, rank=0)
+    rank1 = _DistributedSlimeContext(enabled=True, world_size=2, rank=1)
+    samples0 = _balanced_rank_samples(cfg, rank0, random.Random(1))
+    samples1 = _balanced_rank_samples(cfg, rank1, random.Random(1))
+
+    # Greedy: 100→rank0, 90→rank1, 20→rank1, 10→rank0.
+    assert [len(sample["prompt"]) for sample in samples0] == [100, 10]
+    assert [len(sample["prompt"]) for sample in samples1] == [90, 20]
+
+    # Single-rank behavior is unchanged: every sample, descending work order.
+    solo = _DistributedSlimeContext(enabled=True, world_size=1, rank=0)
+    solo_samples = _balanced_rank_samples(cfg, solo, random.Random(1))
+    assert [len(sample["prompt"]) for sample in solo_samples] == [100, 90, 20, 10]

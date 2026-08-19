@@ -5,8 +5,26 @@ from __future__ import annotations
 import pytest
 from httpx import ASGITransport, AsyncClient
 
+from forge.config import get_settings
 from forge.main import create_app
 from seiso.research.nostr.keys import generate_keypair
+from tests.conftest import RETURN_TOKEN_HEADERS
+
+
+@pytest.mark.asyncio
+async def test_register_omits_access_token_without_opt_in():
+    """Browser path: HttpOnly cookie only — no JWT in the JSON body."""
+    app = create_app()
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        reg = await client.post("/api/auth/register", json={"generate": True})
+        assert reg.status_code == 201, reg.text
+        assert reg.json().get("access_token") in (None, "")
+        assert client.cookies.get("seiso_token")
+        me = await client.get("/api/auth/me")
+        assert me.status_code == 200
+        status = await client.get("/api/auth/status")
+        assert status.json()["owner_npub"] == me.json()["npub"]
 
 
 @pytest.mark.asyncio
@@ -18,14 +36,21 @@ async def test_register_keygen_default_and_login():
         status = await client.get("/api/auth/status")
         assert status.json()["auth_method"] == "nostr"
         assert status.json()["needs_onboarding"] is True
+        assert status.json().get("owner_npub") is None
 
-        reg = await client.post("/api/auth/register", json={})
+        reg = await client.post("/api/auth/register", json={}, headers=RETURN_TOKEN_HEADERS)
         assert reg.status_code == 201, reg.text
         data = reg.json()
         assert data["nsec"] and str(data["nsec"]).startswith("nsec1")
         assert data["user"]["npub"].startswith("npub1")
+        assert data.get("access_token")
         nsec = data["nsec"]
         npub = data["user"]["npub"]
+
+        status2 = await client.get("/api/auth/status")
+        assert status2.json()["owner_npub"] == npub
+        settings = get_settings()
+        assert settings.get_inference_api_key_owner() == data["user"]["nostr_pubkey"]
 
         await client.post(
             "/api/auth/logout",
@@ -57,6 +82,7 @@ async def test_register_import_nsec_and_login():
         reg = await client.post(
             "/api/auth/register",
             json={"nsec": pair.nsec},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert reg.status_code == 201, reg.text
         data = reg.json()
@@ -86,6 +112,7 @@ async def test_password_register_rejected():
         res = await client.post(
             "/api/auth/register",
             json={"password": "securepass1"},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert res.status_code == 422
 
@@ -99,6 +126,7 @@ async def test_register_generate_and_nsec_mutually_exclusive():
         res = await client.post(
             "/api/auth/register",
             json={"generate": True, "nsec": pair.nsec},
+            headers=RETURN_TOKEN_HEADERS,
         )
         assert res.status_code == 422
 
@@ -128,7 +156,9 @@ async def test_register_keygen_returns_nsec_once_for_backup():
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        reg = await client.post("/api/auth/register", json={"generate": True})
+        reg = await client.post(
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
         assert reg.status_code == 201, reg.text
         data = reg.json()
         nsec = data["nsec"]
@@ -152,9 +182,13 @@ async def test_second_register_forbidden():
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        first = await client.post("/api/auth/register", json={"generate": True})
+        first = await client.post(
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
         assert first.status_code == 201
-        second = await client.post("/api/auth/register", json={"generate": True})
+        second = await client.post(
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
         assert second.status_code == 403
 
 
@@ -163,6 +197,8 @@ async def test_login_with_invalid_nsec_shape():
     app = create_app()
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
-        await client.post("/api/auth/register", json={"generate": True})
+        await client.post(
+            "/api/auth/register", json={"generate": True}, headers=RETURN_TOKEN_HEADERS
+        )
         bad = await client.post("/api/auth/login", json={"nsec": "not-a-valid-key"})
         assert bad.status_code == 401

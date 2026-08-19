@@ -63,19 +63,35 @@ def _balanced_rank_samples(
 
     _limited_samples = _trainer._limited_samples
     _sample_work_estimate = _trainer._sample_work_estimate
-    samples = list(_limited_samples(config))
-    rng.shuffle(samples)
+    # Pass 1: stream the dataset keeping only per-sample work estimates, so no
+    # rank materializes the full dataset. Shuffling positions with the same rng
+    # yields the same permutation as shuffling the sample list, and the stable
+    # descending sort keeps tie order — the greedy assignment below is
+    # byte-identical to balancing a fully materialized shuffled list.
+    work_estimates = [_sample_work_estimate(sample, config) for sample in _limited_samples(config)]
+    positions = list(range(len(work_estimates)))
+    rng.shuffle(positions)
     rank_loads = [0] * dist_ctx.world_size
-    rank_samples: list[list[dict[str, Any]]] = [[] for _ in range(dist_ctx.world_size)]
-    for sample in sorted(
-        samples,
-        key=lambda item: _sample_work_estimate(item, config),
+    rank_positions: list[list[int]] = [[] for _ in range(dist_ctx.world_size)]
+    for position in sorted(
+        positions,
+        key=lambda idx: work_estimates[idx],
         reverse=True,
     ):
         rank = min(range(dist_ctx.world_size), key=lambda idx: rank_loads[idx])
-        rank_samples[rank].append(sample)
-        rank_loads[rank] += _sample_work_estimate(sample, config)
-    return rank_samples[dist_ctx.rank]
+        rank_positions[rank].append(position)
+        rank_loads[rank] += work_estimates[position]
+    # Pass 2: stream again and materialize only this rank's slice, preserving
+    # the assignment order produced by the greedy balancing.
+    wanted = set(rank_positions[dist_ctx.rank])
+    slice_by_position = {
+        index: sample for index, sample in enumerate(_limited_samples(config)) if index in wanted
+    }
+    return [
+        slice_by_position[position]
+        for position in rank_positions[dist_ctx.rank]
+        if position in slice_by_position
+    ]
 
 
 def _count_rank_samples(
@@ -135,14 +151,17 @@ def _distributed_context(torch, config: SingleGpuSlimeConfig) -> _DistributedSli
     dist = torch.distributed
     if not dist.is_available():
         raise RuntimeError("distributed slime requires torch.distributed")
+    owns_process_group = False
     if not dist.is_initialized():
         dist.init_process_group(backend=backend, init_method="env://")
+        owns_process_group = True
     return _DistributedSlimeContext(
         enabled=True,
         world_size=world_size,
         rank=rank,
         local_rank=local_rank,
         device=device,
+        owns_process_group=owns_process_group,
     )
 
 

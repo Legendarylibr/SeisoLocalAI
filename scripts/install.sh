@@ -12,16 +12,19 @@
 #   SEISO_BRANCH        Branch to clone (default: main)
 #   SEISO_START=0       Install only — do not launch Forge when finished (default: start)
 #   SEISO_SKIP_UI=1     Skip forge-ui build
-#   SEISO_USE_NPM=1     Use npm instead of Bun for forge-ui (Bun is default when available)
+#   SEISO_USE_NPM=1     Force npm for forge-ui (Linux prefers npm when Node 18+ is present)
+#   SEISO_USE_BUN=1     On Linux, prefer Bun even when npm is available
 #   SEISO_USE_UV=0      Use pip instead of uv for Python deps (uv is default when available)
 #   SEISO_NO_BANNER=1   Skip glitch install TUI
 #   SEISO_VERBOSE=1     Show full pip/UI package manager output (no TUI overlay)
 #   SEISO_NO_OPEN=1     Do not open the browser after Forge starts
-#   SEISO_SKIP_FLASH_ATTN=0  Try optional Flash Attention during install (NVIDIA Linux)
+#   SEISO_SKIP_FLASH_ATTN=1 Skip Flash Attention during install (default: skip; set 0 to try)
 #   SEISO_FAST_INSTALL=1    Skip PyTorch/training extras (Forge + GGUF chat only)
 #   SEISO_INSTALL_PROFILE=… Target install: linux-nvidia, linux-cpu, linux-rocm, wsl-nvidia, macos, chat
 #   SEISO_INSTALL_DEV=1     Include dev extras (pytest, ruff, mypy, …)
 #   SEISO_INSTALL_EXTRAS=…  Override auto-detected pip extras (e.g. forge,train,cuda)
+#   SEISO_REQUIRE_SIDECAR=1 Hard-fail install/start if Ollama/llama-swap missing (default: soft warn)
+#   SEISO_GIT_PULL=1        On start/reinstall of an existing clone, git pull --ff-only
 set -euo pipefail
 
 REPO_URL="${SEISO_REPO_URL:-https://github.com/Legendarylibr/SeisoLocalAI.git}"
@@ -110,10 +113,9 @@ install_tui_enabled() {
 }
 
 install_tui_outro() {
-  local root="$1" forge_url
+  local root="$1"
   install_tui_enabled "$root" || return 0
-  forge_url="$(seiso_forge_url)"
-  python3 "$root/scripts/install_tui.py" outro --url "$forge_url"
+  python3 "$root/scripts/install_tui.py" outro
 }
 
 run_with_install_tui() {
@@ -259,17 +261,11 @@ main() {
   extras="$(detect_platform_extras)"
   if [[ -n "${SEISO_INSTALL_PROFILE:-}" ]]; then
     log_unless_quiet "Install profile: ${SEISO_INSTALL_PROFILE} → [$extras]"
-    case "${SEISO_INSTALL_PROFILE,,}" in
-      linux-nvidia|linux-nvidia-native)
-        export SEISO_REQUIRE_SIDECAR="${SEISO_REQUIRE_SIDECAR:-1}"
-        ;;
-    esac
   else
     log_unless_quiet "Installing Python extras: [$extras]"
-    if declare -F seiso_native_linux_nvidia >/dev/null 2>&1 && seiso_native_linux_nvidia; then
-      export SEISO_REQUIRE_SIDECAR="${SEISO_REQUIRE_SIDECAR:-1}"
-    fi
   fi
+  # Sidecar hard-fail is opt-in (SEISO_REQUIRE_SIDECAR=1). Default is soft-warn so a
+  # missing Ollama install cannot abort a completed Python/UI install.
 
   install_log="$root/.seiso-install.log"
 
@@ -303,17 +299,12 @@ main() {
 
   if [[ "$SEISO_START" == "1" ]]; then
     export SEISO_INSTALL_JUST_RAN=1
-    export SEISO_OPEN_BROWSER=1
+    export SEISO_UI="${SEISO_UI:-tui}"
     exec "$root/scripts/start.sh"
   fi
 
-  local forge_url
-  forge_url="$(seiso_forge_url)"
-  if install_tui_enabled "$root"; then
-    printf '\n%s\nDoctor: %s/scripts/doctor.sh\n\n' "$forge_url" "$root"
-  else
-    printf '\nStart Forge: start\n'
-    printf 'Doctor: %s/scripts/doctor.sh\n\n' "$root"
+  if [[ "$SEISO_START" != "1" ]]; then
+    printf '\nInstall complete.\nStart the TUI: start\nDoctor: %s/scripts/doctor.sh\n\n' "$root"
   fi
 }
 

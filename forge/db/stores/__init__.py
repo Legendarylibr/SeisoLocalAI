@@ -12,7 +12,6 @@ from forge.db.stores.job_events import JobEventsMixin
 from forge.db.stores.maintenance import MaintenanceMixin
 from forge.db.stores.models import ModelsMixin
 from forge.db.stores.providers import ProvidersMixin
-from forge.db.stores.rl_quant import RLQuantMixin
 from forge.db.stores.training import TrainingMixin
 from forge.db.stores.users import UsersMixin
 
@@ -27,7 +26,6 @@ class Database(
     ProvidersMixin,
     ExportMixin,
     HubPublishMixin,
-    RLQuantMixin,
     CompressMixin,
     DistillRLMixin,
     MaintenanceMixin,

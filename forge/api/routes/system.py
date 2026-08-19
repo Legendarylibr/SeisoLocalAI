@@ -47,9 +47,7 @@ async def get_guide(
     )
     return {
         "goal": goal,
-        "steps": [
-            {"title": s.title, "detail": s.detail, "path": s.path} for s in steps
-        ],
+        "steps": [{"title": s.title, "detail": s.detail, "path": s.path} for s in steps],
         "hardware_summary": hardware_summary(profile),
         "local_only": True,
     }

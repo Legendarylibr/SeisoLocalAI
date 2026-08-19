@@ -1,5 +1,8 @@
 # Seiso documentation
 
+Adaptive RL quantization research: [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization).
+
+
 Complete guide to installing, running, and extending **Seiso Local AI** — a free local workspace for fine-tuning, quantization, distillation, compression, and reinforcement learning workflows.
 
 **Repository:** [github.com/Legendarylibr/SeisoLocalAI](https://github.com/Legendarylibr/SeisoLocalAI)
@@ -10,23 +13,26 @@ Complete guide to installing, running, and extending **Seiso Local AI** — a fr
 
 Start with **[getting-started.md](getting-started.md)** — a step-by-step walkthrough from install → onboarding → download model → chat → train → export.
 
+Where Seiso is going (local agentic OS, harness, model-aware routing, BTC/crypto marketplace): **[ROADMAP.md](../ROADMAP.md)**.
+
 ---
 
 ## I want to…
 
 | Goal | Start here |
 |------|------------|
+| Read the product roadmap (agentic OS, harness, routing, marketplace) | [ROADMAP.md](../ROADMAP.md) |
 | Install on Linux or macOS in one command | [install.md](install.md#linux--macos--one-command-recommended) |
 | Install on Windows or AMD ROCm | [platforms/windows.md](platforms/windows.md) · [platforms/linux-amd-rocm.md](platforms/linux-amd-rocm.md) |
-| Launch the web UI | `start` or `seiso forge` → [forge.md](forge.md) |
+| Launch the terminal UI | `start` or `seiso tui` → [cli.md](cli.md#seiso-tui) |
+| Configure Pi / OMP / Hermes / Cline / OpenClaw in the TUI | [tui-harnesses.md](tui-harnesses.md) · `seiso agent harnesses` |
 | First-run Nostr auth (npub / nsec) | [getting-started.md § Onboarding](getting-started.md#step-2--onboarding) · [forge.md § Auth](forge.md#auth-nostr) |
 | Diagnose install / HF / GPU | `seiso doctor` or `./scripts/doctor.sh` → [cli.md](cli.md) |
-| Chat with a local model | [getting-started.md § Step 4](getting-started.md#step-4--chat-with-a-local-model) |
+| Chat with a local model | [getting-started.md § Step 4](getting-started.md#step-4--chat-with-a-local-model) · `seiso tui` |
 | Fine-tune with QLoRA / LoRA | [training/quickstart.md](training/quickstart.md) |
 | Run each training pipeline step by step | [training/pipelines.md](training/pipelines.md) |
 | Single-GPU / multi-GPU slime post-training | [training/quickstart.md § Slime](training/quickstart.md#slime-post-training) · [multi-gpu.md](training/multi-gpu.md) |
 | External NVIDIA NeMo RL (cite upstream) | [training/quickstart.md § NeMo RL](training/quickstart.md#nemo-rl) · [cli.md § seiso nemo-rl](cli.md#seiso-nemo-rl) · [pipelines.md](training/pipelines.md#nemo-rl) |
-| RL quant from CLI | [cli.md § seiso rl-quant](cli.md#seiso-rl-quant) · [compression.md](compression.md) |
 | Use Cursor / Continue with local models | [getting-started.md § Connect external tools](getting-started.md#connect-external-tools-cursor-continue-etc) |
 | Export to GGUF or Hugging Face Hub | [getting-started.md § Step 6](getting-started.md#step-6--export-and-deploy) · [cli.md](cli.md) |
 | Compress / distill / quantize models | [compression.md](compression.md) |
@@ -34,10 +40,13 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 | Quant regression study (train → export → eval) | [cli.md § seiso experiment](cli.md#seiso-experiment) |
 | Attest run digests to Nostr | [provenance-nostr.md](provenance-nostr.md) · `seiso provenance` |
 | Prove a training row was in a sealed corpus | [provenance-nostr.md § Membership](provenance-nostr.md#training-data-membership-private-examples) · `dataset-prove` |
+| Lean formalization of Nostr membership proofs | [provenance-nostr.md § Lean](provenance-nostr.md#lean-formalization) · [`formal/seiso-provenance/`](../formal/seiso-provenance/README.md) |
 | Build a local RAG corpus | [forge.md](forge.md) · `/knowledge` |
 | Enable fused GPU kernels | [training/kernels.md](training/kernels.md) |
 | Read kernel shape / intensity estimates | [training/kernel-shape.md](training/kernel-shape.md) · `seiso-bench-kernels --roofline-only` |
 | Train on multiple GPUs | [training/multi-gpu.md](training/multi-gpu.md) |
+| Opt-in sats marketplace (**not functional — do not use yet**) | [pay/marketplace.md](pay/marketplace.md) |
+| Experimental Buzz mesh training (secondary / opt-in) | [training/mesh.md](training/mesh.md) |
 | Deploy with HTTPS | [deployment/reverse-proxy.md](deployment/reverse-proxy.md) |
 | Fix a problem | [troubleshooting.md](troubleshooting.md) |
 | Run tests before a PR | [CI_LOCAL.md](CI_LOCAL.md) |
@@ -59,8 +68,8 @@ Start with **[getting-started.md](getting-started.md)** — a step-by-step walkt
 
 | Mode | Linux / macOS / WSL | Windows |
 |------|---------------------|---------|
-| **Install + start** | `curl -fsSL …/start \| bash` — starts Forge when done | Manual install → `seiso forge` ([install.md](install.md)) |
-| **Later sessions** | `start` or `seiso forge` from repo | `cd "$env:USERPROFILE\Seiso"` → activate venv → `seiso forge` |
+| **Install + start** | `curl -fsSL …/start \| bash` — starts the TUI when done | Manual install → `seiso tui` ([install.md](install.md)) |
+| **Later sessions** | `start` or `seiso tui` from repo | `cd "$env:USERPROFILE\Seiso"` → activate venv → `seiso tui` |
 | **From a clone** | `start` (starts by default) or `SEISO_START=0 start` | Build UI + `seiso forge` ([platforms/windows.md](platforms/windows.md)) |
 | **Forge (UI dev)** | Terminal 1: `seiso forge` · Terminal 2: `cd forge-ui && npm run dev` | Same |
 | **CLI training** | `seiso train --config configs/example_lora.yaml` | `seiso train --config configs\example_lora.yaml` |
@@ -102,7 +111,7 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 2. [CI_LOCAL.md](CI_LOCAL.md) — quality gate (`make ci-fast`)
 3. [forge.md](forge.md) — UI dev with Vite hot reload
 4. [training/kernels.md](training/kernels.md) — CUDA/Triton kernel stack
-5. [ANALYSIS.md](ANALYSIS.md) · [reports/codebase-review-2026-07-23.md](reports/codebase-review-2026-07-23.md) (latest) · [reports/codebase-review-2026-07.md](reports/codebase-review-2026-07.md) — architecture + July 2026 review findings
+5. [ANALYSIS.md](ANALYSIS.md) — architecture notes (adaptive RL quant research: [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization))
 
 ### Path D — Production deployment
 
@@ -110,6 +119,17 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 2. [deploy/README.md](../deploy/README.md) — systemd, env templates
 3. [README.md § Security](../README.md#security) — hardening checklist
 4. [SECURITY.md](../SECURITY.md) — vulnerability reporting (GitHub private advisories)
+
+### Path E — Opt-in marketplace & Buzz mesh
+
+> **Pay / live Ark / L402:** not functional yet — do not use for real funds.
+> **Mesh:** secondary opt-in Buzz-agent multi-node path (local Forge/CLI stays primary).
+
+1. [ROADMAP.md](../ROADMAP.md) — why marketplace + harness + routing exist (destination OS)
+2. [pay/marketplace.md](pay/marketplace.md) — sats marketplace, Ark + L402 payment methods, faucet vs real settles
+3. [training/mesh.md](training/mesh.md) — Buzz-coordinated shared / multi-node training (no fee)
+4. [cli.md § seiso pay / seiso mesh](cli.md#seiso-pay-opt-in-marketplace) — command cheat sheet
+5. [`.agents/skills/seiso-orchestrate/`](../.agents/skills/seiso-orchestrate/SKILL.md) — agent decision loop (local → mesh → pay)
 
 ---
 
@@ -129,6 +149,7 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 
 | Task | Guide |
 |------|-------|
+| Product roadmap | [ROADMAP.md](../ROADMAP.md) |
 | Install & dependencies | [install.md](install.md) |
 | First-run walkthrough | [getting-started.md](getting-started.md) |
 | Forge UI & API | [forge.md](forge.md) |
@@ -177,14 +198,11 @@ seiso train --config configs/example_training_slime.yaml
 # External NeMo RL (requires SEISO_NEMO_RL_ROOT checkout; dry-run: configs/smoke_nemo_rl.yaml)
 seiso nemo-rl --config configs/example_training_nemo_rl.yaml
 
-# RL quant (CLI → $SEISO_DATA_DIR/rl_quant/cli/<job_id>/)
-seiso rl-quant run --preset minimal --kernel-rl
 
 # Distill-RL (CLI → $SEISO_DATA_DIR/distill_rl/cli/<job_id>/; smoke preset uses gpt2)
 seiso distill-rl run --preset smoke
 
 # Quant regression study (CLI → study output_dir in YAML)
-seiso experiment quant-regression -c configs/examples/quant_regression_study.yaml
 
 # LLM compression (CLI → $SEISO_DATA_DIR/compress/local/cli-<job_id>/runs/<run_id>/)
 seiso compress run --preset smoke
@@ -215,8 +233,6 @@ Seiso/
 │   ├── export/         # Merge, GGUF, Hub publish
 │   ├── compress/       # LLM compression bootstrap
 │   ├── distill_rl/     # Teacher distill + DPO pipeline
-│   ├── rl_quant/       # Adaptive RL quant + kernel policy bridge
-│   ├── experiments/    # Research studies (quant regression, HF deploy eval)
 │   └── security/       # NVIDIA boundary gates
 ├── seiso_cli/          # CLI entrypoints
 ├── forge/              # FastAPI backend
@@ -225,8 +241,6 @@ Seiso/
 │   └── security/       # Auth, CSRF, path sandbox
 ├── forge-ui/           # React + TypeScript + Vite (GPL-3.0)
 ├── seiso/codellama_compress/ # Bundled LLM compression implementation
-├── seiso/adaptive_quant/     # Bundled adaptive RL quant implementation
-├── seiso/analysis/           # RL quant analysis CLI/helpers
 ├── configs/            # Example YAML/JSON configs
 ├── data/               # Sample training JSONL
 ├── deploy/             # Caddy, nginx, systemd templates

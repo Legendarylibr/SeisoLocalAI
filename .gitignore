@@ -34,5 +34,11 @@ checkpoints/
 exports/
 logs/
 .seiso-install.log
+# Local uv export only — not the lock of record. Dependabot must not
+# rehydrate alerts from a committed uv.lock; use locks/python.lock.
+uv.lock
 .cache/
 .test_outputs/
+# Lean / Lake
+formal/**/.lake/
+formal/**/lake-packages/

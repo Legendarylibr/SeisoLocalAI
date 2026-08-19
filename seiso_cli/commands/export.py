@@ -11,16 +11,12 @@ from seiso_cli.console import console
 
 def export_cmd(
     checkpoint: str = typer.Option(..., help="Checkpoint directory"),
-    formats: str = typer.Option(
-        "merged", help="Comma-separated: merged,lora,full,gguf"
-    ),
+    formats: str = typer.Option("merged", help="Comma-separated: merged,lora,full,gguf"),
     profile: str | None = typer.Option(
         None, help="Export profile: lora_bundle, full_bundle, inference, ..."
     ),
     hub_repo: str | None = typer.Option(None, help="Hugging Face repo to push"),
-    precheck_only: bool = typer.Option(
-        False, help="Run Hub precheck without exporting"
-    ),
+    precheck_only: bool = typer.Option(False, help="Run Hub precheck without exporting"),
 ) -> None:
     """Export checkpoint to merged/GGUF/LoRA/full fine-tune."""
     from forge.config import get_settings

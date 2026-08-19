@@ -49,9 +49,7 @@ async def ensure_managed_provider_row(
         # Replace config by delete+create (no update API).
         await db.delete_provider(row["id"], user_id)
         break
-    created = await db.create_provider(
-        user_id, MANAGED_PROVIDER_NAME, PROVIDER_LOCAL_CHAT, config
-    )
+    created = await db.create_provider(user_id, MANAGED_PROVIDER_NAME, PROVIDER_LOCAL_CHAT, config)
     created["config"] = config
     return created
 

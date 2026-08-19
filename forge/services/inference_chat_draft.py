@@ -91,22 +91,17 @@ async def resolve_draft_model(
     elif draft_model_id:
         from forge.services import inference_chat as _inference_chat
 
-        draft_selected = await _inference_chat.get_inference_option(
-            db, user_id, draft_model_id
-        )
+        draft_selected = await _inference_chat.get_inference_option(db, user_id, draft_model_id)
         if not draft_selected:
             raise HTTPException(404, "Draft model not found")
         if not draft_selected.get("selectable", True):
             raise HTTPException(
                 400,
-                draft_selected.get("hardware_note")
-                or "Draft model download is incomplete",
+                draft_selected.get("hardware_note") or "Draft model download is incomplete",
             )
         selected_path = str(draft_selected.get("path") or "")
         if not selected_path:
-            raise HTTPException(
-                400, "Draft model must be a local safetensors/checkpoint path"
-            )
+            raise HTTPException(400, "Draft model must be a local safetensors/checkpoint path")
         if target_model_path:
             _assert_draft_compatible(target_model_path, selected_path)
         compatibility_checked = bool(target_model_path)
@@ -118,9 +113,7 @@ async def resolve_draft_model(
             data_dir=settings.data_dir,
         )
         if not draft_path:
-            raise HTTPException(
-                400, "Draft model must be a local safetensors/checkpoint path"
-            )
+            raise HTTPException(400, "Draft model must be a local safetensors/checkpoint path")
     else:
         return {}
 

@@ -300,16 +300,12 @@ def _parse_iso_ts(value: str | None) -> datetime | None:
 
 def _base_model_from_tags(tags: list[str]) -> str | None:
     for tag in tags:
-        if tag.startswith("base_model:") and not tag.startswith(
-            "base_model:quantized:"
-        ):
+        if tag.startswith("base_model:") and not tag.startswith("base_model:quantized:"):
             return tag.split(":", 1)[1]
     return None
 
 
-def infer_model_family(
-    repo_id: str, tags: list[str] | tuple[str, ...] = ()
-) -> ModelFamily:
+def infer_model_family(repo_id: str, tags: list[str] | tuple[str, ...] = ()) -> ModelFamily:
     """Classify a Hub repo by provider org and family slug roots (not model ids)."""
     tag_list = list(tags)
     org = repo_id.split("/", 1)[0].lower() if "/" in repo_id else ""
@@ -343,11 +339,7 @@ def _infer_task(repo_id: str, pipeline_tag: str | None, tags: list[str]) -> Mode
         or "sentence-transformers" in tag_set
     ):
         return ModelTask.EMBEDDING
-    if (
-        pipeline == "image-text-to-text"
-        or "vision" in tag_set
-        or "multimodal" in tag_set
-    ):
+    if pipeline == "image-text-to-text" or "vision" in tag_set or "multimodal" in tag_set:
         return ModelTask.VISION
     if any(k in hay for k in ("coder", "code-", "-code", "coding", "devstral")):
         return ModelTask.CODE
@@ -367,9 +359,7 @@ def _infer_params(repo_id: str, tags: list[str]) -> str:
 
 def _display_name(repo_id: str, tags: list[str]) -> str:
     for tag in tags:
-        if tag.startswith("base_model:") and not tag.startswith(
-            "base_model:quantized:"
-        ):
+        if tag.startswith("base_model:") and not tag.startswith("base_model:quantized:"):
             base = tag.split(":", 1)[1]
             return base.split("/")[-1].replace("-", " ").replace("_", " ")
     slug = repo_id.split("/")[-1]
@@ -383,9 +373,7 @@ def _is_supported_repo(repo_id: str) -> bool:
     return bool(repo) and "/" in repo
 
 
-def is_gguf_hub_repo(
-    repo_id: str, tags: list[str] | tuple[str, ...] | None = None
-) -> bool:
+def is_gguf_hub_repo(repo_id: str, tags: list[str] | tuple[str, ...] | None = None) -> bool:
     """True when a Hub row is a GGUF artifact (tags or naming)."""
     return _is_gguf_hub_repo(repo_id, list(tags or ()))
 
@@ -429,14 +417,8 @@ def _hub_row_to_entry(
         return None
 
     tags_raw = row.get("tags")
-    tags = (
-        [t for t in tags_raw if isinstance(t, str)]
-        if isinstance(tags_raw, list)
-        else []
-    )
-    pipeline_tag = (
-        row.get("pipeline_tag") if isinstance(row.get("pipeline_tag"), str) else None
-    )
+    tags = [t for t in tags_raw if isinstance(t, str)] if isinstance(tags_raw, list) else []
+    pipeline_tag = row.get("pipeline_tag") if isinstance(row.get("pipeline_tag"), str) else None
 
     task = force_task or _infer_task(repo_id, pipeline_tag, tags)
     is_gguf = _is_gguf_hub_repo(repo_id, tags)
@@ -478,17 +460,11 @@ def _hub_row_to_trainable_entry(
         return None
 
     tags_raw = row.get("tags")
-    tags = (
-        [t for t in tags_raw if isinstance(t, str)]
-        if isinstance(tags_raw, list)
-        else []
-    )
+    tags = [t for t in tags_raw if isinstance(t, str)] if isinstance(tags_raw, list) else []
     if is_gguf_only_repo_id(repo_id, tags):
         return None
 
-    pipeline_tag = (
-        row.get("pipeline_tag") if isinstance(row.get("pipeline_tag"), str) else None
-    )
+    pipeline_tag = row.get("pipeline_tag") if isinstance(row.get("pipeline_tag"), str) else None
 
     task = force_task or _infer_task(repo_id, pipeline_tag, tags)
     # Trainable catalog still excludes embeddings/vision (LoRA/SFT path only).
@@ -624,9 +600,7 @@ def search_catalog(
             continue
         if task and not searching and not _matches_task(entry, task):
             continue
-        if max_params and _parse_param_size(entry.params) > _parse_param_size(
-            max_params
-        ):
+        if max_params and _parse_param_size(entry.params) > _parse_param_size(max_params):
             continue
         scored.append((_boost_score(entry, query), _entry_to_dict(entry)))
 
@@ -690,9 +664,7 @@ def search_trainable_catalog(
             continue
         if task and not _matches_task(entry, task):
             continue
-        if max_params and _parse_param_size(entry.params) > _parse_param_size(
-            max_params
-        ):
+        if max_params and _parse_param_size(entry.params) > _parse_param_size(max_params):
             continue
         scored.append((_boost_score(entry, query), _entry_to_dict(entry)))
 
@@ -729,9 +701,7 @@ def diversify_by_family(models: list[dict]) -> list[dict]:
 
     family_order = sorted(
         by_family.keys(),
-        key=lambda fam: (
-            -(by_family[fam][0].get("priority") or 0) if by_family[fam] else 0
-        ),
+        key=lambda fam: -(by_family[fam][0].get("priority") or 0) if by_family[fam] else 0,
     )
     indices = {fam: 0 for fam in family_order}
     diversified: list[dict] = []
@@ -771,7 +741,5 @@ def get_by_repo(repo_id: str, *, token: str | None = None) -> CatalogEntry | Non
     return _hub_row_to_entry(_model_info_to_row(info))
 
 
-def get_by_gguf_mirror(
-    mirror_repo: str, *, token: str | None = None
-) -> CatalogEntry | None:
+def get_by_gguf_mirror(mirror_repo: str, *, token: str | None = None) -> CatalogEntry | None:
     return get_by_repo(mirror_repo, token=token)

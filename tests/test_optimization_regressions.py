@@ -96,9 +96,7 @@ def test_analyze_sample_mode_does_not_store_cleaned_cache(tmp_path: Path):
     ds.write_text(
         '{"messages":[{"role":"user","content":"hi"},{"role":"assistant","content":"hello"}]}\n'
     )
-    analysis = analyze_training_dataset(
-        ds, dataset_format=DatasetFormat.CHAT, full_scan=False
-    )
+    analysis = analyze_training_dataset(ds, dataset_format=DatasetFormat.CHAT, full_scan=False)
     assert analysis["uses_full_dataset"] is False
     assert "cleaned_cache_key" not in analysis
 
@@ -186,29 +184,12 @@ def test_knowledge_retrieve_uses_inverted_index(tmp_path: Path):
     assert [h["text"] for h in hits2] == [h["text"] for h in hits]
 
 
-def test_policy_heads_dirty_flag_avoids_copy_each_read():
-    import random
-
-    from seiso.adaptive_quant.policy_heads import CategoricalHead
-
-    head = CategoricalHead(4, 3, random.Random(0))
-    w1 = head.weights
-    w2 = head.weights
-    assert w1 is w2 or w1 == w2
-    # After update with native unavailable, Python path mutates in place.
-    probs = [0.3, 0.3, 0.4]
-    head.update([0.1, 0.2, 0.3, 0.4], 1, probs, advantage=0.5, learning_rate=0.01)
-    assert len(head.weights) == 3
-
-
 @pytest.mark.asyncio
 async def test_db_metadata_repo_lookup(tmp_path: Path):
     from forge.db.crypto import generate_encryption_key
     from forge.db.store import Database
 
-    db = Database(
-        tmp_path / "t.db", encryption_key=generate_encryption_key(), ephemeral=True
-    )
+    db = Database(tmp_path / "t.db", encryption_key=generate_encryption_key(), ephemeral=True)
     await db.add_model(
         user_id="u1",
         source="hf:mirror/other",

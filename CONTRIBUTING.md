@@ -17,13 +17,10 @@ Thanks for helping improve Seiso.
 | `seiso/` | Core training, inference, export, compression, and research library |
 | `seiso_cli/` | CLI entry points |
 | `seiso/codellama_compress/` | Bundled LLM compression implementation |
-| `seiso/adaptive_quant/` | Bundled adaptive RL quant implementation |
-| `seiso/analysis/` | RL quant analysis helpers |
-| `docs/` | User and developer documentation |
 | `tests/` | Python tests |
 | `scripts/` | Install, start, and CI helpers |
 | `deploy/` | Reverse-proxy and systemd examples |
 
 ## Documentation
 
-Start at [docs/README.md](docs/README.md) or [docs/getting-started.md](docs/getting-started.md).
+Start at [docs/README.md](docs/README.md) or [docs/getting-started.md](docs/getting-started.md). Destination and phased work: [ROADMAP.md](ROADMAP.md).

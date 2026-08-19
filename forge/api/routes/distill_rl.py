@@ -83,9 +83,7 @@ class DistillRLStartRequest(BaseModel):
     )
     grpo_group_size: int = Field(default=4, ge=2)
     benchmark_verifiable: bool = True
-    benchmark_tasks: list[str] = Field(
-        default_factory=lambda: ["gsm8k", "gpqa", "aime"]
-    )
+    benchmark_tasks: list[str] = Field(default_factory=lambda: ["gsm8k", "gpqa", "aime"])
     seeds: list[int] | None = None
     seed: int = 42
     deterministic: bool = True
@@ -182,15 +180,11 @@ router = build_stage_pipeline_router(
         get_orchestrator=get_distill_rl_orchestrator,
         list_jobs=lambda db, uid: db.list_distill_rl_jobs(uid),
         get_job=lambda db, jid, uid: db.get_distill_rl_job(jid, uid),
-        create_job=lambda db, uid, cfg, jid: db.create_distill_rl_job(
-            uid, cfg, job_id=jid
-        ),
+        create_job=lambda db, uid, cfg, jid: db.create_distill_rl_job(uid, cfg, job_id=jid),
         update_status=lambda db, jid, status, **kw: db.update_distill_rl_job_status(
             jid, status, **kw
         ),
         prepare_config=_prepare_distill_rl_config,
-        enrich_stage_results=lambda result: enrich_stage_results(
-            result, "paper_bundle"
-        ),
+        enrich_stage_results=lambda result: enrich_stage_results(result, "paper_bundle"),
     )
 )

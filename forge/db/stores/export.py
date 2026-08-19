@@ -11,6 +11,7 @@ from forge.db.stores.constants import _EXPORT_LIST_COLUMNS, column_list, now_iso
 
 class ExportMixin:
     if TYPE_CHECKING:
+
         def _enc(self, value: str) -> str: ...
 
         def _decrypt_row(self, table: str, row: dict[str, Any]) -> dict[str, Any]: ...

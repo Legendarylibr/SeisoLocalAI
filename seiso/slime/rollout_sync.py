@@ -364,9 +364,7 @@ def _broadcast_vllm_full(
         try:
             client.pause()
             try:
-                client.update_weights_from_disk(
-                    model_path, weight_version=weight_version
-                )
+                client.update_weights_from_disk(model_path, weight_version=weight_version)
             finally:
                 # Always resume — a failed update must not leave the engine paused.
                 try:

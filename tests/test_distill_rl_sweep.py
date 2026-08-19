@@ -71,9 +71,7 @@ def test_apply_best_sweep_overrides():
 
 def test_extract_metric_nested_path():
     payload = {"checkpoints": {"dpo": {"val_preference_accuracy": 0.82}}}
-    assert extract_metric(
-        payload, "checkpoints.dpo.val_preference_accuracy"
-    ) == pytest.approx(0.82)
+    assert extract_metric(payload, "checkpoints.dpo.val_preference_accuracy") == pytest.approx(0.82)
 
 
 def test_distill_rl_defaults_use_stable_dpo_values(tmp_path: Path):
@@ -104,9 +102,7 @@ def test_run_auto_hyperparameter_sweep_ranks_trials(tmp_path: Path):
     prefs_dir.mkdir(parents=True, exist_ok=True)
     train = prefs_dir / "preferences_train.jsonl"
     val = prefs_dir / "preferences_val.jsonl"
-    train.write_text(
-        '{"prompt":"p","chosen":"yes","rejected":"no"}\n', encoding="utf-8"
-    )
+    train.write_text('{"prompt":"p","chosen":"yes","rejected":"no"}\n', encoding="utf-8")
     val.write_text('{"prompt":"p","chosen":"yes","rejected":"no"}\n', encoding="utf-8")
 
     distilled = cfg.distilled_dir
@@ -175,9 +171,7 @@ def test_run_distill_rl_job_runs_sweep_before_final_dpo(tmp_path: Path):
     prefs.mkdir(parents=True)
     train = prefs / "preferences_train.jsonl"
     val = prefs / "preferences_val.jsonl"
-    train.write_text(
-        '{"prompt":"p","chosen":"yes","rejected":"no"}\n', encoding="utf-8"
-    )
+    train.write_text('{"prompt":"p","chosen":"yes","rejected":"no"}\n', encoding="utf-8")
     val.write_text('{"prompt":"p","chosen":"yes","rejected":"no"}\n', encoding="utf-8")
     dpo_dir = job_root / "dpo" / "checkpoint-1"
     dpo_dir.mkdir(parents=True)

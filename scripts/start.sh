@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Start Seiso Forge (API + web UI). Installs missing deps, runs doctor on failure,
-# and opens the browser when Forge is ready.
+# Start Seiso. Installs missing deps, runs doctor on failure, then launches
+# the terminal UI (default). Set SEISO_UI=forge to start the optional web API.
 #
 # Usage (prefer start on PATH after install):
 #   start
@@ -269,23 +269,49 @@ main() {
     fi
   fi
 
-  forge_url="$(seiso_forge_url)"
-  open_flag=""
-  if [[ "${SEISO_NO_OPEN:-0}" != "1" ]]; then
-    open_flag="--open"
+  if [[ "${SEISO_UI:-tui}" == "forge" ]]; then
+    forge_url="$(seiso_forge_url)"
+
+    # Already running (healthy or still in lifespan / holding the data-dir lock):
+    # open browser and exit instead of failing on the instance lock.
+    if seiso_forge_instance_active "$forge_url"; then
+      log "Forge is already running at $forge_url"
+      if [[ "${SEISO_NO_OPEN:-0}" != "1" ]]; then
+        seiso_open_browser "$forge_url" || true
+      fi
+      return 0
+    fi
+
+    open_flag=""
+    if [[ "${SEISO_NO_OPEN:-0}" != "1" ]]; then
+      open_flag="--open"
+    fi
+
+    if [[ "${SEISO_INSTALL_JUST_RAN:-0}" == "1" ]]; then
+      log "Starting Forge — opening $forge_url when ready"
+    else
+      log "Starting Forge at $forge_url"
+    fi
+
+    if [[ -n "$open_flag" ]]; then
+      "$seiso_bin" forge $open_flag
+    else
+      exec "$seiso_bin" forge
+    fi
+    return 0
   fi
 
-  if [[ "${SEISO_INSTALL_JUST_RAN:-0}" == "1" ]]; then
-    log "Starting Forge — opening $forge_url when ready"
-  else
-    log "Starting Forge at $forge_url"
+  log "TUI starting"
+  # curl | bash leaves stdin as a closed pipe. Attach the interactive TUI
+  # to the real terminal so it does not EOF/abort right after install.
+  if [[ -t 0 ]]; then
+    exec "$seiso_bin" tui
   fi
-
-  if [[ -n "$open_flag" ]]; then
-    "$seiso_bin" forge $open_flag
-  else
-    exec "$seiso_bin" forge
+  if [[ -r /dev/tty && -w /dev/tty ]]; then
+    exec "$seiso_bin" tui </dev/tty >/dev/tty 2>&1
   fi
+  log "Install complete. Start the TUI from a terminal: seiso tui"
+  return 0
 }
 
 main "$@"

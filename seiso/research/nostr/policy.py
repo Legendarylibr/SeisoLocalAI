@@ -19,9 +19,7 @@ _BLOCKED_HOSTS = frozenset(
 _LOCAL_HTTP_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 # CGNAT / shared-address space (RFC 6598) — not covered by ipaddress.is_private.
 # Keep in sync with forge.security.url_policy._BLOCKED_NETWORKS.
-_BLOCKED_NETWORKS = (
-    ipaddress.ip_network("100.64.0.0/10"),
-)
+_BLOCKED_NETWORKS = (ipaddress.ip_network("100.64.0.0/10"),)
 
 # Public relays used when SEISO_NOSTR_RELAYS is unset (digests-only attestations).
 _DEFAULT_RELAYS = ("wss://nos.lol", "wss://relay.damus.io")
@@ -176,9 +174,7 @@ def normalize_relay_list(
     out: list[str] = []
     seen: set[str] = set()
     for raw in relays:
-        normalized = validate_relay_url(
-            raw, allowlist=allowlist, allow_loopback=allow_loopback
-        )
+        normalized = validate_relay_url(raw, allowlist=allowlist, allow_loopback=allow_loopback)
         if normalized not in seen:
             seen.add(normalized)
             out.append(normalized)

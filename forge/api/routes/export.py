@@ -67,7 +67,9 @@ def _resolve_export_hub_token(
 
 
 @router.get("/profiles")
-async def export_profiles() -> list[dict]:
+async def export_profiles(
+    _user_id: Annotated[str, Depends(get_current_user_id)],
+) -> list[dict]:
     from seiso.export.pipeline import profile_catalog
 
     return profile_catalog()
@@ -130,9 +132,7 @@ async def start_export(
             db, data_dir=settings.data_dir, user_id=user_id, checkpoint=body.checkpoint
         )
     except (SecurityError, ValueError) as exc:
-        raise HTTPException(
-            403 if isinstance(exc, SecurityError) else 400, str(exc)
-        ) from exc
+        raise HTTPException(403 if isinstance(exc, SecurityError) else 400, str(exc)) from exc
 
     hub_repo, hub_metadata = _resolve_hub_repo(body)
     hub_token = _resolve_export_hub_token(settings, user_id, body.hub)
@@ -151,18 +151,6 @@ async def start_export(
         redacted_hub.pop("hf_token", None)
         config["hub"] = redacted_hub
     gguf_quants = list(body.gguf_quantizations or ["q4_k_m"])
-
-    if body.rl_quant_job_id:
-        rl_job = await db.get_rl_quant_job(body.rl_quant_job_id, user_id)
-        if not rl_job:
-            raise HTTPException(404, "RL quant job not found")
-        if rl_job.get("status") != "completed":
-            raise HTTPException(400, "RL quant job is not completed")
-        stored = rl_job.get("gguf_quants_json") or "[]"
-        parsed = loads_json_field(stored, [])
-        if parsed:
-            gguf_quants = parsed
-        config["rl_quant_job_id"] = body.rl_quant_job_id
 
     hub_precheck_dict: dict[str, Any] | None = None
     if hub_repo and hub_metadata:
@@ -225,8 +213,7 @@ async def start_export(
                 )
             except Exception:
                 logging.getLogger(__name__).exception(
-                    "Export inventory registration failed for job %s "
-                    "(export remains completed)",
+                    "Export inventory registration failed for job %s (export remains completed)",
                     job_id,
                 )
         if job.status.value == "completed":
@@ -239,8 +226,7 @@ async def start_export(
                     user_id=user_id,
                     result=job.result if isinstance(job.result, dict) else None,
                     output_dir=payload.get("output_dir"),
-                    expected_pubkey=str((user or {}).get("nostr_pubkey") or "")
-                    or None,
+                    expected_pubkey=str((user or {}).get("nostr_pubkey") or "") or None,
                 )
             except Exception:
                 logging.getLogger(__name__).exception(
@@ -248,9 +234,7 @@ async def start_export(
                 )
 
     async def _failed(message: str) -> None:
-        await db.update_export_job_status(
-            job_id, "failed", user_id=user_id, error_text=message
-        )
+        await db.update_export_job_status(job_id, "failed", user_id=user_id, error_text=message)
 
     async def _run() -> None:
         await run_orchestrated_job(
@@ -271,9 +255,7 @@ async def start_publish_to_hub(
     body: PublishToHubRequest,
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
-    orchestrator: Annotated[
-        HubPublishOrchestrator, Depends(get_hub_publish_orchestrator)
-    ],
+    orchestrator: Annotated[HubPublishOrchestrator, Depends(get_hub_publish_orchestrator)],
     settings: Annotated[ForgeSettings, Depends(get_settings)],
 ) -> PipelineJobResponse:
     """Start a background Hugging Face publish job (required for multi-GB GGUF uploads)."""
@@ -368,9 +350,7 @@ async def stream_publish_to_hub(
     job_id: str,
     user_id: Annotated[str, Depends(get_current_user_id)],
     db: Annotated[Database, Depends(get_db)],
-    orchestrator: Annotated[
-        HubPublishOrchestrator, Depends(get_hub_publish_orchestrator)
-    ],
+    orchestrator: Annotated[HubPublishOrchestrator, Depends(get_hub_publish_orchestrator)],
 ):
     if not await db.get_hub_publish_job(job_id, user_id):
         raise HTTPException(404, "Job not found")

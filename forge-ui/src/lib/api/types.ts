@@ -471,6 +471,34 @@ export type TrainingRecommendations = {
   dataset_analysis?: DatasetAnalysis;
 };
 
+/** Forge UI training surface — full local config; mesh/multi-node is agent-only. */
+export type TrainingSurface = {
+  surface: "frontend" | "agent";
+  exposes_full_training_config: boolean;
+  config_fields: string[];
+  local_distributed: {
+    enabled: boolean;
+    max_nodes: number | null;
+    strategies: string[];
+    multi_gpu: boolean;
+    note?: string;
+  };
+  multi_node: boolean;
+  mesh: {
+    available_on_this_surface: boolean;
+    opt_in_env: string;
+    requires: string;
+    operator_mesh_flag_set: boolean;
+    buzz_agent_present: boolean;
+    not_functional_yet?: boolean;
+    secondary_path?: boolean;
+    nostr_signed_plans?: boolean;
+    sig_alg?: string;
+  };
+  agent_surface?: string;
+  buzz_compatible: boolean;
+};
+
 export type CloudGpuCredential = {
   id: string;
   name: string;
@@ -519,25 +547,6 @@ export type TrainingMetricsPayload = {
   training: TrainingMetricPoint[];
   system: SystemMetrics[];
   updated_at?: number | null;
-};
-
-export type RLQuantJob = {
-  id: string;
-  status: string;
-  config_json: string;
-  output_dir: string | null;
-  recommendation_path: string | null;
-  gguf_quants: string[];
-  error_text?: string | null;
-  created_at: string;
-};
-
-export type RLQuantPreset = {
-  id: string;
-  label: string;
-  backend: string;
-  training_backend: string;
-  stages: string[];
 };
 
 export type CompressJob = {

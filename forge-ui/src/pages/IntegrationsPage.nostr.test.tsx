@@ -59,6 +59,6 @@ describe("IntegrationsPage Nostr keygen", () => {
 
     const toast = screen.getByTestId("nostr-status-msg");
     expect(toast.textContent).not.toContain("nsec1");
-    expect(toast.textContent).toMatch(/Write down the nsec below/i);
+    expect(toast.textContent).toMatch(/Save the recovery key below/i);
   });
 });

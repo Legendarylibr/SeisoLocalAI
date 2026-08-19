@@ -87,7 +87,7 @@ _LONG_FORM_PATTERNS = (
 )
 
 # Strong end-of-reply punctuation (last line).
-_LAST_LINE_DONE_RE = re.compile(r'[.!?…]\s*[\"\'»”’)\]\*]*\s*$')
+_LAST_LINE_DONE_RE = re.compile(r"[.!?…]\s*[\"\'»”’)\]\*]*\s*$")
 # Mid-thought endings that should always trigger another pass.
 _INCOMPLETE_TRAIL_RE = re.compile(
     r"(?:"
@@ -271,9 +271,7 @@ def hit_length_limit(
     streams still trigger auto-continue instead of a false early stop.
     """
     limit = max(1, int(max_tokens))
-    tokens = effective_pass_tokens(
-        output_tokens, pass_text=pass_text, metadata=metadata
-    )
+    tokens = effective_pass_tokens(output_tokens, pass_text=pass_text, metadata=metadata)
     # Allow ±1 for off-by-one token metering across backends.
     near_cap = tokens >= max(1, limit - 1)
     # "Most of the pass" — catches slight under-counts without treating short
@@ -382,9 +380,7 @@ def is_empty_length_budget_burn(
     """
     if str(pass_text or "").strip():
         return False
-    tokens = effective_pass_tokens(
-        pass_output_tokens, pass_text=pass_text, metadata=metadata
-    )
+    tokens = effective_pass_tokens(pass_output_tokens, pass_text=pass_text, metadata=metadata)
     # Require a real metered burn (not a zero-token glitch).
     if tokens < 8:
         return False
@@ -433,9 +429,7 @@ def should_auto_continue(
     if not text and not force_incomplete and not empty_burn:
         return False
 
-    tokens = effective_pass_tokens(
-        pass_output_tokens, pass_text=pass_text, metadata=metadata
-    )
+    tokens = effective_pass_tokens(pass_output_tokens, pass_text=pass_text, metadata=metadata)
     # Avoid continue loops when the pass produced almost nothing useful.
     reason = (finish_reason or "").lower()
     if tokens < 8 and reason not in {"length", "max_tokens"} and not force_incomplete:

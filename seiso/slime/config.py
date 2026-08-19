@@ -93,6 +93,7 @@ def unresolved_local_jsonl(path: Path | str | None) -> bool:
 def _env_flag(name: str) -> bool:
     return os.environ.get(name, "").strip().lower() in {"1", "true", "yes"}
 
+
 def effective_train_batch_size(config: SingleGpuSlimeConfig) -> int:
     """Prompt groups per step after filtering (slime rollout_batch_size target)."""
     if config.train_batch_size is not None:
@@ -338,9 +339,7 @@ class SingleGpuSlimeConfig:
             else:
                 payload[key] = value
         if "data_gen_source" in payload:
-            payload["data_gen_source"] = _normalize_data_gen_source(
-                str(payload["data_gen_source"])
-            )
+            payload["data_gen_source"] = _normalize_data_gen_source(str(payload["data_gen_source"]))
         return cls(**payload)
 
     def validate(self) -> None:
@@ -384,9 +383,7 @@ class SingleGpuSlimeConfig:
                 "code, or set SEISO_SLIME_ALLOW_FIELD_REWARD=1 only for debugging"
             )
         if self.temperature <= 0:
-            raise ValueError(
-                "temperature must be > 0 so GRPO groups have sampling diversity"
-            )
+            raise ValueError("temperature must be > 0 so GRPO groups have sampling diversity")
         if self.temperature > 2.0:
             raise ValueError("temperature must be <= 2.0 (degenerate sampling)")
         if not (0.0 < self.top_p <= 1.0):
@@ -434,27 +431,21 @@ class SingleGpuSlimeConfig:
         if self.clip_ratio_high is not None:
             if self.clip_ratio_high < self.clip_ratio:
                 raise ValueError(
-                    "clip_ratio_high must be >= clip_ratio "
-                    "(slime eps_clip_high >= eps_clip)"
+                    "clip_ratio_high must be >= clip_ratio (slime eps_clip_high >= eps_clip)"
                 )
             if self.clip_ratio_high > 2.0:
                 raise ValueError(
-                    "clip_ratio_high must be <= 2.0 (unbounded high clip disables "
-                    "the trust region)"
+                    "clip_ratio_high must be <= 2.0 (unbounded high clip disables the trust region)"
                 )
         if self.clip_ratio_c is not None and float(self.clip_ratio_c) <= 1.0:
             raise ValueError(
-                "clip_ratio_c must be > 1.0 for dual-clip (OpenRLHF/verl), or None "
-                "to disable"
+                "clip_ratio_c must be > 1.0 for dual-clip (OpenRLHF/verl), or None to disable"
             )
         agg = str(self.loss_aggregation or "seq_mean").strip().lower()
         if agg not in {"seq_mean", "token_mean"}:
             raise ValueError("loss_aggregation must be 'seq_mean' or 'token_mean'")
         object.__setattr__(self, "loss_aggregation", agg)
-        if (
-            self.policy_micro_batch_size % self.rollouts_per_prompt != 0
-            and not allow_tiny_rl()
-        ):
+        if self.policy_micro_batch_size % self.rollouts_per_prompt != 0 and not allow_tiny_rl():
             raise ValueError(
                 "policy_micro_batch_size must be a multiple of rollouts_per_prompt "
                 "so microbatches keep intact GRPO groups (CI: SEISO_ALLOW_TINY_RL=1)"
@@ -470,9 +461,7 @@ class SingleGpuSlimeConfig:
             raise ValueError("format_reward_weight must be non-negative")
         if self.process_reward_weight < 0:
             raise ValueError("process_reward_weight must be non-negative")
-        if self.process_reward_weight > 0 and not _env_flag(
-            "SEISO_SLIME_ALLOW_PROCESS_REWARD"
-        ):
+        if self.process_reward_weight > 0 and not _env_flag("SEISO_SLIME_ALLOW_PROCESS_REWARD"):
             raise ValueError(
                 "process_reward_weight > 0 enables experimental lexical process "
                 "shaping (gameable); leave at 0 for outcome-first GRPO, or set "
@@ -552,9 +541,7 @@ class SingleGpuSlimeConfig:
         dd_mode = str(self.data_designer or "off").lower().strip()
         dd_on = dd_mode in {"on", "true", "1", "yes", "force", "always"}
         dd_off = dd_mode in {"off", "false", "0", "no", "disable", "disabled"}
-        dataset_as_hub = bool(
-            self.dataset and not Path(self.dataset).expanduser().is_file()
-        )
+        dataset_as_hub = bool(self.dataset and not Path(self.dataset).expanduser().is_file())
         if not materialize_enabled or src_for_split in {"off", "none"}:
             materialize_will_split = False
         elif src_for_split == "dataset":
@@ -611,10 +598,7 @@ class SingleGpuSlimeConfig:
                         "data_gen materialize will auto-split, or set "
                         "SEISO_ALLOW_TEMPLATE_SLIME=1 for shape-only YAMLs."
                     )
-                if (
-                    unresolved_local_jsonl(self.dataset)
-                    and not materialize_will_split
-                ):
+                if unresolved_local_jsonl(self.dataset) and not materialize_will_split:
                     raise ValueError(
                         f"dataset={self.dataset} is missing on disk. Point "
                         "dataset at a verifiable JSONL, enable data_gen + "
@@ -642,8 +626,21 @@ class SingleGpuSlimeConfig:
             raise ValueError("verifier_max_text_chars must be non-negative")
         if not self.best_checkpoint_dir:
             raise ValueError("best_checkpoint_dir must not be empty")
+        from seiso.security import assert_relative_artifact_name
+
+        assert_relative_artifact_name(self.best_checkpoint_dir, field="best_checkpoint_dir")
+        if self.final_checkpoint_dir:
+            assert_relative_artifact_name(self.final_checkpoint_dir, field="final_checkpoint_dir")
+        # Weight-sync dirs are joined under output_dir during HTTP rollout sync —
+        # reject .. / absolute the same way as checkpoint artifact names.
+        assert_relative_artifact_name(self.sglang_weight_dir, field="sglang_weight_dir")
+        assert_relative_artifact_name(self.vllm_weight_dir, field="vllm_weight_dir")
         if self.write_verifier_data and not self.verifier_data_file:
             raise ValueError("verifier_data_file must not be empty")
+        if self.verifier_data_file:
+            assert_relative_artifact_name(self.verifier_data_file, field="verifier_data_file")
+        if self.data_gen_filename:
+            assert_relative_artifact_name(self.data_gen_filename, field="data_gen_filename")
         if self.data_gen_count < 0:
             raise ValueError("data_gen_count must be non-negative")
         if self.data_gen and self.data_gen_count < 1:
@@ -683,11 +680,7 @@ class SingleGpuSlimeConfig:
             )
         if materialize_requested and not allow_tiny_rl():
             floor = PRODUCT_DATA_GEN_FLOOR
-            if (
-                self.require_held_out_eval
-                and self.eval_dataset is None
-                and materialize_will_split
-            ):
+            if self.require_held_out_eval and self.eval_dataset is None and materialize_will_split:
                 floor = min_data_gen_count_for_held_out_split(PRODUCT_DATA_GEN_FLOOR)
             if self.data_gen_count < floor:
                 raise ValueError(

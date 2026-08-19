@@ -20,7 +20,6 @@ _ORCHESTRATOR_SPECS: dict[str, tuple[str, str]] = {
     "export": ("forge.orchestrators.export", "ExportOrchestrator"),
     "hub_publish": ("forge.orchestrators.hub_publish", "HubPublishOrchestrator"),
     "inference": ("forge.orchestrators.inference", "InferenceOrchestrator"),
-    "rl_quant": ("forge.orchestrators.rl_quant", "RLQuantOrchestrator"),
     "compress": ("forge.orchestrators.compress", "CompressOrchestrator"),
     "distill_rl": ("forge.orchestrators.distill_rl", "DistillRLOrchestrator"),
     "recipes": ("forge.orchestrators.recipes", "RecipeOrchestrator"),
@@ -57,7 +56,6 @@ get_training_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["training"])
 get_export_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["export"])
 get_hub_publish_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["hub_publish"])
 get_inference_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["inference"])
-get_rl_quant_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["rl_quant"])
 get_compress_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["compress"])
 get_distill_rl_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["distill_rl"])
 get_recipe_orchestrator = _orchestrator_dep(*_ORCHESTRATOR_SPECS["recipes"])

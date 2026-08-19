@@ -13,6 +13,8 @@ from forge.tools.registry import (
     tools_system_prompt,
 )
 
+_MAX_TOOL_CALLS_PER_ROUND = 8
+
 
 async def run_agent_loop_async(
     generate_fn: Callable[[list[dict]], Awaitable[str]],
@@ -38,12 +40,22 @@ async def run_agent_loop_async(
         if not calls:
             from forge.services.llm_output import strip_spurious_chat_artifacts
 
-            clean = strip_spurious_chat_artifacts(
-                TOOL_CALL_PATTERN.sub("", reply).strip()
+            clean = strip_spurious_chat_artifacts(TOOL_CALL_PATTERN.sub("", reply).strip())
+            return clean or reply, history + [{"role": "assistant", "content": clean or reply}]
+
+        if len(calls) > _MAX_TOOL_CALLS_PER_ROUND:
+            dropped = calls[_MAX_TOOL_CALLS_PER_ROUND:]
+            calls = calls[:_MAX_TOOL_CALLS_PER_ROUND]
+            audit_event(
+                "tool_calls_capped",
+                user_id=user_id,
+                round=round_i + 1,
+                kept=len(calls),
+                dropped=len(dropped),
+                dropped_tools=[str(c.get("name") or "") for c in dropped],
             )
-            return clean or reply, history + [
-                {"role": "assistant", "content": clean or reply}
-            ]
+            if on_log:
+                on_log(f"Tool round {round_i + 1}: capped to {len(calls)} (dropped {len(dropped)})")
 
         if on_log:
             on_log(f"Tool round {round_i + 1}: {len(calls)} call(s)")
@@ -52,6 +64,8 @@ async def run_agent_loop_async(
         for call in calls:
             name = call.get("name", "")
             args = call.get("arguments", {})
+            if not isinstance(args, dict):
+                args = {}
             if on_log:
                 on_log(f"  → {name}({json.dumps(args)[:120]})")
             audit_event(
@@ -60,6 +74,7 @@ async def run_agent_loop_async(
                 tool=name,
                 round=round_i + 1,
                 args_sha256=hash_audit_payload(args),
+                registered=name in registry.tools,
             )
             result = await registry.execute_async(name, args)
             audit_event(

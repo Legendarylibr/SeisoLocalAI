@@ -7,9 +7,7 @@ class CompressMixin:
     async def create_compress_job(
         self, user_id: str, config: dict, job_id: str | None = None
     ) -> dict:
-        return await self._create_config_job(
-            "compress_jobs", user_id, config, job_id=job_id
-        )
+        return await self._create_config_job("compress_jobs", user_id, config, job_id=job_id)
 
     async def get_compress_job(self, job_id: str, user_id: str) -> dict | None:
         return await self._get_config_job("compress_jobs", job_id, user_id)

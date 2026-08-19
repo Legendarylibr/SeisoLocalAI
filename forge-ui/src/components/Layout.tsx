@@ -25,7 +25,6 @@ const NAV_GROUPS: { label: string; items: NavItem[] }[] = [
     label: "Studio",
     items: [
       { to: "/train", label: "Train", icon: "train", desc: "LoRA fine-tuning" },
-      { to: "/rl-quant", label: "RL Quant", icon: "quant", desc: "Reward-guided quant" },
       { to: "/compress", label: "Compress", icon: "compress", desc: "Distill & prune LLMs" },
       { to: "/distill-rl", label: "Distill-RL", icon: "train", desc: "Distill + DPO alignment" },
       { to: "/export", label: "Export", icon: "export", desc: "Publish to Hub" },
@@ -42,7 +41,7 @@ export function Layout({ children, fullBleed = false }: { children: React.ReactN
   const location = useLocation();
   const { logout } = useAuth();
   const isChat = location.pathname === "/chat";
-  const isStudioCompact = /^\/(train|rl-quant|compress|distill-rl|export|recipes)(\/|$)/.test(location.pathname);
+  const isStudioCompact = /^\/(train|compress|distill-rl|export|recipes)(\/|$)/.test(location.pathname);
   const [navOpen, setNavOpen] = useState(false);
 
   useEffect(() => {
@@ -68,18 +67,13 @@ export function Layout({ children, fullBleed = false }: { children: React.ReactN
       />
 
       <aside className={`sidebar${navOpen ? " sidebar-open" : ""}`}>
-        <div className="sidebar-mascot" aria-hidden>
-          <SeisoLogoMark className="sidebar-mascot-img" />
-        </div>
-
-        <NavLink to="/" className="brand sidebar-elevated" style={{ textDecoration: "none", color: "inherit" }}>
-          <span className="brand-mark">
-            <SeisoLogoMark className="brand-logo-img" />
-          </span>
-          <span className="brand-text">
-            <span className="brand-name">Seiso</span>
-            <span className="brand-tagline">Local AI platform</span>
-          </span>
+        <NavLink
+          to="/"
+          className="brand brand-wordmark sidebar-elevated"
+          style={{ textDecoration: "none", color: "inherit" }}
+          aria-label="Seiso home"
+        >
+          <SeisoLogoMark className="sidebar-brand-wordmark" />
         </NavLink>
 
         <div className="sidebar-nav sidebar-elevated">

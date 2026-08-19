@@ -9,6 +9,7 @@ import {
   TrainingJob,
   TrainingMetricPoint,
   TrainingRecommendations,
+  TrainingSurface,
 } from "@/lib/api";
 import { invalidateApiCache } from "@/lib/api/getCache";
 import { appendBoundedLog } from "@/lib/api/sse";
@@ -88,10 +89,11 @@ export function TrainPage() {
   const [activeTab, setActiveTab] = useState<TrainStudioTab>("setup");
   const [distributedStrategy, setDistributedStrategy] = useState("auto");
   const [distributedNproc, setDistributedNproc] = useState("");
-  const [distributedNodes, setDistributedNodes] = useState(1);
-  const [distributedNodeRank, setDistributedNodeRank] = useState(0);
+  // Frontend surface is single-host only (nnodes=1). Multi-node / mesh is Buzz-agent-only.
+  const distributedNodes = 1;
   const [distributedMasterAddr, setDistributedMasterAddr] = useState("127.0.0.1");
   const [distributedMasterPort, setDistributedMasterPort] = useState(29500);
+  const [trainingSurface, setTrainingSurface] = useState<TrainingSurface | null>(null);
   const [ddpBackend, setDdpBackend] = useState("");
   const [ddpFindUnused, setDdpFindUnused] = useState(false);
   const [distributedOverridesEnabled, setDistributedOverridesEnabled] = useState(false);
@@ -229,6 +231,7 @@ export function TrainPage() {
     api.listTrainingJobs().then(setJobs).catch(console.error);
     api.listExportProfiles().then(setExportProfiles).catch(console.error);
     api.listCloudGpuCredentials().then(setCloudCredentials).catch(console.error);
+    api.getTrainingSurface().then(setTrainingSurface).catch(console.error);
     if (pendingModel) setModelId(pendingModel);
   }, [pendingModel]);
 
@@ -697,8 +700,9 @@ export function TrainPage() {
           multi_gpu: distributedEnabled,
           distributed_strategy: distributedStrategy,
           distributed_nproc_per_node: distributedNproc ? Number(distributedNproc) : undefined,
-          distributed_num_nodes: distributedNodes,
-          distributed_node_rank: distributedNodeRank,
+          // Frontend surface: always single host. Multi-node is Buzz-agent/mesh-only.
+          distributed_num_nodes: 1,
+          distributed_node_rank: 0,
           distributed_master_addr: distributedMasterAddr,
           distributed_master_port: distributedMasterPort,
           ddp_backend: ddpBackend || undefined,
@@ -1716,25 +1720,28 @@ export function TrainPage() {
               <div className="option-grid">
                 <div className="form-field">
                   <label>Total nodes</label>
-                  <input
-                    type="number"
-                    min={1}
-                    max={256}
-                    value={distributedNodes}
-                    onChange={(e) => setDistributedNodes(Math.max(1, Number(e.target.value) || 1))}
-                  />
+                  <input type="number" min={1} max={1} value={1} readOnly disabled />
+                  <p className="form-hint">
+                    Frontend is single-host (nodes=1). Multi-node mesh is Buzz-agent-only.
+                  </p>
                 </div>
                 <div className="form-field">
                   <label>This node rank</label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={Math.max(0, distributedNodes - 1)}
-                    value={distributedNodeRank}
-                    onChange={(e) => setDistributedNodeRank(Math.max(0, Number(e.target.value) || 0))}
-                  />
+                  <input type="number" min={0} max={0} value={0} readOnly disabled />
                 </div>
               </div>
+              {trainingSurface?.exposes_full_training_config && (
+                <div className="status-callout status-callout-info train-rec-panel">
+                  <div className="status-callout-body">
+                    <strong className="status-callout-title">Training config (frontend)</strong>
+                    <div className="status-callout-text">
+                      Full local training settings stay available here (method, quant, local
+                      multi-GPU DDP, hyperparams). Mesh / multi-node coordination runs only from
+                      a Buzz agent with SEISO_ALLOW_MESH=1 — not from this UI.
+                    </div>
+                  </div>
+                </div>
+              )}
               <div className="option-grid">
                 <div className="form-field">
                   <label>Master address</label>
@@ -1959,10 +1966,22 @@ export function TrainPage() {
           <div className="card studio-card">
             <StudioCardHeader
               icon="C"
-              title="Cloud target"
-              description="Provider, region, and GPU capacity for distributed launchers"
+              title="Cloud target metadata"
+              description="Labels + encrypted credentials only — does not provision instances or start remote training"
             />
             <StudioCardBody>
+              <div className="status-callout status-callout-warn" role="status">
+                <div className="status-callout-body">
+                  <strong className="status-callout-title">Metadata only</strong>
+                  <p className="status-callout-text">
+                    Enabling this tab records provider/region/instance labels on the job
+                    config. Seiso will <strong>not</strong> create cloud VMs, start remote
+                    DDP, or launch a cloud vLLM server. Provision the host yourself, then
+                    point local training at a reachable URL (for slime:
+                    <code> vllm_base_url</code>). See docs/training/multi-gpu.md.
+                  </p>
+                </div>
+              </div>
               <label className="studio-checkbox-item studio-checkbox-item-standalone">
                 <input
                   type="checkbox"
@@ -1975,7 +1994,7 @@ export function TrainPage() {
                     }
                   }}
                 />
-                Use cloud GPUs for distributed training
+                Attach cloud target metadata to this job (no remote launch)
               </label>
               <div className="option-grid">
                 <div className="form-field">

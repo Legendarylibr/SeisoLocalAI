@@ -7,7 +7,6 @@ from memory_fixtures import gpu_normal_caps as _gpu_normal_caps
 from memory_fixtures import mock_gpu_total as _mock_gpu_total
 
 from seiso.memory.protection import (
-    apply_rl_memory_guards,
     apply_training_memory_guards,
     assess_path_memory_fit,
     cap_llama_batch_for_context,
@@ -108,9 +107,7 @@ def test_llama_decode_budget_scales_with_native_gpu_size(monkeypatch, tmp_path):
             )
         )
 
-    assert [budget.n_batch for budget in budgets] == sorted(
-        budget.n_batch for budget in budgets
-    )
+    assert [budget.n_batch for budget in budgets] == sorted(budget.n_batch for budget in budgets)
     assert all(budget.max_tokens <= 768 for budget in budgets)
     assert all(budget.n_ubatch <= budget.n_batch for budget in budgets)
 
@@ -146,6 +143,7 @@ def test_llama_decode_budget_stream_is_more_conservative(monkeypatch, tmp_path):
     assert stream.reserve_mb > complete.reserve_mb
     assert stream.n_batch <= complete.n_batch
     assert stream.n_ubatch <= complete.n_ubatch
+
 
 def test_is_oom_error_detects_cuda_message():
     assert is_oom_error(RuntimeError("CUDA out of memory. Tried to allocate 2.00 GiB"))
@@ -414,12 +412,8 @@ def test_native_linux_context_cap_reserves_requested_completion(monkeypatch, tmp
         lambda _path, *, headroom_mb, n_ctx, **_kwargs: headroom_mb >= n_ctx,
     )
 
-    short = native_linux_llama_context_cap(
-        gguf, free_mb=10000, ceiling=8192, max_tokens=512
-    )
-    long = native_linux_llama_context_cap(
-        gguf, free_mb=10000, ceiling=8192, max_tokens=4096
-    )
+    short = native_linux_llama_context_cap(gguf, free_mb=10000, ceiling=8192, max_tokens=512)
+    long = native_linux_llama_context_cap(gguf, free_mb=10000, ceiling=8192, max_tokens=4096)
 
     assert short == 8192
     assert long == 4096
@@ -734,9 +728,7 @@ def test_llama_load_profile_ladder_native_linux_uses_safe_caps_for_roomy_models(
     assert profiles[-1].get("flash_attn") is False
 
 
-def test_llama_load_profile_ladder_native_linux_long_context_caps_batches(
-    monkeypatch, tmp_path
-):
+def test_llama_load_profile_ladder_native_linux_long_context_caps_batches(monkeypatch, tmp_path):
     gguf = tmp_path / "small.gguf"
     gguf.write_bytes(b"\x00" * 1024)
     monkeypatch.setattr("seiso.platform.is_native_linux_nvidia", lambda **_: True)
@@ -1650,23 +1642,6 @@ def test_apply_training_memory_guards_caps_unsafe_user_sizing(monkeypatch):
     assert policy["changed"] is True
     assert policy["changes"]["batch_size"] == {"from": 8, "to": 1}
     assert policy["changes"]["max_seq_length"] == {"from": 8192, "to": 1024}
-
-
-def test_apply_rl_memory_guards_caps_large_batches(monkeypatch):
-    monkeypatch.setattr("seiso.memory.protection.headroom_mb", lambda: 2048)
-    flat = {
-        "torch_preflight_batch_size": 16384,
-        "replay_buffer_on_gpu": True,
-        "torch_batch_episodes": 2048,
-        "torch_minibatch_size": 4096,
-        "online_batch_size": 128,
-    }
-    out = apply_rl_memory_guards(flat)
-    assert out["torch_preflight_batch_size"] == 512
-    assert out["torch_batch_episodes"] == 128
-    assert out["torch_minibatch_size"] == 64
-    assert out["online_batch_size"] == 32
-    assert out["replay_buffer_on_gpu"] is True
 
 
 def test_ensure_load_fits_allows_oversized_chat_gguf(tmp_path, monkeypatch):
