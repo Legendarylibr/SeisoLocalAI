@@ -90,3 +90,31 @@ def test_agent_plan_dry_run() -> None:
     assert payload["plan"]["steps"][0]["kind"] == "chat"
     assert payload["result"]["status"] == "done"
     assert payload["result"]["results"][0]["output"]["dry_run"] is True
+
+
+def test_agent_harnesses_cli() -> None:
+    result = runner.invoke(app, ["agent", "harnesses"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    ids = {row["id"] for row in payload["harnesses"]}
+    assert ids >= {"pi", "omp", "hermes", "cline", "openclaw"}
+
+
+def test_agent_endpoint_cli() -> None:
+    result = runner.invoke(app, ["agent", "endpoint", "--source", "ollama"])
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert "url" in payload
+    assert "api_key" not in payload
+
+
+def test_agent_swarm_dry_run_cli() -> None:
+    result = runner.invoke(
+        app,
+        ["agent", "swarm", "--dry-run", "--harness", "openclaw", "--goal", "smoke"],
+    )
+    assert result.exit_code == 0, result.output
+    payload = json.loads(result.output)
+    assert payload["plan"]["steps"][0]["id"] == "worker"
+    assert payload["result"]["status"] == "done"
+    assert payload["result"]["harness"] == "openclaw"

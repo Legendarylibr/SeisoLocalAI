@@ -507,6 +507,7 @@ def render_settings(
     choices: list | None = None,
     compact: bool = False,
     window: int = 8,
+    harness_summary: str = "",
 ) -> Text:
     out = Text()
     out.append("Settings\n", style="bold")
@@ -518,6 +519,8 @@ def render_settings(
         out.append(f"Hardware         {hardware_summary(max_len=48)}\n", style=SECONDARY)
     if storage_mode:
         out.append(f"Storage          {storage_mode}\n", style=SECONDARY)
+    if harness_summary:
+        out.append(f"Harness          {harness_summary}\n", style=SECONDARY)
     if npub:
         out.append(f"Public ID        {npub}\n", style=ACCENT)
     if nostr and not compact:
@@ -781,6 +784,7 @@ def draw_frame(
     signed_in: bool = False,
     compose_cursor: int | None = None,
     chat_offset: int = 0,
+    harness_summary: str = "",
 ) -> None:
     local_hub = local_hub or []
     remote_hub = remote_hub or []
@@ -850,6 +854,7 @@ def draw_frame(
             choices=choices,
             compact=compact,
             window=max(3, window - 4),
+            harness_summary=harness_summary,
         )
     elif page == "integrations":
         title, subtitle = "Integrations", "Platform"

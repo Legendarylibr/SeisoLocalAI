@@ -128,3 +128,78 @@ def agent_plan(
         ),
     )
     _print_json({"plan": plan.as_dict(), "result": result.as_dict()})
+
+
+@agent_app.command("harnesses")
+def agent_harnesses() -> None:
+    """Detect Pi / OMP / Hermes / Cline / OpenClaw on PATH."""
+    from seiso.agent.adapters.detect import detect_all
+
+    rows = detect_all(include_version=True)
+    _print_json({"harnesses": [row.as_dict() for row in rows]})
+
+
+@agent_app.command("endpoint")
+def agent_endpoint(
+    source: Annotated[str, typer.Option(help="auto|ollama|router|forge")] = "auto",
+    route_class: Annotated[str, typer.Option("--route-class")] = "allow_paid",
+) -> None:
+    """Print the resolved localhost OpenAI-compat URL (no secrets)."""
+    from seiso.agent.adapters.endpoint import resolve_endpoint
+
+    endpoint = resolve_endpoint(source=source, route_class=route_class, probe=False)
+    _print_json(endpoint.public_dict())
+
+
+@agent_app.command("swarm")
+def agent_swarm(
+    goal: Annotated[str, typer.Option(help="Swarm goal")] = "dry-run",
+    harness: Annotated[str, typer.Option(help="pi|omp|hermes|cline|openclaw")] = "hermes",
+    preset: Annotated[str, typer.Option(help="single|pair|plan_act_verify")] = "single",
+    dry_run: Annotated[bool, typer.Option("--dry-run/--run")] = True,
+    subagents: Annotated[bool, typer.Option("--subagents/--no-subagents")] = False,
+    route_class: Annotated[str, typer.Option("--route-class")] = "allow_paid",
+    source: Annotated[str, typer.Option(help="auto|ollama|router|forge")] = "auto",
+    confirm: Annotated[bool, typer.Option("--confirm/--no-confirm")] = False,
+) -> None:
+    """Build and optionally run a swarm (default --dry-run, no child processes)."""
+    from seiso.agent.adapters.types import parse_harness_id
+    from seiso.agent.harness import HarnessContext
+    from seiso.agent.swarm.presets import build_plan
+    from seiso.agent.swarm.run import run_swarm
+    from seiso.agent.swarm.types import AgentSettings, parse_preset
+    from seiso.routing.types import Candidate
+
+    settings = AgentSettings(
+        harness=parse_harness_id(harness),
+        model_source=source,
+        seiso_subagents=subagents,
+        preset=parse_preset(preset),
+        route_class=route_class,
+    )
+    # activate_subagents() already ran in AgentSettings.__post_init__ when on:
+    # pair + completion/correctness, no extra LLM.
+    plan = build_plan(goal, settings, plan_id="cli-swarm")
+    inventory = (
+        Candidate(
+            model_id="local-default",
+            backend="llamacpp",
+            role="code",
+            context_tokens=8192,
+            vram_mb=4096,
+            downloaded=True,
+            params_b=7.0,
+        ),
+    )
+    result = run_swarm(
+        goal,
+        settings,
+        HarnessContext(
+            local_healthy=True,
+            inventory=inventory,
+            confirm=confirm,
+            dry_run=dry_run,
+        ),
+        plan_id=plan.id,
+    )
+    _print_json({"plan": plan.as_dict(), "result": result.as_dict()})

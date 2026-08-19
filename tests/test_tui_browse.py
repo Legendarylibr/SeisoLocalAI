@@ -174,7 +174,16 @@ def test_page_choices_and_enter_hint(tmp_path: Path) -> None:
 
     settings = page_choices("settings")
     assert settings[0].action == "unload"
-    assert {item.action for item in settings} >= {"unload", "logout", "keygen", "reset"}
+    assert {item.action for item in settings} >= {
+        "unload",
+        "logout",
+        "keygen",
+        "reset",
+        "cycle_harness",
+        "toggle_subagents",
+    }
+    integ = page_choices("integrations")
+    assert {item.action for item in integ} >= {"refresh_harnesses", "swarm_dry_run"}
 
     assert "opens tiny.gguf" in enter_hint(
         focus="main",

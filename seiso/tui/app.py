@@ -31,6 +31,21 @@ from seiso.tui.browse import (
     resolve_hub_choice,
     sidebar_items,
 )
+from seiso.tui.harnesses import (
+    cycle_harness,
+    cycle_preset,
+    cycle_role_model,
+    cycle_route,
+    cycle_source,
+    detect_all,
+    load_settings,
+    save_settings,
+    set_role_prompt,
+    summary_line,
+    toggle_role,
+    toggle_role_llm,
+    toggle_subagents,
+)
 from seiso.tui.hub import HubRow, combined_rows, download_hub_repo, search_hub
 from seiso.tui.keys import Key, KeyReader, stdin_is_interactive
 from seiso.tui.offline import (
@@ -119,6 +134,8 @@ def run_tui(
     compose_cursor = 0
     chat_offset = 0
     knowledge = knowledge_names(data_dir)
+    agent_settings = load_settings(data_dir)
+    harness_detect = list(detect_all())
     scripted = keys is not None
     key_iter = iter(keys or ())
     live = True if scripted else (stdin_is_interactive() if interactive is None else interactive)
@@ -145,6 +162,9 @@ def run_tui(
             knowledge=knowledge,
             auth_phase=auth_phase if page == "auth" else "welcome",
             storage_mode=storage_choice,
+            agent_settings=agent_settings,
+            harness_detect=harness_detect,
+            model_labels=[item.label for item in models],
         )
 
     def clamp_cursors() -> None:
@@ -208,6 +228,7 @@ def run_tui(
             ),
             npub_full=(account.npub if account else pending_npub),
             signed_in=bool(account) and auth_phase == "ready",
+            harness_summary=summary_line(agent_settings),
             storage_mode=storage_choice,
             nostr=nostr_info,
             choices=choices() if page in {"auth", "settings", "integrations"} else None,
@@ -436,10 +457,113 @@ def run_tui(
             toggle_pref("auto_attest")
         elif action == "loopback_toggle":
             toggle_pref("allow_loopback")
+        elif action == "cycle_harness":
+            persist_agent(cycle_harness(agent_settings), "Harness")
+        elif action == "cycle_source":
+            persist_agent(cycle_source(agent_settings), "Model source")
+        elif action == "cycle_preset":
+            persist_agent(cycle_preset(agent_settings), "Swarm preset")
+        elif action == "cycle_route":
+            persist_agent(cycle_route(agent_settings), "Route class")
+        elif action == "toggle_subagents":
+            persist_agent(toggle_subagents(agent_settings), "Seiso subagents")
+        elif action == "refresh_harnesses":
+            refresh_harnesses()
+        elif action == "swarm_dry_run":
+            run_swarm_from_tui(dry_run=True)
+        elif action == "swarm_run":
+            run_swarm_from_tui(dry_run=False)
+        elif action.startswith("toggle_role_"):
+            persist_agent(toggle_role(agent_settings, action[len("toggle_role_") :]), "Subagent")
+        elif action.startswith("toggle_llm_"):
+            persist_agent(
+                toggle_role_llm(agent_settings, action[len("toggle_llm_") :]), "Subagent LLM"
+            )
+        elif action.startswith("cycle_model_"):
+            persist_agent(
+                cycle_role_model(
+                    agent_settings,
+                    action[len("cycle_model_") :],
+                    [item.label for item in models],
+                ),
+                "Subagent model",
+            )
+        elif action.startswith("prompt_"):
+            role = action[len("prompt_") :]
+            if compose.strip():
+                persist_agent(
+                    set_role_prompt(agent_settings, role, compose.strip()), f"{role} prompt"
+                )
+                compose = ""
+            else:
+                status = f"Type {role} instructions, then Enter."
 
     def nostr_info_clear() -> None:
         nonlocal nostr_info
         nostr_info = None
+
+    def persist_agent(updated, label: str) -> None:
+        nonlocal agent_settings, status
+        agent_settings = updated
+        save_settings(data_dir, agent_settings)
+        status = f"{label}: {summary_line(agent_settings)}"
+
+    def refresh_harnesses() -> None:
+        nonlocal harness_detect, status
+        harness_detect = list(detect_all())
+        found = sum(1 for item in harness_detect if item.installed)
+        status = f"{found} harness CLI(s) on PATH"
+
+    def run_swarm_from_tui(*, dry_run: bool, goal: str = "") -> None:
+        nonlocal status, messages
+        from seiso.agent.adapters import get_adapter
+        from seiso.agent.harness import HarnessContext
+        from seiso.agent.swarm.run import run_swarm
+        from seiso.routing.types import Candidate
+        from seiso.tui.harnesses import prepare_endpoint
+
+        text = (goal or compose).strip() or "dry-run"
+        endpoint = prepare_endpoint(data_dir, agent_settings, probe=False)
+        if not dry_run and not endpoint.url:
+            status = "No local endpoint. Load a GGUF, start Ollama, or enable the Smart Router."
+            return
+        inventory = (
+            Candidate(
+                model_id=endpoint.model_id or "local-default",
+                backend="llamacpp",
+                role="code",
+                context_tokens=8192,
+                vram_mb=4096,
+                downloaded=True,
+                params_b=7.0,
+            ),
+        )
+        adapter = get_adapter(agent_settings.harness)
+        result = run_swarm(
+            text,
+            agent_settings,
+            HarnessContext(
+                local_healthy=True,
+                inventory=inventory,
+                dry_run=dry_run,
+                confirm=not dry_run,
+            ),
+            worker=None if dry_run else adapter.launch,
+            workdir=root,
+            isolated_dir=data_dir / "agent" / "harnesses" / agent_settings.harness,
+            endpoint_url=endpoint.url,
+            model_id=endpoint.model_id,
+            api_key=endpoint.api_key,
+        )
+        status = f"Swarm {result.status}" + (
+            f" ({result.blocked_reason})" if result.blocked_reason else ""
+        )
+        messages.append(
+            {
+                "role": "assistant",
+                "content": f"[{agent_settings.harness}] {status} — {text[:120]}",
+            }
+        )
 
     def toggle_pref(field: str) -> None:
         nonlocal status
@@ -664,7 +788,7 @@ def run_tui(
         if cmd.kind == "help":
             status = (
                 "↑↓ scroll  ←→ sidebar/page  Enter select  "
-                "/hub /search q /download N /chat /train /unload /logout /quit"
+                "/hub /search q /download N /chat /harness /subagents /agent /unload /quit"
             )
         elif cmd.kind == "clear":
             messages.clear()
@@ -734,6 +858,38 @@ def run_tui(
                     refresh_nostr()
                     status = f"Relays: {', '.join(relays) or '(none)'}"
                     page = "integrations"
+        elif cmd.kind == "harness":
+            from seiso.agent.adapters.types import parse_harness_id
+
+            try:
+                agent_settings.harness = parse_harness_id(cmd.arg)
+            except ValueError as exc:
+                status = str(exc)
+            else:
+                persist_agent(agent_settings, "Harness")
+        elif cmd.kind == "subagents":
+            flag = cmd.arg.strip().lower()
+            if flag in {"on", "1", "true", "yes"}:
+                agent_settings.activate_subagents()
+            elif flag in {"off", "0", "false", "no"}:
+                agent_settings.deactivate_subagents()
+            else:
+                toggle_subagents(agent_settings)
+            persist_agent(agent_settings, "Seiso subagents")
+        elif cmd.kind == "swarm":
+            from seiso.agent.swarm.types import parse_preset
+
+            try:
+                agent_settings.preset = parse_preset(cmd.arg)
+            except ValueError as exc:
+                status = str(exc)
+            else:
+                persist_agent(agent_settings, "Swarm preset")
+        elif cmd.kind == "agent":
+            if not cmd.arg.strip():
+                status = "Usage: /agent <goal>"
+            else:
+                run_swarm_from_tui(dry_run=False, goal=cmd.arg)
         elif cmd.kind == "run":
             from seiso.tui.jobs import run_cli_job
 

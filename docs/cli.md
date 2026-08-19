@@ -350,9 +350,17 @@ seiso agent decide --job slime --no-local-healthy --mesh-peers --route-class loc
 
 # One-step harness plan (default --dry-run: no jobs)
 seiso agent plan --dry-run --task chat --goal "smoke chat"
+
+# Optional coding harnesses (Pi / OMP / Hermes / Cline / OpenClaw)
+seiso agent harnesses
+seiso agent endpoint --source auto
+seiso agent swarm --dry-run --harness hermes --goal "smoke"
+seiso agent swarm --dry-run --subagents --preset pair --goal "add tests"
 ```
 
 Prefer these over ad-hoc scripts; they call `decide_compute` and `run_harness`.
+
+`seiso agent swarm` stays **dry-run by default**. `--run` starts the selected harness as a headless worker. Seiso subagents (planner / completion / correctness / synthesizer) default **off**. Configure them in `seiso tui` Settings (`/harness`, `/subagents`, `/agent`). See [tui-harnesses.md](tui-harnesses.md).
 
 ## `seiso agent status` (Buzz-facing signed status)
 

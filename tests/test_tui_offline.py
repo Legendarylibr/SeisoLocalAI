@@ -159,6 +159,12 @@ def test_parse_slash_aliases() -> None:
     assert parse_slash("/logout").kind == "logout"
     assert parse_slash("/relays wss://example.com").kind == "relays"
     assert parse_slash("/relays wss://example.com").arg == "wss://example.com"
+    assert parse_slash("/harness openclaw").kind == "harness"
+    assert parse_slash("/harness openclaw").arg == "openclaw"
+    assert parse_slash("/subagents off").kind == "subagents"
+    assert parse_slash("/swarm pair").kind == "swarm"
+    assert parse_slash("/agent fix tests").kind == "agent"
+    assert parse_slash("/agent fix tests").arg == "fix tests"
     assert parse_slash("/wat").kind == "unknown"
 
 
