@@ -133,6 +133,24 @@ Six built-in skills, each paired with an agent definition.
 
 ---
 
+## Repo-bundled Skills
+
+### Seiso Orchestrate (Buzz integration)
+
+`seiso-orchestrate` is a skill for orchestrating Seiso (Forge + CLI) from a Buzz agent room using `buzz-cli` for channel updates and Seiso for local train/compress/export/provenance jobs.
+
+- **Location:** `.agents/skills/seiso-orchestrate/` (SKILL.md + reference.md)
+- **Preconditions:** `BUZZ_PRIVATE_KEY` (agent nsec), `BUZZ_RELAY_URL`, Seiso install paths (`SEISO_INSTALL_DIR`, `SEISO_DATA_DIR`)
+- **Workflow:** Join/create Buzz channel → set topic → run Seiso CLI jobs → post receipts (commands, job IDs, manifest paths, Nostr `event_id`) back to channel
+- **Supported jobs:** `seiso train`, `seiso compress`, `seiso distill-rl`, `seiso rl-quant`, `seiso export`, `seiso provenance attest|verify`
+- **Safety:** Never post `nsec`, HF tokens, backup passphrases, or cookie headers to Buzz. Never automate Forge keygen. Default Forge bind is localhost.
+- **Decision guide:** Smoke configs for quick iteration, Forge UI when human is watching, CLI for agent loops
+- **Install into Buzz checkout:** `cp -R .agents/skills/seiso-orchestrate /path/to/buzz/.agents/skills/`
+
+Full orchestration loop and command cookbook in the reference doc.
+
+---
+
 ## Seiso integration map
 
 | Skill | Seiso component |
@@ -165,4 +183,4 @@ Key reference files in the Seiso docs tree:
 - `docs/troubleshooting.md` — Troubleshooting guide
 - `CONTRIBUTING.md` — Contribution guidelines
 - `SECURITY.md` — Security policy
-- `.agents/skills/seiso-orchestrate/SKILL.md` — Buzz agent orchestration for Seiso workflows
+
