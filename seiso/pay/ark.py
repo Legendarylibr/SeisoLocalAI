@@ -1,8 +1,9 @@
 """Ark settlement interface — faucet now; Bark/Second wire when configured.
 
-Also composes shared funding discovery (Ark + L402 + faucet). Live Ark and
-live Lightning L402 are **not functional yet** — do not use for real funds.
-``SEISO_PAY_L402_SIM=1`` (or faucet) enables simulated L402 fund/exchange.
+Also composes shared funding discovery (Ark + L402 + x402 EVM + faucet).
+Live Ark, live Lightning L402, and live x402 EVM are **not functional yet** —
+do not use for real funds. ``SEISO_PAY_L402_SIM=1`` and ``SEISO_PAY_X402_SIM=1``
+(or faucet) enable simulated fund/exchange.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from seiso.pay.flags import (
     protocol_treasury_ark,
 )
 from seiso.pay.l402 import funding_l402_block, l402_sim_enabled
+from seiso.pay.x402 import funding_x402_block, x402_sim_enabled
 
 SettleMode = Literal["faucet", "ark", "simulated", "l402"]
 
@@ -43,7 +45,8 @@ class SettlementReceipt:
 def funding_instructions(session_id: str, amount_sats: int) -> dict[str, Any]:
     """Payment instructions for buyers (Ark, L402, and/or faucet)."""
     ark_addr = operator_ark() or f"ark:pending:{session_id[:12]}"
-    sim = l402_sim_enabled()
+    l402_sim = l402_sim_enabled()
+    x402_sim = x402_sim_enabled()
     out: dict[str, Any] = {
         "session_id": session_id,
         "amount_sats": amount_sats,
@@ -51,24 +54,35 @@ def funding_instructions(session_id: str, amount_sats: int) -> dict[str, Any]:
         "ark_address": ark_addr,
         "ln_invoice": None,
         "l402": funding_l402_block(session_id, amount_sats),
+        "x402": funding_x402_block(session_id, amount_sats),
         "faucet_available": faucet_enabled(),
         "network": (os.environ.get("SEISO_ARK_NETWORK") or "signet").strip(),
         "status": "pending",
         "do_not_use_live_rails": True,
         "detail": (
-            "Live Ark and live Lightning L402 are not functional yet — do not "
-            "use for real funds. "
+            "Live Ark, live Lightning L402, and live x402 EVM are "
+            "not functional yet — do not use for real funds. "
             + (
-                "Simulated L402 fund/exchange is available (POST /pay/v1/sessions/fund/l402)."
-                if sim
-                else "Faucet/sim only for local smoke tests."
+                "Simulated L402 + x402 fund/exchange available."
+                if l402_sim and x402_sim
+                else (
+                    "Simulated L402 available, x402 not ready."
+                    if l402_sim
+                    else (
+                        "Simulated x402 available, L402 not ready."
+                        if x402_sim
+                        else "Faucet/sim only for local smoke tests."
+                    )
+                )
             )
         ),
     }
     if faucet_enabled():
         out["faucet_hint"] = "Dev faucet: seiso pay session fund --session ID --sats N --faucet"
-    if sim:
+    if l402_sim:
         out["l402_hint"] = "Sim L402: seiso pay session fund --session ID --sats N --l402"
+    if x402_sim:
+        out["x402_hint"] = "Sim x402: seiso pay session fund --session ID --sats N --x402"
     return out
 
 

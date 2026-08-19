@@ -78,6 +78,17 @@ def pay_session(
             help="Fund via L402 sim (SEISO_PAY_L402_SIM=1 or faucet)",
         ),
     ] = False,
+    x402: Annotated[
+        bool,
+        typer.Option(
+            "--x402",
+            help="Fund via x402 EVM sim (SEISO_PAY_X402_SIM=1 or faucet)",
+        ),
+    ] = False,
+    network: Annotated[
+        str | None,
+        typer.Option(help="EVM CAIP-2 network for x402 (default SEISO_PAY_X402_NETWORK)"),
+    ] = None,
     json_out: Annotated[bool, typer.Option("--json")] = True,
 ) -> None:
     """Create / status / fund marketplace sessions."""
@@ -85,6 +96,11 @@ def pay_session(
     from seiso.pay.ark import funding_instructions
     from seiso.pay.flags import faucet_enabled
     from seiso.pay.l402 import complete_fund, l402_sim_enabled, mint_fund_challenge
+    from seiso.pay.x402 import (
+        complete_fund as complete_x402_fund,
+        mint_fund_challenge as mint_x402_challenge,
+        x402_sim_enabled,
+    )
     from seiso.pay.store import (
         activate_session,
         create_session,
@@ -98,7 +114,17 @@ def pay_session(
         created = create_session(scopes=[s.strip() for s in scopes.split(",")])
         tok = created["token"]
         sid = created["session_id"]
-        if sats > 0 and l402:
+        if sats > 0 and x402:
+            if not x402_sim_enabled():
+                console.print(
+                    "[red]SEISO_PAY_X402_SIM=1 (or SEISO_PAY_FAUCET=1) required "
+                    "for x402 sim funding[/]"
+                )
+                raise typer.Exit(1)
+            chal = mint_x402_challenge(session_id=sid, amount_sats=sats, network=network)
+            sig = str(chal.get("sim_payment_signature") or "")
+            complete_x402_fund(payment_signature=sig)
+        elif sats > 0 and l402:
             if not l402_sim_enabled():
                 console.print(
                     "[red]SEISO_PAY_L402_SIM=1 (or SEISO_PAY_FAUCET=1) required "
@@ -145,6 +171,25 @@ def pay_session(
         if sats <= 0:
             console.print("[red]--sats required[/]")
             raise typer.Exit(1)
+        if x402:
+            if not x402_sim_enabled():
+                console.print(
+                    "[red]SEISO_PAY_X402_SIM=1 (or SEISO_PAY_FAUCET=1) required "
+                    "for x402 EVM sim. Live USDC/facilitator is not wired.[/]"
+                )
+                _print_json(funding_instructions(session, sats))
+                raise typer.Exit(2)
+            try:
+                chal = mint_x402_challenge(
+                    session_id=session, amount_sats=sats, network=network
+                )
+                sig = str(chal.get("sim_payment_signature") or "")
+                result = complete_x402_fund(payment_signature=sig)
+            except Exception as exc:
+                console.print(f"[red]{exc}[/]")
+                raise typer.Exit(1) from exc
+            _print_json(result)
+            return
         if l402:
             if not l402_sim_enabled():
                 console.print(
