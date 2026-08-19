@@ -1,4 +1,4 @@
-# Seiso Local AI
+# Seiso Local AI (on gitlab now https://gitlab.com/legendarylibr/seiso)
 
 Going to work on a self hosted mirror then merge large changes (maybe waiting till it's done) to reduce ci/github actions
 
