@@ -114,7 +114,7 @@ dev = [
   "pytest-asyncio>=0.23",
   "pytest-xdist>=3.6",
   "ruff==0.16.3",
-  "mypy==2.3.0",
+  "mypy==2.3.1",
   "types-PyYAML>=6.0",
   "pylint>=3.2",
   "bandit[toml]>=1.7",
