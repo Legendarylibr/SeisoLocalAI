@@ -5,7 +5,7 @@
 setuptools>=83
 # JWT: PyJWT (see [forge] in pyproject.toml). Historical pyasn1 floor removed with python-jose.
 ruff>=0.4
-mypy==2.3.0
+mypy==2.3.1
 types-PyYAML>=6.0
 pylint>=3.2
 bandit[toml]>=1.7
