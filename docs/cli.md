@@ -19,7 +19,7 @@ Helper scripts (repo `scripts/`, not on `PATH`):
 |------------------|---------|
 | `start` | Install or launch the Seiso TUI — on `PATH` via `~/.local/bin` after install |
 | `./scripts/install.sh` | Lower-level installer (system deps, venv, pip extras, UI build) |
-| `./scripts/start.sh` | Lower-level launcher (`seiso tui`; `SEISO_UI=forge` for the web API) |
+| `./scripts/start.sh` | Lower-level launcher (`seiso forge`; `SEISO_UI=tui` for the terminal UI) |
 | `./scripts/doctor.sh` | Diagnose install, HF, GPU stack (runs automatically on install/start failure) |
 | `./scripts/precheck.sh` | Fast local CI gate (`make precheck`) |
 | `./scripts/install_flash_attn.sh` | Optional Flash Attention (Linux NVIDIA) |
@@ -129,7 +129,7 @@ seiso tui --model 1       # pick by index / path / name substring
 
 Same **Nostr account** as Forge: first launch creates a recovery key (`nsec`) or restores one; later sessions unlock from the saved session (24h, same JWT secret as the web UI) or by pasting the key / NIP-49 backup. Settings can rotate, import, sign out, or start a new session (`RESET`). Integrations toggles auto-attest and relays (`/relays wss://…`).
 
-Hub: `/search qwen`, or scroll to a row and press Enter to open (on disk) or download. Chat loads weights on the first message; `/unload` frees RAM/VRAM. Studio pages (`/train`, `/compress`, …) show the CLI — scroll a config and press Enter, or `/run configs/example_lora.yaml`. Optional web API: `SEISO_UI=forge start` or `seiso forge`.
+Hub: `/search qwen`, or scroll to a row and press Enter to open (on disk) or download. Chat loads weights on the first message; `/unload` frees RAM/VRAM. Studio pages (`/train`, `/compress`, …) show the CLI — scroll a config and press Enter, or `/run configs/example_lora.yaml`. Terminal UI: `SEISO_UI=tui start` or `seiso tui`.
 
 ## `seiso export`
 
