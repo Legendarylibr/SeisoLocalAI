@@ -3,7 +3,7 @@
   "algorithm": "sha256",
   "artifacts": {
     "locks/python.lock": "994b11404891d911a40d8af59257909ff341d9001f2af35d90ffd8452398f770",
-    "forge-ui/package-lock.json": "56a4e37cf60ab699110b383da89bb8ea100fdee23ad23d11dc2dfa122637f13e",
-    "forge-ui/bun.lock": "1c6abdfd45271f58b518a74e963c295fba726473970902a18dea6dbfe29b813e"
+    "forge-ui/package-lock.json": "15345cf5b2ca30e607c728209130c4d24344e0ee82378c04bee87fe38694785c",
+    "forge-ui/bun.lock": "dda8dda44cc5ebe3b29277951225f9916993d2804ae02028ab8598ec2c162194"
   }
 }
