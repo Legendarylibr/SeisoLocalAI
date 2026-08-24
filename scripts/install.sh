@@ -299,7 +299,7 @@ main() {
 
   if [[ "$SEISO_START" == "1" ]]; then
     export SEISO_INSTALL_JUST_RAN=1
-    export SEISO_UI="${SEISO_UI:-tui}"
+    export SEISO_UI="${SEISO_UI:-forge}"
     exec "$root/scripts/start.sh"
   fi
 

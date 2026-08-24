@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Start Seiso. Installs missing deps, runs doctor on failure, then launches
-# the terminal UI (default). Set SEISO_UI=forge to start the optional web API.
+# the Forge web UI (default). Set SEISO_UI=tui to start the optional terminal UI.
 #
 # Usage (prefer start on PATH after install):
 #   start
@@ -269,7 +269,7 @@ main() {
     fi
   fi
 
-  if [[ "${SEISO_UI:-tui}" == "forge" ]]; then
+  if [[ "${SEISO_UI:-forge}" == "forge" ]]; then
     forge_url="$(seiso_forge_url)"
 
     # Already running (healthy or still in lifespan / holding the data-dir lock):
