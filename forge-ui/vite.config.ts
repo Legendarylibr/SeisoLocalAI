@@ -2,6 +2,8 @@ import { defineConfig } from "vitest/config";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
+const host = process.env.TAURI_DEV_HOST;
+
 export default defineConfig({
   plugins: [react()],
   resolve: { alias: { "@": path.resolve(__dirname, "src") } },
@@ -13,6 +15,9 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: { "/api": "http://127.0.0.1:8765", "/health": "http://127.0.0.1:8765", "/v1": "http://127.0.0.1:8765" },
+    strictPort: true,
+    host: host || false,
+    open: false,
   },
   build: {
     outDir: "dist",
@@ -34,4 +39,6 @@ export default defineConfig({
       },
     },
   },
+  clearScreen: false,
+  envPrefix: ["VITE_", "TAURI_"],
 });

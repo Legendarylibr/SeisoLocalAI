@@ -9,7 +9,10 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "@noble/ciphers": "^2.3.0",
@@ -21,6 +24,7 @@
     "react-router": "^8.3.0"
   },
   "devDependencies": {
+    "@tauri-apps/cli": "^2.0.0",
     "@testing-library/jest-dom": "~7.0.1",
     "@testing-library/react": "^16.3.2",
     "@types/react": "^19.2.18",
