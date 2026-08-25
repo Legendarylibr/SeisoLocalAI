@@ -99,7 +99,6 @@ fn spawn_sidecar(app: &tauri::App) {
     let handle = app.handle().clone();
     let sidecar_state: tauri::State<'_, SidecarHandle> = app.state();
 
-    // Forward SSH_AUTH_SOCK so git operations over SSH work
     let extra_env: Vec<(String, String)> = {
         let mut env = Vec::new();
         if let Ok(sock) = std::env::var("SSH_AUTH_SOCK") {
@@ -107,6 +106,11 @@ fn spawn_sidecar(app: &tauri::App) {
         }
         if let Ok(known) = std::env::var("SSH_KNOWN_HOSTS") {
             env.push(("SSH_KNOWN_HOSTS".to_string(), known));
+        }
+        for var in &["SEISO_INSTALL_DIR", "SEISO_DATA_DIR", "SEISO_PORT"] {
+            if let Ok(val) = std::env::var(var) {
+                env.push((var.to_string(), val));
+            }
         }
         env
     };
