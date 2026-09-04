@@ -2,7 +2,7 @@
   "version": 1,
   "algorithm": "sha256",
   "artifacts": {
-    "locks/python.lock": "a73bcdfa033ca0a170916f7320019a0a16346d3784e7d76ace4249bad3f45a09",
+    "locks/python.lock": "0d6e9ca6fb60adefacbae61bd7386022c9b55dd42d4e4e624e1699e23e30b897",
     "forge-ui/package-lock.json": "bac8144396a0e8c19bbedc4a66e6f66b2e3875218bc3987c01f4eb3a3b40bcc0",
     "forge-ui/bun.lock": "12a9b7a002fe67968e2dd69d020009c711db595ab1cc50753e53a199f102162d"
   }
