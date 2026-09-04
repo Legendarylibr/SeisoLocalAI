@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import json
-import os
 from pathlib import Path
 
 import pytest
@@ -80,11 +78,11 @@ def test_list_supported_networks() -> None:
     assert len(nets) > 30
     # Check for key chains
     caip2s = {n["caip2"] for n in nets}
-    assert "eip155:1" in caip2s      # Ethereum
-    assert "eip155:8453" in caip2s    # Base
-    assert "eip155:42161" in caip2s   # Arbitrum
-    assert "eip155:4663" in caip2s    # Robinhood Chain
-    assert "eip155:46630" in caip2s   # Robinhood Chain Testnet
+    assert "eip155:1" in caip2s  # Ethereum
+    assert "eip155:8453" in caip2s  # Base
+    assert "eip155:42161" in caip2s  # Arbitrum
+    assert "eip155:4663" in caip2s  # Robinhood Chain
+    assert "eip155:46630" in caip2s  # Robinhood Chain Testnet
 
 
 def test_x402_network_default() -> None:
@@ -102,7 +100,7 @@ def test_x402_asset_base_sepolia() -> None:
 
 
 def test_x402_asset_robinhood() -> None:
-    from seiso.pay.x402 import x402_asset, USDC_BY_NETWORK
+    from seiso.pay.x402 import USDC_BY_NETWORK
 
     assert "eip155:4663" in USDC_BY_NETWORK
 
@@ -121,7 +119,7 @@ def test_mint_and_complete_fund(monkeypatch) -> None:
     session = create_session(scopes=["inference"], data_dir=Path("/tmp/.seiso-test-x402"))
     sid = session["session_id"]
 
-    from seiso.pay.x402 import mint_fund_challenge, complete_fund
+    from seiso.pay.x402 import complete_fund, mint_fund_challenge
 
     chal = mint_fund_challenge(
         session_id=sid,
@@ -186,7 +184,7 @@ def test_funding_x402_block_not_advertised(monkeypatch) -> None:
 
 
 def test_encode_decode_payment_header() -> None:
-    from seiso.pay.x402 import encode_payment_header, decode_payment_header
+    from seiso.pay.x402 import decode_payment_header, encode_payment_header
 
     payload = {"test": "value", "x402Version": 2}
     encoded = encode_payment_header(payload)
@@ -198,7 +196,9 @@ def test_encode_decode_payment_header() -> None:
 def test_www_authenticate_header() -> None:
     from seiso.pay.x402 import www_authenticate_header
 
-    h = www_authenticate_header(network="eip155:84532", pay_to="0x1234567890123456789012345678901234567890")
+    h = www_authenticate_header(
+        network="eip155:84532", pay_to="0x1234567890123456789012345678901234567890"
+    )
     assert "X402" in h
     assert "eip155:84532" in h
     assert "0x1234567890" in h
