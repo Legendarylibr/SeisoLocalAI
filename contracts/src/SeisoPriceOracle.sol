@@ -10,6 +10,7 @@ import {AggregatorV3Interface} from "./interfaces/AggregatorV3Interface.sol";
 contract SeisoPriceOracle {
     AggregatorV3Interface public btcUsd;
     AggregatorV3Interface public ethUsd;
+    address public immutable owner;
 
     event PricesUpdated(uint256 btcUsd8, uint256 ethUsd8, uint256 timestamp);
     event OracleAddressesUpdated(address btc, address eth);
@@ -17,6 +18,7 @@ contract SeisoPriceOracle {
     error StalePrice(uint256 updatedAt, uint256 maxAge);
 
     constructor(address _btcUsd, address _ethUsd) {
+        owner = msg.sender;
         btcUsd = AggregatorV3Interface(_btcUsd);
         ethUsd = AggregatorV3Interface(_ethUsd);
     }
@@ -39,9 +41,9 @@ contract SeisoPriceOracle {
         return (uint256(btcPrice), uint256(ethPrice), block.timestamp);
     }
 
-    /// @notice Update oracle contract addresses (operator/treasury only).
+    /// @notice Update oracle contract addresses (owner only).
     function setOracles(address _btcUsd, address _ethUsd) external {
-        require(msg.sender == address(this) || msg.sender == tx.origin, "unauthorized");
+        require(msg.sender == owner, "unauthorized");
         btcUsd = AggregatorV3Interface(_btcUsd);
         ethUsd = AggregatorV3Interface(_ethUsd);
         emit OracleAddressesUpdated(_btcUsd, _ethUsd);

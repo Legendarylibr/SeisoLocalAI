@@ -75,6 +75,7 @@ contract SeisoPayRouterTest is Test {
 
         vm.deal(buyer, AMOUNT);
         vm.prank(buyer);
+        vm.warp(block.timestamp + 100); // advance past deadline
         vm.expectRevert(abi.encodeWithSelector(SeisoPayRouter.QuoteExpired.selector, 1, block.timestamp));
         router.payETH{value: AMOUNT}(q, bytes("test"));
     }
@@ -109,17 +110,86 @@ contract SeisoPayRouterTest is Test {
         vm.expectRevert();
         router.setProtocolFeeBps(2000); // > 10%
     }
+
+    function test_RevertReentrancy() public {
+        ReentrantPayee reentrant = new ReentrantPayee(router);
+        SeisoPayRouter.Quote memory q = SeisoPayRouter.Quote({
+            requestId: REQUEST_ID,
+            payee: address(reentrant),
+            asset: address(0),
+            amount: AMOUNT,
+            protocolFeeBps: FEE_BPS,
+            deadline: DEADLINE
+        });
+
+        vm.deal(buyer, AMOUNT);
+        vm.prank(buyer);
+        // The reentrant payee re-calls payETH on receipt; the guard must reject it.
+        router.payETH{value: AMOUNT}(q, bytes("test"));
+        assertEq(reentrant.reentryAttempts(), 1);
+    }
+}
+
+contract ReentrantPayee {
+    SeisoPayRouter public immutable router;
+    uint256 public reentryAttempts;
+
+    constructor(SeisoPayRouter _router) {
+        router = _router;
+    }
+
+    receive() external payable {
+        reentryAttempts += 1;
+        SeisoPayRouter.Quote memory q = SeisoPayRouter.Quote({
+            requestId: keccak256("reentry"),
+            payee: address(this),
+            asset: address(0),
+            amount: 1,
+            protocolFeeBps: 0,
+            deadline: type(uint256).max
+        });
+        try router.payETH{value: 0}(q, bytes("")) {
+            // Reentry unexpectedly succeeded — flag it.
+            reentryAttempts += 100;
+        } catch {
+            // Expected: guard reverts the reentrant call.
+        }
+    }
 }
 
 contract SeisoPriceOracleTest is Test {
     SeisoPriceOracle public oracle;
+    address public owner;
+    address public attacker;
 
     function setUp() public {
+        owner = makeAddr("oracle-owner");
+        attacker = makeAddr("attacker");
+        vm.startPrank(owner);
         oracle = new SeisoPriceOracle(address(0), address(0));
+        vm.stopPrank();
     }
 
     function test_Deployment() public view {
         assertEq(address(oracle.btcUsd()), address(0));
         assertEq(address(oracle.ethUsd()), address(0));
+        assertEq(oracle.owner(), owner);
+    }
+
+    function test_SetOracles_OwnerOnly() public {
+        address btc = makeAddr("btc-feed");
+        address eth = makeAddr("eth-feed");
+        vm.prank(owner);
+        oracle.setOracles(btc, eth);
+        assertEq(address(oracle.btcUsd()), btc);
+        assertEq(address(oracle.ethUsd()), eth);
+    }
+
+    function test_RevertSetOracles_NonOwner() public {
+        address btc = makeAddr("btc-feed");
+        address eth = makeAddr("eth-feed");
+        vm.prank(attacker);
+        vm.expectRevert("unauthorized");
+        oracle.setOracles(btc, eth);
     }
 }
