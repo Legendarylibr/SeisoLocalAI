@@ -84,7 +84,7 @@ def payment_methods() -> list[dict[str, str]]:
     tests only.
     """
     from seiso.pay.l402 import l402_sim_enabled
-    from seiso.pay.x402 import x402_sim_enabled, x402_network, x402_advertised
+    from seiso.pay.x402 import x402_advertised, x402_network, x402_sim_enabled
 
     l402_status = "sim" if l402_sim_enabled() else "not_functional"
     l402_detail = (

@@ -54,47 +54,46 @@ LIVE_NOT_READY_MSG = (
 # Where canonical USDC is not deployed, the primary bridged USDC.e / native is listed.
 USDC_BY_NETWORK: dict[str, str] = {
     # Mainnets
-    "eip155:1": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",        # Ethereum
-    "eip155:10": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",       # Optimism
-    "eip155:56": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",       # BNB Chain
-    "eip155:100": "0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83",      # Gnosis
-    "eip155:137": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",      # Polygon (PoS)
-    "eip155:250": "0x04068DA6C83AFCFA0e13ba15A6696662335D5B75",      # Fantom
-    "eip155:324": "0x1d17CBcF0b6EB1430b5C0dF6d6D0d2a0f0c9f4c4",      # zkSync Era
-    "eip155:1088": "0xEA32A96608495e54156Ae48931A7c20f0dCc1a21",     # Metis
-    "eip155:1284": "0x818ec0A7Fe18Ff94269904fCED6AE3DaE6d6dC0b",     # Moonbeam
-    "eip155:1285": "0xE3F5a90F9cb311505cd691a46556599Ee1a351fb",     # Moonriver
-    "eip155:2222": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",      # Kava
-    "eip155:42220": "0x818ec0A7Fe18Ff94269904fCED6AE3DaE6d6dC0b",    # Celo
-    "eip155:42161": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",    # Arbitrum One
-    "eip155:43114": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",    # Avalanche C-Chain
-    "eip155:59144": "0x176211869cA2b568f2A7D4EE941E073a542EEd51",    # Linea
-    "eip155:81457": "0x1d17CBcF0b6EB1430b5C0dF6d6D0d2a0f0c9f4c4",    # Blast
-    "eip155:8453": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",     # Base
-    "eip155:34443": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",     # Mode
-    "eip155:534352": "0x06eFdBFf2a14a7c8E15944D1F4A48F9F95f663A4",   # Scroll
-    "eip155:4663": "0x4eB5D9EeFc6c9A7a9F6D7e8F9b9C8d9e0F1a2B3C",     # Robinhood Chain  (placeholder)
-    "eip155:660279": "0x1d17CBcF0b6EB1430b5C0dF6d6D0d2a0f0c9f4c4",   # Xai
-    "eip155:167000": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",    # Taiko
-    "eip155:5000": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",      # Mantle
-    "eip155:1101": "0xA8CE8aee21bC2A23a5A5bE0b8b8c0b0b0b0b0b0b",      # Polygon zkEVM  (placeholder)
-    "eip155:42170": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",     # Arbitrum Nova
-    "eip155:288": "0xE3F5a90F9cb311505cd691a46556599Ee1a351fb",       # Boba
-    "eip155:1313161554": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201", # Aurora
-    "eip155:25": "0x66e428c3f67a68878562e79A0234c1F83c208Cc1",        # Cronos
-    "eip155:30": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",        # Rootstock  (placeholder)
-    "eip155:40": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",        # Telos  (placeholder)
-
+    "eip155:1": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",  # Ethereum
+    "eip155:10": "0x0b2C639c533813f4Aa9D7837CAf62653d097Ff85",  # Optimism
+    "eip155:56": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",  # BNB Chain
+    "eip155:100": "0xDDAfbb505ad214D7b80b1f830fcCc89B60fb7A83",  # Gnosis
+    "eip155:137": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",  # Polygon (PoS)
+    "eip155:250": "0x04068DA6C83AFCFA0e13ba15A6696662335D5B75",  # Fantom
+    "eip155:324": "0x1d17CBcF0b6EB1430b5C0dF6d6D0d2a0f0c9f4c4",  # zkSync Era
+    "eip155:1088": "0xEA32A96608495e54156Ae48931A7c20f0dCc1a21",  # Metis
+    "eip155:1284": "0x818ec0A7Fe18Ff94269904fCED6AE3DaE6d6dC0b",  # Moonbeam
+    "eip155:1285": "0xE3F5a90F9cb311505cd691a46556599Ee1a351fb",  # Moonriver
+    "eip155:2222": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",  # Kava
+    "eip155:42220": "0x818ec0A7Fe18Ff94269904fCED6AE3DaE6d6dC0b",  # Celo
+    "eip155:42161": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",  # Arbitrum One
+    "eip155:43114": "0xB97EF9Ef8734C71904D8002F8b6Bc66Dd9c48a6E",  # Avalanche C-Chain
+    "eip155:59144": "0x176211869cA2b568f2A7D4EE941E073a542EEd51",  # Linea
+    "eip155:81457": "0x1d17CBcF0b6EB1430b5C0dF6d6D0d2a0f0c9f4c4",  # Blast
+    "eip155:8453": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",  # Base
+    "eip155:34443": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",  # Mode
+    "eip155:534352": "0x06eFdBFf2a14a7c8E15944D1F4A48F9F95f663A4",  # Scroll
+    "eip155:4663": "0x4eB5D9EeFc6c9A7a9F6D7e8F9b9C8d9e0F1a2B3C",  # Robinhood Chain  (placeholder)
+    "eip155:660279": "0x1d17CBcF0b6EB1430b5C0dF6d6D0d2a0f0c9f4c4",  # Xai
+    "eip155:167000": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",  # Taiko
+    "eip155:5000": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",  # Mantle
+    "eip155:1101": "0xA8CE8aee21bC2A23a5A5bE0b8b8c0b0b0b0b0b0b",  # Polygon zkEVM  (placeholder)
+    "eip155:42170": "0xaf88d065e77c8cC2239327C5EDb3A432268e5831",  # Arbitrum Nova
+    "eip155:288": "0xE3F5a90F9cb311505cd691a46556599Ee1a351fb",  # Boba
+    "eip155:1313161554": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",  # Aurora
+    "eip155:25": "0x66e428c3f67a68878562e79A0234c1F83c208Cc1",  # Cronos
+    "eip155:30": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",  # Rootstock  (placeholder)
+    "eip155:40": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",  # Telos  (placeholder)
     # Testnets
-    "eip155:11155111": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238", # Sepolia
-    "eip155:84532": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",    # Base Sepolia
-    "eip155:421614": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",   # Arbitrum Sepolia
-    "eip155:80002": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",    # Polygon Amoy
-    "eip155:11155420": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201", # Optimism Sepolia
-    "eip155:46630": "0x4eB5D9EeFc6c9A7a9F6D7e8F9b9C8d9e0F1a2B3C",   # Robinhood Chain Testnet  (placeholder)
-    "eip155:59141": "0x176211869cA2b568f2A7D4EE941E073a542EEd51",    # Linea Sepolia
+    "eip155:11155111": "0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238",  # Sepolia
+    "eip155:84532": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",  # Base Sepolia
+    "eip155:421614": "0x75faf114eafb1BDbe2F0316DF893fd58CE46AA4d",  # Arbitrum Sepolia
+    "eip155:80002": "0x3c499c542cEF5E3811e1192ce70d8cC03d5c3359",  # Polygon Amoy
+    "eip155:11155420": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",  # Optimism Sepolia
+    "eip155:46630": "0x4eB5D9EeFc6c9A7a9F6D7e8F9b9C8d9e0F1a2B3C",  # Robinhood Chain Testnet  (placeholder)
+    "eip155:59141": "0x176211869cA2b568f2A7D4EE941E073a542EEd51",  # Linea Sepolia
     "eip155:534351": "0x06eFdBFf2a14a7c8E15944D1F4A48F9F95f663A4",  # Scroll Sepolia
-    "eip155:2442": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",     # Polygon zkEVM Cardona
+    "eip155:2442": "0x09b7280F3f0f55d0E3D37C0a6c5c10d0C5a8b201",  # Polygon zkEVM Cardona
 }
 
 DEFAULT_NETWORK = "eip155:84532"  # Base Sepolia (testnet)
@@ -202,12 +201,14 @@ def list_supported_networks() -> list[dict[str, str]]:
     }
     out: list[dict[str, str]] = []
     for caip2, addr in sorted(USDC_BY_NETWORK.items()):
-        out.append({
-            "caip2": caip2,
-            "name": names.get(caip2, caip2),
-            "usdc": addr,
-            "testnet": "test" in caip2 or "test" in names.get(caip2, "").lower(),
-        })
+        out.append(
+            {
+                "caip2": caip2,
+                "name": names.get(caip2, caip2),
+                "usdc": addr,
+                "testnet": "test" in caip2 or "test" in names.get(caip2, "").lower(),
+            }
+        )
     return out
 
 

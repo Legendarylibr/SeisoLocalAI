@@ -6,8 +6,8 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 _DEFAULT_BTC_USD_8 = 60_000_00_000_000  # 1 BTC = $60,000 (8 decimals)
-_DEFAULT_ETH_USD_8 = 3_500_00_000_000   # 1 ETH  = $3,500  (8 decimals)
-_DEFAULT_USDC_ATOMIC_PER_SAT = 5        # dev placeholder: 1 sat → 5 USDC atomic
+_DEFAULT_ETH_USD_8 = 3_500_00_000_000  # 1 ETH  = $3,500  (8 decimals)
+_DEFAULT_USDC_ATOMIC_PER_SAT = 5  # dev placeholder: 1 sat → 5 USDC atomic
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,7 +60,9 @@ def quote_fx(
     # USDC atomic (6 decimals): 1 sat → atomic mapping
     import os
 
-    raw = (os.environ.get("SEISO_PAY_X402_ATOMIC_PER_SAT") or str(_DEFAULT_USDC_ATOMIC_PER_SAT)).strip()
+    raw = (
+        os.environ.get("SEISO_PAY_X402_ATOMIC_PER_SAT") or str(_DEFAULT_USDC_ATOMIC_PER_SAT)
+    ).strip()
     try:
         atomic_per_sat = int(raw)
     except ValueError:

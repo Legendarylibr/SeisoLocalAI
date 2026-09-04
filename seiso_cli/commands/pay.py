@@ -96,17 +96,21 @@ def pay_session(
     from seiso.pay.ark import funding_instructions
     from seiso.pay.flags import faucet_enabled
     from seiso.pay.l402 import complete_fund, l402_sim_enabled, mint_fund_challenge
-    from seiso.pay.x402 import (
-        complete_fund as complete_x402_fund,
-        mint_fund_challenge as mint_x402_challenge,
-        x402_sim_enabled,
-    )
     from seiso.pay.store import (
         activate_session,
         create_session,
         load_session,
         public_session_view,
         resolve_session_by_token,
+    )
+    from seiso.pay.x402 import (
+        complete_fund as complete_x402_fund,
+    )
+    from seiso.pay.x402 import (
+        mint_fund_challenge as mint_x402_challenge,
+    )
+    from seiso.pay.x402 import (
+        x402_sim_enabled,
     )
 
     act = action.strip().lower()
@@ -180,9 +184,7 @@ def pay_session(
                 _print_json(funding_instructions(session, sats))
                 raise typer.Exit(2)
             try:
-                chal = mint_x402_challenge(
-                    session_id=session, amount_sats=sats, network=network
-                )
+                chal = mint_x402_challenge(session_id=session, amount_sats=sats, network=network)
                 sig = str(chal.get("sim_payment_signature") or "")
                 result = complete_x402_fund(payment_signature=sig)
             except Exception as exc:
