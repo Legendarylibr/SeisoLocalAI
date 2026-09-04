@@ -23,12 +23,6 @@ from seiso.pay.l402 import (
     l402_sim_enabled,
     mint_fund_challenge,
 )
-from seiso.pay.x402 import (
-    REFERENCE_URL as X402_REFERENCE_URL,
-    complete_fund as complete_x402_fund,
-    mint_fund_challenge as mint_x402_challenge,
-    x402_sim_enabled,
-)
 from seiso.pay.pricing import JOB_TYPES, quote_job
 from seiso.pay.store import (
     activate_session,
@@ -37,6 +31,18 @@ from seiso.pay.store import (
     load_job,
     public_session_view,
     resolve_session_by_token,
+)
+from seiso.pay.x402 import (
+    REFERENCE_URL as X402_REFERENCE_URL,
+)
+from seiso.pay.x402 import (
+    complete_fund as complete_x402_fund,
+)
+from seiso.pay.x402 import (
+    mint_fund_challenge as mint_x402_challenge,
+)
+from seiso.pay.x402 import (
+    x402_sim_enabled,
 )
 
 

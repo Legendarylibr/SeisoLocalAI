@@ -56,7 +56,6 @@ def load_prices(data_dir: Path | None = None) -> OraclePrices:
 
     Live oracle reads from chain via ``SeisoPriceOracle`` when wired.
     """
-    cache = None
     if data_dir:
         cache_file = data_dir / "pay" / "oracle_cache.json"
         if cache_file.is_file():
