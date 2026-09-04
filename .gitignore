@@ -39,6 +39,10 @@ logs/
 uv.lock
 .cache/
 .test_outputs/
+# Foundry (contracts/)
+contracts/cache/
+contracts/lib/
+contracts/out/
 # Lean / Lake
 formal/**/.lake/
 formal/**/lake-packages/

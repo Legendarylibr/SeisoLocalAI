@@ -92,7 +92,7 @@ def test_docs_hub_links_roadmap() -> None:
 
 
 def test_skill_points_at_decide_compute() -> None:
-    skill = (REPO / ".agents/skills/seiso-orchestrate/SKILL.md").read_text(encoding="utf-8")
+    skill = (REPO / "AGENTS.md").read_text(encoding="utf-8")
     assert "decide_compute" in skill
 
 

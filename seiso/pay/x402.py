@@ -199,7 +199,7 @@ def list_supported_networks() -> list[dict[str, str]]:
         "eip155:11155111": "Sepolia (test)",
         "eip155:11155420": "Optimism Sepolia (test)",
     }
-    out: list[dict[str, str]] = []
+    out: list[dict[str, str | bool]] = []
     for caip2, addr in sorted(USDC_BY_NETWORK.items()):
         out.append(
             {

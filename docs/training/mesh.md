@@ -28,7 +28,7 @@ else SEISO_PAY_URL set?      → sats marketplace (Ark + protocol fee; not for r
 else                         → ask a human
 ```
 
-See [pay/marketplace.md](../pay/marketplace.md) and [`.agents/skills/seiso-orchestrate/SKILL.md`](../../.agents/skills/seiso-orchestrate/SKILL.md).
+See [pay/marketplace.md](../pay/marketplace.md) and [`AGENTS.md`](../../AGENTS.md).
 
 ## Flow
 

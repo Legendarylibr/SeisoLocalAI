@@ -138,7 +138,7 @@ Lightning/L402 pay-in is one-way — marketplace refunds do **not** send sats ba
 
 ## Buzz receipts
 
-Agents orchestrating paid runs should post a short receipt to the Buzz channel (see [`.agents/skills/seiso-orchestrate/`](../../.agents/skills/seiso-orchestrate/SKILL.md)):
+Agents orchestrating paid runs should post a short receipt to the Buzz channel (see [`AGENTS.md`](../../AGENTS.md)):
 
 ```text
 ## Seiso run

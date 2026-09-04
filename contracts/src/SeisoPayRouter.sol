@@ -37,6 +37,15 @@ contract SeisoPayRouter {
     bool public paused;
     AggregatorV3Interface public priceOracle;
 
+    uint256 private _locked = 1;
+
+    modifier nonReentrant() {
+        require(_locked == 1, "reentrancy");
+        _locked = 2;
+        _;
+        _locked = 1;
+    }
+
     constructor(address _protocolTreasury, uint256 _protocolFeeBps, address _oracle) {
         protocolTreasury = _protocolTreasury;
         protocolFeeBps = _protocolFeeBps;
@@ -55,6 +64,7 @@ contract SeisoPayRouter {
         external
         payable
         notPaused
+        nonReentrant
         returns (bool)
     {
         if (block.timestamp > quote.deadline) revert QuoteExpired(quote.deadline, block.timestamp);
@@ -89,6 +99,7 @@ contract SeisoPayRouter {
     function payERC20(Quote calldata quote, bytes calldata clientData)
         external
         notPaused
+        nonReentrant
         returns (bool)
     {
         if (block.timestamp > quote.deadline) revert QuoteExpired(quote.deadline, block.timestamp);
