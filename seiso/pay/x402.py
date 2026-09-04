@@ -155,7 +155,7 @@ def normalize_evm_address(raw: str) -> str:
     return "0x" + text[2:].lower()
 
 
-def list_supported_networks() -> list[dict[str, str]]:
+def list_supported_networks() -> list[dict[str, str | bool]]:
     """Return all supported networks with chain info."""
     names: dict[str, str] = {
         "eip155:1": "Ethereum",
