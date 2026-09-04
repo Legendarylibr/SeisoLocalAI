@@ -374,7 +374,7 @@ jq -c .nostr_event status.json | buzz messages send --channel "$CHANNEL" --conte
 ```
 
 Prefer local → mesh → paid marketplace when orchestrating from a Buzz agent
-([seiso-orchestrate skill](../.agents/skills/seiso-orchestrate/SKILL.md)).
+([seiso-orchestrate skill](../AGENTS.md)).
 See [training/mesh.md](training/mesh.md).
 
 ## External Smart Router

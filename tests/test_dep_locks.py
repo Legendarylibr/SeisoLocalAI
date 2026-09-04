@@ -96,7 +96,7 @@ def test_locked_package_versions_reads_pins():
     assert versions["aiohttp"] == "3.14.3"
     assert versions["cryptography"] == "50.0.0"
     assert versions["pyjwt"] == "2.13.0"
-    assert versions["setuptools"] == "83.0.0"
+    assert versions["setuptools"] == "84.0.0"
     assert "ecdsa" not in versions
     assert "python-jose" not in versions
 

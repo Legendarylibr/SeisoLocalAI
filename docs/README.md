@@ -129,7 +129,7 @@ See [install.md](install.md) and [forge.md](forge.md) for full details.
 2. [pay/marketplace.md](pay/marketplace.md) — sats marketplace, Ark + L402 payment methods, faucet vs real settles
 3. [training/mesh.md](training/mesh.md) — Buzz-coordinated shared / multi-node training (no fee)
 4. [cli.md § seiso pay / seiso mesh](cli.md#seiso-pay-opt-in-marketplace) — command cheat sheet
-5. [`.agents/skills/seiso-orchestrate/`](../.agents/skills/seiso-orchestrate/SKILL.md) — agent decision loop (local → mesh → pay)
+5. [`AGENTS.md`](../AGENTS.md) — agent decision loop (local → mesh → pay)
 
 ---
 

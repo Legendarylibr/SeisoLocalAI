@@ -278,6 +278,6 @@ See also the canonical tree in [README.md](../README.md#data--storage).
 - **Full CLI:** [cli.md](cli.md)
 - **Security hardening:** [README.md](../README.md#security) and [forge.md](forge.md)
 - **Opt-in remote marketplace (Ark + L402) — not functional yet, do not use:** [pay/marketplace.md](pay/marketplace.md) — self-hosted stays free
-- **Buzz shared / multi-node training (secondary / opt-in):** [training/mesh.md](training/mesh.md) · skill [seiso-orchestrate](../.agents/skills/seiso-orchestrate/SKILL.md)
+- **Buzz shared / multi-node training (secondary / opt-in):** [training/mesh.md](training/mesh.md) · skill [seiso-orchestrate](../AGENTS.md)
 
 Adaptive RL quantization research: [Adaptive-RL-Quantization](https://github.com/Legendarylibr/Adaptive-RL-Quantization).

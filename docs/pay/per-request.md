@@ -67,4 +67,4 @@ forge install
 forge script script/Deploy.s.sol --rpc-url base_sepolia --broadcast
 ```
 
-See [contracts/](../contracts/) for Solidity source and tests.
+See [contracts/](../../contracts/) for Solidity source and tests.
