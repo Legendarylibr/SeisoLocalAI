@@ -129,9 +129,7 @@ pub fn verify_swarm_completion(
 }
 
 #[tauri::command]
-pub fn list_swarm_runs(
-    state: State<'_, Arc<Mutex<SwarmOrchestrator>>>,
-) -> Vec<SwarmSummary> {
+pub fn list_swarm_runs(state: State<'_, Arc<Mutex<SwarmOrchestrator>>>) -> Vec<SwarmSummary> {
     let orchestrator = state.lock();
     orchestrator
         .list_runs()
@@ -166,9 +164,7 @@ pub fn can_spawn_agent(state: State<'_, Arc<Mutex<SwarmOrchestrator>>>) -> bool 
 }
 
 #[tauri::command]
-pub fn get_resource_info(
-    state: State<'_, Arc<Mutex<SwarmOrchestrator>>>,
-) -> ResourceInfo {
+pub fn get_resource_info(state: State<'_, Arc<Mutex<SwarmOrchestrator>>>) -> ResourceInfo {
     let orchestrator = state.lock();
     let spawn_capacity = orchestrator.spawn_capacity();
     let running_agents = orchestrator
@@ -186,18 +182,13 @@ pub fn get_resource_info(
 }
 
 #[tauri::command]
-pub fn watchdog_tick(
-    state: State<'_, Arc<Mutex<SwarmOrchestrator>>>,
-) -> Vec<String> {
+pub fn watchdog_tick(state: State<'_, Arc<Mutex<SwarmOrchestrator>>>) -> Vec<String> {
     let orchestrator = state.lock();
     orchestrator.watchdog_tick()
 }
 
 #[tauri::command]
-pub fn set_worktree_merged(
-    state: State<'_, Arc<Mutex<SwarmOrchestrator>>>,
-    run_id: String,
-) {
+pub fn set_worktree_merged(state: State<'_, Arc<Mutex<SwarmOrchestrator>>>, run_id: String) {
     let orchestrator = state.lock();
     orchestrator.set_merged(&run_id);
 }

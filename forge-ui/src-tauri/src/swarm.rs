@@ -4,10 +4,9 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
-use std::time::Duration;
-use sysinfo::{Pid, PidExt, ProcessExt, System, SystemExt};
+use sysinfo::System;
 use uuid::Uuid;
 
 const MAX_CONCURRENT_AGENTS: usize = 4;
@@ -89,8 +88,11 @@ impl SwarmOrchestrator {
             .filter(|a| a.id != agent_id)
             .map(|a| a.id.clone())
             .collect();
-        let worktree_paths: Vec<String> =
-            run.subagents.iter().map(|a| a.worktree_path.clone()).collect();
+        let worktree_paths: Vec<String> = run
+            .subagents
+            .iter()
+            .map(|a| a.worktree_path.clone())
+            .collect();
         Some(AgentManifest {
             id: agent.id.clone(),
             role: agent.role.clone(),
@@ -102,15 +104,16 @@ impl SwarmOrchestrator {
         })
     }
 
-    pub fn write_peer_manifests(&self, run: &SwarmRun) {
-        let rid = run.id.clone();
+    pub fn write_peer_manifests(&self, run_id: &str) {
+        let run = self.get_run(run_id);
+        let Some(run) = run else { return };
         for agent in &run.subagents {
             if agent.status != "running" {
                 continue;
             }
             let manifest = self
-                .agent_manifest(&rid, &agent.id)
-                .unwrap_or_else(|| panic!("missing agent {} in run {}", agent.id, rid));
+                .agent_manifest(run_id, &agent.id)
+                .unwrap_or_else(|| panic!("missing agent {} in run {}", agent.id, run_id));
             let json = serde_json::to_string_pretty(&manifest).unwrap_or_default();
             let path = PathBuf::from(&agent.worktree_path).join(".seiso-peer-manifest.json");
             if let Some(parent) = path.parent() {
@@ -164,8 +167,10 @@ impl SwarmOrchestrator {
             merged: false,
             aggregator_note: None,
         };
-        let mut runs = self.runs.lock();
-        runs.insert(id.clone(), run);
+        {
+            let mut runs = self.runs.lock();
+            runs.insert(id.clone(), run);
+        }
         self.persist_runs();
         id
     }
@@ -178,26 +183,28 @@ impl SwarmOrchestrator {
         worktree_path: &str,
         role: &str,
     ) -> Result<(), String> {
-        let mut runs = self.runs.lock();
-        let run = runs
-            .get_mut(run_id)
-            .ok_or_else(|| format!("run {} not found", run_id))?;
-        let now = Utc::now().to_rfc3339();
-        run.subagents.push(SubagentState {
-            id: agent_id.to_string(),
-            branch: branch.to_string(),
-            worktree_path: worktree_path.to_string(),
-            role: role.to_string(),
-            status: "running".to_string(),
-            progress: "initializing".to_string(),
-            started_at: Some(now.clone()),
-            last_activity: Some(now),
-            exit_code: None,
-            output_summary: None,
-            error: None,
-        });
-        run.updated_at = now;
-        self.write_peer_manifests(run);
+        {
+            let mut runs = self.runs.lock();
+            let run = runs
+                .get_mut(run_id)
+                .ok_or_else(|| format!("run {} not found", run_id))?;
+            let now = Utc::now().to_rfc3339();
+            run.subagents.push(SubagentState {
+                id: agent_id.to_string(),
+                branch: branch.to_string(),
+                worktree_path: worktree_path.to_string(),
+                role: role.to_string(),
+                status: "running".to_string(),
+                progress: "initializing".to_string(),
+                started_at: Some(now.clone()),
+                last_activity: Some(now.clone()),
+                exit_code: None,
+                output_summary: None,
+                error: None,
+            });
+            run.updated_at = now;
+        }
+        self.write_peer_manifests(run_id);
         self.persist_runs();
         Ok(())
     }
@@ -212,67 +219,75 @@ impl SwarmOrchestrator {
         exit_code: Option<i32>,
         error: Option<&str>,
     ) {
-        let mut runs = self.runs.lock();
-        if let Some(run) = runs.get_mut(run_id) {
-            let now = Utc::now().to_rfc3339();
-            if let Some(agent) = run.subagents.iter_mut().find(|a| a.id == agent_id) {
-                agent.status = status.to_string();
-                agent.progress = progress.to_string();
-                agent.last_activity = Some(now.clone());
-                agent.exit_code = exit_code;
-                if let Some(o) = output {
-                    agent.output_summary = Some(o.to_string());
+        {
+            let mut runs = self.runs.lock();
+            if let Some(run) = runs.get_mut(run_id) {
+                let now = Utc::now().to_rfc3339();
+                if let Some(agent) = run.subagents.iter_mut().find(|a| a.id == agent_id) {
+                    agent.status = status.to_string();
+                    agent.progress = progress.to_string();
+                    agent.last_activity = Some(now.clone());
+                    agent.exit_code = exit_code;
+                    if let Some(o) = output {
+                        agent.output_summary = Some(o.to_string());
+                    }
+                    if let Some(e) = error {
+                        agent.error = Some(e.to_string());
+                    }
                 }
-                if let Some(e) = error {
-                    agent.error = Some(e.to_string());
-                }
-            }
-            run.updated_at = now;
+                run.updated_at = now;
 
-            let terminal: [&str; 3] = ["done", "failed", "stalled"];
-            let all_done = run.subagents.iter().all(|a| terminal.contains(&a.status.as_str()));
-            if all_done {
-                let any_failed = run
+                let terminal: [&str; 3] = ["done", "failed", "stalled"];
+                let all_done = run
                     .subagents
                     .iter()
-                    .any(|a| a.status == "failed" || a.status == "stalled");
-                run.status = if any_failed {
-                    "partial".to_string()
-                } else {
-                    "done".to_string()
-                };
+                    .all(|a| terminal.contains(&a.status.as_str()));
+                if all_done {
+                    let any_failed = run
+                        .subagents
+                        .iter()
+                        .any(|a| a.status == "failed" || a.status == "stalled");
+                    run.status = if any_failed {
+                        "partial".to_string()
+                    } else {
+                        "done".to_string()
+                    };
+                }
             }
-            self.persist_runs();
         }
+        self.persist_runs();
     }
 
     // ── Aggregation ──────────────────────────────────────────────────────
 
     pub fn aggregate_results(&self, run_id: &str) -> Option<String> {
-        let mut runs = self.runs.lock();
-        let run = runs.get_mut(run_id)?;
+        let note = {
+            let mut runs = self.runs.lock();
+            let run = runs.get_mut(run_id)?;
 
-        let mut parts: Vec<String> = Vec::new();
-        for agent in &run.subagents {
-            let summary = agent.output_summary.as_deref().unwrap_or("(no output)");
-            let status_icon = match agent.status.as_str() {
-                "done" => "[OK]",
-                "failed" => "[FAIL]",
-                "stalled" => "[STALLED]",
-                _ => "[?]",
-            };
-            parts.push(format!(
-                "{} {} (branch: {}): {}",
-                status_icon, agent.role, agent.branch, summary
-            ));
-            if let Some(ref err) = agent.error {
-                parts.push(format!("  error: {}", err));
+            let mut parts: Vec<String> = Vec::new();
+            for agent in &run.subagents {
+                let summary = agent.output_summary.as_deref().unwrap_or("(no output)");
+                let status_icon = match agent.status.as_str() {
+                    "done" => "[OK]",
+                    "failed" => "[FAIL]",
+                    "stalled" => "[STALLED]",
+                    _ => "[?]",
+                };
+                parts.push(format!(
+                    "{} {} (branch: {}): {}",
+                    status_icon, agent.role, agent.branch, summary
+                ));
+                if let Some(err) = &agent.error {
+                    parts.push(format!("  error: {}", err));
+                }
             }
-        }
 
-        let note = parts.join("\n");
-        run.aggregator_note = Some(note.clone());
-        run.updated_at = Utc::now().to_rfc3339();
+            let note = parts.join("\n");
+            run.aggregator_note = Some(note.clone());
+            run.updated_at = Utc::now().to_rfc3339();
+            note
+        };
         self.persist_runs();
         Some(note)
     }
@@ -281,39 +296,42 @@ impl SwarmOrchestrator {
 
     pub fn detect_and_resolve_stalls(&self) -> Vec<(String, String)> {
         let mut stalled: Vec<(String, String)> = Vec::new();
-        let mut runs = self.runs.lock();
-        let now = Utc::now();
-        for run in runs.values_mut() {
-            if run.status != "running" {
-                continue;
-            }
-            for agent in &mut run.subagents {
-                if agent.status != "running" {
+        {
+            let mut runs = self.runs.lock();
+            let now = Utc::now();
+            for run in runs.values_mut() {
+                if run.status != "running" {
                     continue;
                 }
-                if let Some(ref last) = agent.last_activity {
-                    if let Ok(dt) = DateTime::parse_from_rfc3339(last) {
-                        let elapsed = (now - dt).num_seconds() as u64;
-                        if elapsed < STALL_TIMEOUT_SECS {
-                            continue;
+                for agent in &mut run.subagents {
+                    if agent.status != "running" {
+                        continue;
+                    }
+                    if let Some(last) = &agent.last_activity {
+                        if let Ok(dt) = DateTime::parse_from_rfc3339(last) {
+                            let elapsed = (now - dt.with_timezone(&Utc)).num_seconds() as u64;
+                            if elapsed < STALL_TIMEOUT_SECS {
+                                continue;
+                            }
+                            agent.status = "stalled".to_string();
+                            agent.progress = "stalled: no activity".to_string();
+                            let agent_id = agent.id.clone();
+                            let wt_path = agent.worktree_path.clone();
+                            let resume = format!(
+                                "You appear to be stalled. Last progress: {}. \
+                                 Please resume the task and finish it. \
+                                 If you need to re-read context, do so now. \
+                                 Do not repeat work already done.",
+                                agent.progress
+                            );
+                            let resume_path =
+                                PathBuf::from(&wt_path).join(".seiso-resume-prompt.txt");
+                            fs::write(&resume_path, &resume).ok();
+                            stalled.push((
+                                agent_id,
+                                format!("resume prompt written to {}", resume_path.display()),
+                            ));
                         }
-                        agent.status = "stalled".to_string();
-                        agent.progress = "stalled: no activity".to_string();
-                        let agent_id = agent.id.clone();
-                        let wt_path = agent.worktree_path.clone();
-                        let resume = format!(
-                            "You appear to be stalled. Last progress: {}. \
-                             Please resume the task and finish it. \
-                             If you need to re-read context, do so now. \
-                             Do not repeat work already done.",
-                            agent.progress
-                        );
-                        let resume_path = PathBuf::from(&wt_path).join(".seiso-resume-prompt.txt");
-                        fs::write(&resume_path, &resume).ok();
-                        stalled.push((
-                            agent_id,
-                            format!("resume prompt written to {}", resume_path.display()),
-                        ));
                     }
                 }
             }
@@ -329,7 +347,7 @@ impl SwarmOrchestrator {
         let runs = self.runs.lock();
         if let Some(run) = runs.get(run_id) {
             for agent in &run.subagents {
-                if let Some(ref output) = agent.output_summary {
+                if let Some(output) = &agent.output_summary {
                     let truncation_signals = [
                         "... (truncated",
                         "[TRUNCATED]",
@@ -428,19 +446,21 @@ impl SwarmOrchestrator {
     }
 
     pub fn list_runs(&self) -> Vec<SwarmRun> {
-        let mut runs = self.runs.lock();
+        let runs = self.runs.lock();
         let mut list: Vec<SwarmRun> = runs.values().cloned().collect();
         list.sort_by(|a, b| b.started_at.cmp(&a.started_at));
         list
     }
 
     pub fn set_merged(&self, run_id: &str) {
-        let mut runs = self.runs.lock();
-        if let Some(run) = runs.get_mut(run_id) {
-            run.merged = true;
-            run.updated_at = Utc::now().to_rfc3339();
-            self.persist_runs();
+        {
+            let mut runs = self.runs.lock();
+            if let Some(run) = runs.get_mut(run_id) {
+                run.merged = true;
+                run.updated_at = Utc::now().to_rfc3339();
+            }
         }
+        self.persist_runs();
     }
 
     pub fn shutdown_flag(&self) -> Arc<AtomicBool> {
@@ -519,9 +539,24 @@ mod tests {
         orchestrator
             .register_subagent(&run_id, "a2", "b2", "/tmp/wt2", "completion")
             .unwrap();
-        orchestrator.update_subagent(&run_id, "a1", "done", "complete", Some("worked"), Some(0), None);
-        orchestrator
-            .update_subagent(&run_id, "a2", "done", "complete", Some("verified"), Some(0), None);
+        orchestrator.update_subagent(
+            &run_id,
+            "a1",
+            "done",
+            "complete",
+            Some("worked"),
+            Some(0),
+            None,
+        );
+        orchestrator.update_subagent(
+            &run_id,
+            "a2",
+            "done",
+            "complete",
+            Some("verified"),
+            Some(0),
+            None,
+        );
         let summary = orchestrator.aggregate_results(&run_id);
         assert!(summary.is_some());
         assert!(summary.unwrap().contains("[OK] worker"));

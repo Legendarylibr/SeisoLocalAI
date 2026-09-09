@@ -1,26 +1,23 @@
 use parking_lot::Mutex;
 use std::path::PathBuf;
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 use tauri::{
-    AppHandle, Emitter, Manager,
     menu::{MenuBuilder, MenuItemBuilder},
     tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent},
+    AppHandle, Emitter, Manager,
 };
+use tauri_plugin_shell::ShellExt;
 
 mod commands;
 mod swarm;
 
 /// Backend-sidecar child process handle.
 struct SidecarHandle {
-    child: Option<tauri_plugin_shell::process::CommandChild>,
+    child: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
 }
 
 /// Periodic watchdog ticker.
-fn start_watchdog(
-    handle: AppHandle,
-    orchestrator: Arc<Mutex<swarm::SwarmOrchestrator>>,
-) {
+fn start_watchdog(handle: AppHandle, orchestrator: Arc<Mutex<swarm::SwarmOrchestrator>>) {
     tauri::async_runtime::spawn(async move {
         let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(15));
         loop {
@@ -33,7 +30,10 @@ fn start_watchdog(
                 let _ = handle.emit("watchdog-action", action);
             }
             // Heartbeat
-            let _ = handle.emit("backend-heartbeat", serde_json::json!({"ts": chrono::Utc::now().to_rfc3339()}));
+            let _ = handle.emit(
+                "backend-heartbeat",
+                serde_json::json!({"ts": chrono::Utc::now().to_rfc3339()}),
+            );
         }
     });
 }
@@ -42,7 +42,9 @@ fn start_watchdog(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
-        .manage(SidecarHandle { child: None })
+        .manage(SidecarHandle {
+            child: Mutex::new(None),
+        })
         .setup(|app| {
             // ── Orchestrator ──────────────────────────────────────────────
             let data_dir = {
@@ -52,9 +54,7 @@ pub fn run() {
                     .unwrap_or_else(|_| home.join(".seiso"));
                 base.join("desktop")
             };
-            let orchestrator = Arc::new(Mutex::new(swarm::SwarmOrchestrator::new(
-                data_dir,
-            )));
+            let orchestrator = Arc::new(Mutex::new(swarm::SwarmOrchestrator::new(data_dir)));
             app.manage(orchestrator.clone());
 
             // ── Sidecar ───────────────────────────────────────────────────
@@ -115,17 +115,12 @@ fn spawn_sidecar(app: &tauri::App) {
         env
     };
 
-    let sidecar_cmd = app
-        .shell()
-        .sidecar("binaries/seiso-sidecar")
-        .map_err(|e| {
-            eprintln!("sidecar binary not found: {e}");
-        });
+    let sidecar_cmd = app.shell().sidecar("seiso-sidecar").map_err(|e| {
+        eprintln!("sidecar binary not found: {e}");
+    });
 
     if let Ok(cmd) = sidecar_cmd {
-        let cmd = extra_env
-            .into_iter()
-            .fold(cmd, |c, (k, v)| c.env(k, v));
+        let cmd = extra_env.into_iter().fold(cmd, |c, (k, v)| c.env(k, v));
 
         match cmd.spawn() {
             Ok((mut rx, child)) => {
