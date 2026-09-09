@@ -19,6 +19,7 @@ venv/
 node_modules/
 forge-ui/dist/
 forge-ui/.vite/
+forge-ui/src-tauri/target/
 .coverage
 htmlcov/
 .mypy_cache/

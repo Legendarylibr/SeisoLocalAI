@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# Seiso sidecar — spawned by the Tauri desktop app.
+# Activates the venv, ensures SSH agent forwarding, starts Forge backend.
+set -euo pipefail
+
+INSTALL_DIR="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
+DATA_DIR="${SEISO_DATA_DIR:-$HOME/.seiso}"
+PORT="${SEISO_PORT:-8765}"
+
+cd "$INSTALL_DIR"
+
+# Activate venv
+VENV="$INSTALL_DIR/.venv"
+if [ -f "$VENV/bin/activate" ]; then
+  source "$VENV/bin/activate"
+elif [ -f "$VENV/Scripts/activate" ]; then
+  # Windows
+  source "$VENV/Scripts/activate"
+else
+  echo "error: no .venv found at $VENV" >&2
+  exit 1
+fi
+
+# Ensure SSH agent socket is forwarded to git operations
+if [ -n "${SSH_AUTH_SOCK:-}" ]; then
+  export SSH_AUTH_SOCK
+  echo "SSH_AUTH_SOCK forwarded: $SSH_AUTH_SOCK" >&2
+fi
+
+# Ensure gh CLI is on PATH
+if command -v gh &>/dev/null; then
+  echo "gh CLI available: $(gh --version 2>&1 | head -1)" >&2
+fi
+
+# Write a marker file so the Forge API knows it's running in desktop mode
+mkdir -p "$DATA_DIR/desktop"
+echo "desktop" > "$DATA_DIR/desktop/mode"
+
+# Start Forge without opening a browser (Tauri is the UI)
+# --no-open prevents the browser from launching
+# --port matches what Tauri expects
+exec seiso forge --no-open --port "$PORT" "$@"
