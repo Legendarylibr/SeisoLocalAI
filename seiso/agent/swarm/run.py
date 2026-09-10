@@ -96,9 +96,7 @@ def _with_continuation(plan: Plan, continuation: str) -> Plan:
         if step.id == "worker":
             payload = dict(step.payload)
             goal = str(payload.get("goal") or "")
-            payload["goal"] = (
-                f"{goal}\n\nVerifier feedback — continue and address:\n{continuation}"
-            )
+            payload["goal"] = f"{goal}\n\nVerifier feedback — continue and address:\n{continuation}"
             step = Step(
                 id=step.id,
                 kind=step.kind,
@@ -118,9 +116,10 @@ def _build_feedback(verdicts: list[dict[str, Any]]) -> str:
         if verdict.get("ok"):
             continue
         reason = str(verdict.get("reason") or "incomplete")
-        evidence = (
-            verdict.get("evidence") if isinstance(verdict.get("evidence"), Mapping) else {}
-        )
+        evidence: Mapping[str, Any] = {}
+        raw_evidence = verdict.get("evidence")
+        if isinstance(raw_evidence, Mapping):
+            evidence = raw_evidence
         detail = ""
         missing = evidence.get("missing")
         if missing:
@@ -128,9 +127,7 @@ def _build_feedback(verdicts: list[dict[str, Any]]) -> str:
         elif evidence.get("tests_failed"):
             detail = " tests failed"
         elif evidence.get("compile_errors"):
-            detail = (
-                f" compile errors: {'; '.join(str(e) for e in evidence['compile_errors'][:2])}"
-            )
+            detail = f" compile errors: {'; '.join(str(e) for e in evidence['compile_errors'][:2])}"
         parts.append(f"- {reason}{detail}")
     return "\n".join(parts)
 
