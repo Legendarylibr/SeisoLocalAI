@@ -1,5 +1,6 @@
 use parking_lot::Mutex;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use tauri::{
     menu::{MenuBuilder, MenuItemBuilder},
@@ -12,8 +13,20 @@ mod commands;
 mod swarm;
 
 /// Backend-sidecar child process handle.
-struct SidecarHandle {
+pub(crate) struct SidecarHandle {
     child: Mutex<Option<tauri_plugin_shell::process::CommandChild>>,
+    alive: AtomicBool,
+}
+
+impl SidecarHandle {
+    /// Report whether the sidecar child was spawned and has not terminated.
+    pub(crate) fn backend_status(&self) -> (bool, Option<u32>) {
+        let guard = self.child.lock();
+        match guard.as_ref() {
+            Some(child) => (self.alive.load(Ordering::SeqCst), Some(child.pid())),
+            None => (false, None),
+        }
+    }
 }
 
 /// Periodic watchdog ticker.
@@ -44,6 +57,7 @@ pub fn run() {
         .plugin(tauri_plugin_shell::init())
         .manage(SidecarHandle {
             child: Mutex::new(None),
+            alive: AtomicBool::new(false),
         })
         .setup(|app| {
             // ── Orchestrator ──────────────────────────────────────────────
@@ -125,6 +139,7 @@ fn spawn_sidecar(app: &tauri::App) {
         match cmd.spawn() {
             Ok((mut rx, child)) => {
                 *sidecar_state.child.lock() = Some(child);
+                sidecar_state.alive.store(true, Ordering::SeqCst);
 
                 tauri::async_runtime::spawn(async move {
                     use tauri_plugin_shell::process::CommandEvent;
@@ -137,6 +152,9 @@ fn spawn_sidecar(app: &tauri::App) {
                                 let _ = handle.emit("backend-log", line);
                             }
                             CommandEvent::Terminated(payload) => {
+                                if let Some(state) = handle.try_state::<SidecarHandle>() {
+                                    state.alive.store(false, Ordering::SeqCst);
+                                }
                                 let _ = handle.emit("backend-exited", payload);
                                 break;
                             }

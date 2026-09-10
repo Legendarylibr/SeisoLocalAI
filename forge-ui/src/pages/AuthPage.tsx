@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { downloadNip49KeyBackup } from "@/lib/keyBackup";
 import { looksLikeNcryptsec, resolveSecretToNsec } from "@/lib/nip49";
@@ -42,6 +42,18 @@ export function AuthPage() {
   const [confirmingReset, setConfirmingReset] = useState(false);
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState(false);
+  const cancelResetRef = useRef<HTMLButtonElement | null>(null);
+
+  // Focus the reset dialog on open; Escape cancels it.
+  useEffect(() => {
+    if (!confirmingReset) return;
+    cancelResetRef.current?.focus();
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") cancelReset();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [confirmingReset]);
   const mode = needsOnboarding ? "register" : "login";
   const needsImportPassphrase = useMemo(() => looksLikeNcryptsec(nsec), [nsec]);
 
@@ -444,7 +456,12 @@ export function AuthPage() {
               entries. Downloaded model files remain on disk.
             </p>
             <div className="auth-confirm-actions">
-              <button type="button" className="btn" onClick={cancelReset}>
+              <button
+                ref={cancelResetRef}
+                type="button"
+                className="btn"
+                onClick={cancelReset}
+              >
                 Cancel
               </button>
               <button

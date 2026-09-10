@@ -1,6 +1,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { App } from "./App";
+import { SeisoLogoMark } from "@/components/SeisoLogo";
 import "./styles.css";
 
 // Tauri desktop webview: the embedded UI is served from the tauri:// custom
@@ -11,6 +12,8 @@ import "./styles.css";
 // same built app, making auth cookies same-origin. Poll /health first so the
 // window does not hit a connection-refused page while the sidecar boots.
 const TAURI_BACKEND = "http://127.0.0.1:8765";
+const HEALTH_POLL_ATTEMPTS = 120;
+const HEALTH_POLL_INTERVAL_MS = 500;
 
 function isTauriEmbeddedOrigin(): boolean {
   if (typeof window === "undefined" || !("__TAURI_INTERNALS__" in window)) {
@@ -30,20 +33,38 @@ function renderApp() {
   );
 }
 
-if (isTauriEmbeddedOrigin()) {
-  // Show the same loading screen the app uses while we wait for the backend.
+function renderLoading() {
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <div className="app-loading">
       <div className="app-loading-atmosphere" aria-hidden />
       <div className="app-loading-mark app-loading-mark-wordmark">
-        <span className="app-loading-text">Seiso Local AI</span>
+        <SeisoLogoMark className="app-loading-logo" />
       </div>
       <div className="app-loading-bar" aria-hidden />
       <p className="app-loading-text">Starting Seiso…</p>
     </div>,
   );
+}
+
+function renderBackendUnreachable() {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <div className="app-loading">
+      <div className="app-loading-atmosphere" aria-hidden />
+      <div className="app-loading-mark app-loading-mark-wordmark">
+        <SeisoLogoMark className="app-loading-logo" />
+      </div>
+      <p className="app-loading-text">
+        Could not reach the Seiso backend at {TAURI_BACKEND}. Close and start again, or run
+        `seiso forge` in a terminal to diagnose.
+      </p>
+    </div>,
+  );
+}
+
+if (isTauriEmbeddedOrigin()) {
+  renderLoading();
   (async () => {
-    for (let attempt = 0; attempt < 120; attempt++) {
+    for (let attempt = 0; attempt < HEALTH_POLL_ATTEMPTS; attempt++) {
       try {
         const res = await fetch(`${TAURI_BACKEND}/health`);
         if (res.ok) {
@@ -54,8 +75,9 @@ if (isTauriEmbeddedOrigin()) {
         // backend not up yet — retry
       }
       // Promise.withResolvers requires lib ES2024; project targets ES2022.
-      await new Promise<void>((resolve) => setTimeout(resolve, 500));
+      await new Promise<void>((resolve) => setTimeout(resolve, HEALTH_POLL_INTERVAL_MS));
     }
+    renderBackendUnreachable();
   })();
 } else {
   renderApp();

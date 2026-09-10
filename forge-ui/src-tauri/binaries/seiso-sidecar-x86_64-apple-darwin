@@ -1,23 +1,33 @@
 #!/usr/bin/env bash
 # Seiso sidecar — spawned by the Tauri desktop app.
-# Activates the venv, ensures SSH agent forwarding, starts Forge backend.
+# Starts the Forge backend using the venv's seiso entrypoint directly
+# (no sourcing of an environment-controlled activate script).
 set -euo pipefail
 
 INSTALL_DIR="${SEISO_INSTALL_DIR:-$HOME/Seiso}"
 DATA_DIR="${SEISO_DATA_DIR:-$HOME/.seiso}"
 PORT="${SEISO_PORT:-8765}"
 
-cd "$INSTALL_DIR"
+# Refuse a non-absolute or missing install dir — never cd/source from an
+# unexpected path.
+case "$INSTALL_DIR" in
+  /*) ;;
+  *)
+    echo "error: SEISO_INSTALL_DIR must be an absolute path (got '$INSTALL_DIR')" >&2
+    exit 1
+    ;;
+esac
 
-# Activate venv
-VENV="$INSTALL_DIR/.venv"
-if [ -f "$VENV/bin/activate" ]; then
-  source "$VENV/bin/activate"
-elif [ -f "$VENV/Scripts/activate" ]; then
-  # Windows
-  source "$VENV/Scripts/activate"
-else
-  echo "error: no .venv found at $VENV" >&2
+if [ ! -d "$INSTALL_DIR" ]; then
+  echo "error: install dir does not exist: $INSTALL_DIR" >&2
+  exit 1
+fi
+
+# The venv's console script carries the venv interpreter in its shebang, so it
+# runs without sourcing activate.
+SEISO="$INSTALL_DIR/.venv/bin/seiso"
+if [ ! -x "$SEISO" ]; then
+  echo "error: seiso CLI not found at $SEISO (is Seiso installed?)" >&2
   exit 1
 fi
 
@@ -39,4 +49,4 @@ echo "desktop" > "$DATA_DIR/desktop/mode"
 # Start Forge without opening a browser (Tauri is the UI)
 # --no-open prevents the browser from launching
 # --port matches what Tauri expects
-exec seiso forge --no-open --port "$PORT" "$@"
+exec "$SEISO" forge --no-open --port "$PORT" "$@"

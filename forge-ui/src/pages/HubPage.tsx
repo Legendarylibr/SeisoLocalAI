@@ -85,6 +85,7 @@ export function HubPage() {
   const [hasMore, setHasMore] = useState(false);
   const [loadingMore, setLoadingMore] = useState(false);
   const [catalogSearchError, setCatalogSearchError] = useState<string | null>(null);
+  const [memoryBlockMessage, setMemoryBlockMessage] = useState<string | null>(null);
   const PAGE_SIZE = 50;
 
   const refreshLocal = () => api.listModels().then(setLocal).catch(console.error);
@@ -187,7 +188,9 @@ export function HubPage() {
 
   const openChat = (model: CatalogModel) => {
     if (modelMemoryBlocked(model, hwSummary?.vram_headroom_mb)) {
-      window.alert(modelMemoryBlockReason(model));
+      // window.alert is a no-op in the Tauri webview (WKWebView) — surface the
+      // reason inline instead.
+      setMemoryBlockMessage(modelMemoryBlockReason(model));
       return;
     }
     setDownloading(model.repo_id);
@@ -334,6 +337,11 @@ export function HubPage() {
           {catalogSearchError && (
             <StatusCallout tone="warn" title="Hugging Face Hub search failed">
               {catalogSearchError}
+            </StatusCallout>
+          )}
+          {memoryBlockMessage && (
+            <StatusCallout tone="warn" title="Not enough free memory for this model">
+              {memoryBlockMessage}
             </StatusCallout>
           )}
           <div className="card filters hub-filters">

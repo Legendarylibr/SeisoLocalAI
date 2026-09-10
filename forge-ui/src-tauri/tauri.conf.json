@@ -25,12 +25,12 @@
       "iconAsTemplate": true
     },
     "security": {
-      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8765 ws://127.0.0.1:8765; img-src 'self' asset: https://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'"
+      "csp": "default-src 'self'; connect-src 'self' http://127.0.0.1:8765 ws://127.0.0.1:8765; img-src 'self' asset: https://asset.localhost blob: data:; style-src 'self' 'unsafe-inline'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'"
     }
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["app", "dmg", "deb", "appimage"],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",
@@ -38,10 +38,5 @@
       "icons/icon.ico"
     ],
     "externalBin": ["binaries/seiso-sidecar"]
-  },
-  "plugins": {
-    "shell": {
-      "open": true
-    }
   }
 }
