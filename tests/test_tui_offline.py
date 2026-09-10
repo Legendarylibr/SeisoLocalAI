@@ -236,12 +236,19 @@ def test_lite_web_ui_removed() -> None:
     assert not (root / "seiso/tui/static").exists()
 
 
-def test_start_defaults_to_tui() -> None:
+def test_start_defaults_to_tauri_desktop() -> None:
+    """start.sh launches the Tauri desktop app as the only startup path."""
     start = (Path(__file__).resolve().parents[1] / "scripts/start.sh").read_text(encoding="utf-8")
-    assert "SEISO_UI:-forge" in start or "SEISO_UI:-forge" in start.replace('"', "")
-    assert 'exec "$seiso_bin" tui' in start
-    assert "/dev/tty" in start
-    assert "seiso tui" in start or "tui" in start
+    # The desktop app is built (with the custom-protocol feature) then launched.
+    assert "seiso_build_tauri" in start
+    assert "seiso_launch_tauri" in start
+    assert "cargo build --release --features custom-protocol" in start
+    # The sidecar needs the install/data/port env forwarded from the launcher.
+    assert "SEISO_INSTALL_DIR" in start
+    assert "SEISO_DATA_DIR" in start
+    assert "SEISO_PORT" in start
+    # The old forge/tui branches are gone — Tauri is the only startup path.
+    assert "SEISO_UI" not in start
 
 
 def test_install_complete_announces_tui_not_forge_url() -> None:
