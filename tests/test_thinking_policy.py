@@ -93,6 +93,48 @@ def test_auto_policy_reasoning_model_general_chat(monkeypatch):
     assert 0 < policy.think_max_tokens <= 96
 
 
+def test_auto_policy_reasoning_model_general_chat_is_brief(monkeypatch):
+    from seiso.chat.thinking import resolve_thinking_policy
+
+    monkeypatch.delenv("SEISO_THINK_MODE", raising=False)
+    monkeypatch.delenv("SEISO_OLLAMA_THINK", raising=False)
+    monkeypatch.setenv("SEISO_THINK_MAX_TOKENS", "128")
+
+    # General chat on a reasoning model: thinking capped to 10% of content
+    # (51 of 512), not the env cap — keeps TTFT low on the common path.
+    policy = resolve_thinking_policy(
+        content_max_tokens=512,
+        messages=[{"role": "user", "content": "Summarize the main idea of recursion."}],
+        model_key="Qwen/Qwen3-4B",
+    )
+    assert policy.enabled is True
+    assert policy.think_max_tokens == 51
+    assert policy.decode_max_tokens == 512 + 51
+
+    # Complex tasks keep the full budget even on reasoning models.
+    complex_policy = resolve_thinking_policy(
+        content_max_tokens=512,
+        messages=[{"role": "user", "content": "Prove this theorem step by step"}],
+        model_key="Qwen/Qwen3-4B",
+    )
+    assert complex_policy.think_max_tokens == 128
+    assert complex_policy.think_max_tokens > 51
+    assert complex_policy.api_value == "medium"
+
+
+def test_default_thinking_cap_is_brief(monkeypatch):
+    from seiso.chat.thinking import thinking_max_tokens
+
+    monkeypatch.delenv("SEISO_THINK_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("SEISO_OLLAMA_THINK_MAX_TOKENS", raising=False)
+    monkeypatch.delenv("SEISO_THINK_BUDGET_RATIO", raising=False)
+    monkeypatch.delenv("SEISO_OLLAMA_THINK_BUDGET_RATIO", raising=False)
+    monkeypatch.delenv("SEISO_CONTENT_RESERVE_RATIO", raising=False)
+
+    # Default cap is 64 (not 128): halves the worst-case TTFT tax.
+    assert thinking_max_tokens(768, task="complex") == 64
+
+
 def test_content_reserve_limits_thinking(monkeypatch):
     from seiso.chat.thinking import thinking_max_tokens
 

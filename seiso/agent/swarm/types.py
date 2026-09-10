@@ -90,15 +90,19 @@ class AgentSettings:
             self.activate_subagents()
 
     def activate_subagents(self) -> None:
-        """Turn swarms on. Default useful set: pair + completion/correctness, no LLM."""
+        """Turn swarms on. Default: ONE verifier (completion), no LLM.
+
+        The completion check runs after the worker, so the chain never delays
+        the worker's first token and never adds an LLM round-trip that can hang.
+        correctness stays off by default — one subagent, not two.
+        """
         self.seiso_subagents = True
         if self.preset == "single":
             self.preset = "pair"
         if not any(spec.enabled for spec in self.subagents.values()):
-            for role in ("completion", "correctness"):
-                spec = self.subagents[role]
-                spec.enabled = True
-                spec.allow_llm = False
+            self.subagents["completion"].enabled = True
+            self.subagents["completion"].allow_llm = False
+            self.subagents["correctness"].enabled = False
 
     def deactivate_subagents(self) -> None:
         """Master off — worker only. Per-role flags kept for the next turn-on."""

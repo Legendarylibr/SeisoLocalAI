@@ -25,10 +25,17 @@ from seiso.inference.streaming import estimate_chunk_tokens
 
 # Absolute ceilings — never let thinking dominate a pass.
 _THINK_MAX_HARD = 256
-_THINK_MAX_DEFAULT = 128
+# Default cap is deliberately small: thinking tokens decode before the first
+# *visible* token, so this is the worst-case TTFT tax. 64 ≈ 50 words of brief
+# reasoning; raise SEISO_THINK_MAX_TOKENS for genuinely hard tasks.
+_THINK_MAX_DEFAULT = 64
 _THINK_BUDGET_RATIO_DEFAULT = 0.25
 # Visible answer always keeps at least this fraction of the content budget.
 _CONTENT_RESERVE_RATIO_DEFAULT = 0.70
+# Reasoning models on general chat get only this fraction of the content
+# budget for thinking — keeps TTFT low on the common path without disabling
+# reasoning entirely (complex tasks keep the full budget).
+_THINK_BRIEF_RATIO = 0.10
 
 _LEVELS = frozenset({"low", "medium", "high", "max"})
 _FALSEY = frozenset({"0", "false", "no", "off"})
@@ -306,6 +313,10 @@ def resolve_thinking_policy(
             content,
             task="complex" if task == "complex" else "general",
         )
+        if task != "complex" and reasoning_model:
+            # Brief thinking only for reasoning models on general chat — the
+            # common path. Keeps TTFT low; complex tasks keep the full budget.
+            think_max = min(think_max, max(1, int(content * _THINK_BRIEF_RATIO)))
         if think_max <= 0:
             return ThinkingPolicy(
                 enabled=False,

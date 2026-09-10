@@ -1182,8 +1182,8 @@ def test_ollama_think_max_tokens_budget(monkeypatch):
     monkeypatch.delenv("SEISO_THINK_BUDGET_RATIO", raising=False)
     monkeypatch.delenv("SEISO_OLLAMA_THINK_BUDGET_RATIO", raising=False)
     monkeypatch.delenv("SEISO_CONTENT_RESERVE_RATIO", raising=False)
-    # Default: min(128, 25% of content, 30% reserve room, hard 256).
-    assert ollama_think_max_tokens(768) == 128  # 25% of 768 = 192 → capped at 128
+    # Default: min(64, 25% of content, 30% reserve room, hard 256).
+    assert ollama_think_max_tokens(768) == 64  # 25% of 768 = 192 → capped at 64
     assert ollama_think_max_tokens(200) == 50  # 25% of 200
     monkeypatch.setenv("SEISO_THINK_MAX_TOKENS", "0")
     assert ollama_think_max_tokens(768) == 0
