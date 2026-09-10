@@ -33,7 +33,7 @@ That is the operating system: **scheduler + policy + router + wallets**, with yo
           ▼
  ┌──────────────────────────────────────────┐
  │  Local agentic OS (this repo)            │
- │  Forge · TUI · CLI · Compat /v1          │
+ │  Forge · CLI · Compat /v1          │
  │                                          │
  │  Harness  ──►  model-aware router  ──►   │
  │  plan,        local backends +           │
@@ -62,7 +62,7 @@ Seiso already owns the machine-local control plane: jobs, SSE logs, memory guard
 
 | Layer | Role |
 |-------|------|
-| Surfaces | Forge UI, `seiso tui`, `seiso` CLI, `/v1` for Cursor / other clients |
+| Surfaces | Forge UI, `seiso` CLI, `/v1` for Cursor / other clients |
 | Kernel-ish | Job orchestrators, hardware/VRAM guards, path sandbox, auth |
 | Policy | Opt-in tools, code-exec, remote bind, pay, mesh — all default **off** |
 | Identity | Local Nostr `npub` / `nsec`; provenance attestations |
@@ -70,7 +70,7 @@ Seiso already owns the machine-local control plane: jobs, SSE logs, memory guard
 
 **Now**
 
-- Single-user localhost Forge + CLI + TUI
+- Single-user localhost Forge + CLI
 - Isolated GGUF chat sidecar on Linux NVIDIA (Ollama first, llama-swap fallback)
 - Job runners for train / slime / NeMo RL / export / compress / distill-RL / knowledge
 - Compat `/v1` so external agents can talk to local models

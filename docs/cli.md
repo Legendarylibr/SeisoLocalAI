@@ -17,7 +17,7 @@ Helper scripts (repo `scripts/`, not on `PATH`):
 
 | Command / script | Purpose |
 |------------------|---------|
-| `start` | Install or launch the Seiso TUI — on `PATH` via `~/.local/bin` after install |
+| `start` | Install or launch the Seiso Forge desktop app — on `PATH` via `~/.local/bin` after install |
 | `./scripts/install.sh` | Lower-level installer (system deps, venv, pip extras, UI build) |
 | `./scripts/start.sh` | Lower-level launcher — opens the Seiso Forge desktop app (Tauri) |
 | `./scripts/doctor.sh` | Diagnose install, HF, GPU stack (runs automatically on install/start failure) |
@@ -32,7 +32,7 @@ Launch the Forge web server (API + built UI).
 
 ```bash
 seiso forge
-seiso forge --open             # open browser when /health is ready (opt-in; start defaults to TUI)
+seiso forge --open             # open browser when /health is ready (opt-in; start opens the desktop app)
 seiso forge --reload          # auto-reload Python on code changes
 seiso forge --port 8766       # custom port
 ```
@@ -114,22 +114,6 @@ Terminal chat with a local model.
 seiso chat --model meta-llama/Llama-3.2-3B-Instruct --prompt "Hello"
 seiso chat --model /path/to/model.gguf   # interactive mode (omit --prompt)
 ```
-
-## `seiso tui`
-
-Default **workspace UI**. Copies the Forge sidebar, Chat, Hub, Dashboard, and studio pages — no browser. Hub searches Hugging Face live (not only files already on disk). `start` launches this.
-
-```bash
-seiso tui                 # terminal UI (also what `start` runs)
-seiso tui --list          # local GGUF inventory, smallest first
-seiso tui --model 1       # pick by index / path / name substring
-```
-
-**Move with the keyboard, then press Enter.** `↑`/`↓` or the mouse wheel scroll the highlighted `▸` row — the wheel never types into the box. `←`/`→` or Tab switch the sidebar and the page. Enter opens the highlighted item (a page, a local model, a Hub download, or a studio config). Type to chat, or start a `/command`. While typing, `←`/`→` move the caret; the wheel still scrolls the list.
-
-Same **Nostr account** as Forge: first launch creates a recovery key (`nsec`) or restores one; later sessions unlock from the saved session (24h, same JWT secret as the web UI) or by pasting the key / NIP-49 backup. Settings can rotate, import, sign out, or start a new session (`RESET`). Integrations toggles auto-attest and relays (`/relays wss://…`).
-
-Hub: `/search qwen`, or scroll to a row and press Enter to open (on disk) or download. Chat loads weights on the first message; `/unload` frees RAM/VRAM. Studio pages (`/train`, `/compress`, …) show the CLI — scroll a config and press Enter, or `/run configs/example_lora.yaml`. Terminal UI: `seiso tui`.
 
 ## `seiso export`
 
@@ -360,7 +344,7 @@ seiso agent swarm --dry-run --subagents --preset pair --goal "add tests"
 
 Prefer these over ad-hoc scripts; they call `decide_compute` and `run_harness`.
 
-`seiso agent swarm` stays **dry-run by default**. `--run` starts the selected harness as a headless worker. Seiso subagents (planner / completion / correctness / synthesizer) default **off**. Configure them in `seiso tui` Settings (`/harness`, `/subagents`, `/agent`). See [tui-harnesses.md](tui-harnesses.md).
+`seiso agent swarm` stays **dry-run by default**. `--run` starts the selected harness as a headless worker. Seiso subagents (planner / completion / correctness / synthesizer) default **off**. Configure them via `seiso agent harnesses`.
 
 ## `seiso agent status` (Buzz-facing signed status)
 

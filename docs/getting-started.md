@@ -19,7 +19,7 @@ This guide walks you from a fresh machine to your first chat, training run, and 
 
 ### Linux, macOS, and WSL2 (fastest)
 
-One command installs dependencies (including native Linux build tools), builds optional extras, and **starts the Seiso TUI** (no browser):
+One command installs dependencies (including native Linux build tools), builds optional extras, and **starts the Seiso Forge desktop app**:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
@@ -118,7 +118,7 @@ Before loading a larger model, use **Free memory** in Chat or Model Hub to unloa
 
 ## Step 4 — Chat with a local model
 
-Default path (`start` / `seiso tui`) is the terminal UI:
+Open the desktop app (`start`) or the web UI (`seiso forge`):
 
 1. Create a local account (**Enter** on Create account) or restore a recovery key — same `nsec` / `npub` as Forge
 2. Hub lists **local GGUFs** and **live Hugging Face** results
@@ -126,7 +126,7 @@ Default path (`start` / `seiso tui`) is the terminal UI:
 4. Type a message in Chat — weights load on the first send
 5. `/unload` (or Settings → Enter) frees RAM/VRAM without deleting downloads
 
-`start` launches the Seiso Forge desktop app (Tauri wrapper). The web UI (`seiso forge`) and terminal UI (`seiso tui`) remain available as CLI commands.
+`start` launches the Seiso Forge desktop app (Tauri wrapper). The web UI (`seiso forge`) remains available as a CLI command.
 
 **Backend auto-selection:**
 

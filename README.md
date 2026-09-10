@@ -39,7 +39,7 @@ Seiso combines a **web workspace (Forge)** and a **Python core (CLI + library)**
 
 | Workflow | Forge UI | CLI |
 |----------|----------|-----|
-| Download & chat with open models | Model Hub, Chat | `seiso chat` / `seiso tui` |
+| Download & chat with open models | Model Hub, Chat | `seiso chat` |
 | QLoRA / LoRA / full fine-tune | Training Studio | `seiso train` |
 | Single-GPU slime post-training | CLI | `seiso train --config configs/example_training_slime.yaml` |
 | Multi-GPU slime (vLLM rollouts) | CLI | `scripts/run_slime_vllm_ddp.sh 2 configs/example_training_slime_vllm.yaml` |
@@ -138,7 +138,7 @@ What the installer does:
 2. Creates `.venv` and installs platform extras (CUDA on Linux + NVIDIA, MLX on macOS, GGUF support)
 3. Copies `.env.example` → `.env` if missing
 4. Builds `forge-ui/dist`
-5. Runs `seiso tui` (terminal UI; no browser)
+5. Launches the Seiso Forge desktop app (Tauri)
 
 On native Linux + NVIDIA, the `linux-nvidia` profile installs **Ollama**
 (Ollama-first isolated GGUF chat), seeds sidecar `.env` defaults, and verifies
@@ -229,7 +229,6 @@ More detail: [docs/platforms/linux-nvidia.md](docs/platforms/linux-nvidia.md) (C
 | **First install** | Handled by `start` — no extra step | Opens the Seiso Forge desktop app (Tauri) |
 | **Later sessions** | `start` | Re-checks deps, builds UI if missing, opens the desktop app |
 | **Web UI in a browser** | `seiso forge` | Manual — the backend serves the React app at `http://127.0.0.1:8765` |
-| **Terminal UI** | `seiso tui` | Manual — keyboard-driven TUI |
 | **One-liner restart** | `curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start \| bash` | Bootstraps install if repo is missing |
 | **Custom port** | `SEISO_PORT=8766 seiso forge` | Or set in `.env` |
 
@@ -388,7 +387,6 @@ Forge details: **[docs/forge.md](docs/forge.md)**
 | `seiso slime` | Single-process slime GRPO post-train (also `seiso train -c … method: slime`) |
 | `seiso nemo-rl` | Launch external [NVIDIA NeMo RL](https://github.com/NVIDIA-NeMo/RL) (`method: nemo_rl`; requires `SEISO_NEMO_RL_ROOT`) |
 | `seiso chat` | Terminal chat with local models |
-| `seiso tui` | Lightweight offline terminal UI that mimics Forge (arrow keys + Enter; no browser) |
 | `seiso export` | Export merged / GGUF / LoRA + Hub push |
 | `seiso compress run` | LLM compression pipeline |
 | `seiso compress manifest-verify` | Verify hash-chained run manifest |

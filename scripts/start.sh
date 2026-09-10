@@ -6,9 +6,8 @@
 #   start
 #   SEISO_INSTALL_DIR=~/Seiso ./scripts/start.sh
 #
-# The web UI and terminal UI remain available as CLI commands:
+# The web UI remains available as a CLI command:
 #   seiso forge   # web UI in a browser
-#   seiso tui     # terminal UI
 #
 # One-liner (installs if needed, then starts):
 #   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash

@@ -124,10 +124,10 @@ else
   bad "install path missing uv support"
 fi
 
-if rg -q 'wait "\$job_pid"' "$ROOT/scripts/install.sh" 2>/dev/null; then
-  ok "install TUI uses bash wait on background install job"
+if rg -q 'run_install_prep_and_worker' "$ROOT/scripts/install.sh" 2>/dev/null; then
+  ok "install runs the worker with output captured to the install log"
 else
-  bad "install.sh does not bash-wait on background install job (Python waitpid cannot reap bash siblings)"
+  bad "install.sh does not run the install worker with log capture"
 fi
 
 if rg -q 'seiso_verify_cli' "$ROOT/scripts/lib/common.sh" "$ROOT/scripts/install.sh" 2>/dev/null; then

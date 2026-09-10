@@ -24,11 +24,11 @@ Where Seiso is going (local agentic OS, harness, model-aware routing, BTC/crypto
 | Read the product roadmap (agentic OS, harness, routing, marketplace) | [ROADMAP.md](../ROADMAP.md) |
 | Install on Linux or macOS in one command | [install.md](install.md#linux--macos--one-command-recommended) |
 | Install on Windows or AMD ROCm | [platforms/windows.md](platforms/windows.md) · [platforms/linux-amd-rocm.md](platforms/linux-amd-rocm.md) |
-| Launch the terminal UI | `start` or `seiso tui` → [cli.md](cli.md#seiso-tui) |
-| Configure Pi / OMP / Hermes / Cline / OpenClaw in the TUI | [tui-harnesses.md](tui-harnesses.md) · `seiso agent harnesses` |
+| Launch the desktop app | `start` → [cli.md](cli.md) |
+| Configure Pi / OMP / Hermes / Cline / OpenClaw | `seiso agent harnesses` |
 | First-run Nostr auth (npub / nsec) | [getting-started.md § Onboarding](getting-started.md#step-2--onboarding) · [forge.md § Auth](forge.md#auth-nostr) |
 | Diagnose install / HF / GPU | `seiso doctor` or `./scripts/doctor.sh` → [cli.md](cli.md) |
-| Chat with a local model | [getting-started.md § Step 4](getting-started.md#step-4--chat-with-a-local-model) · `seiso tui` |
+| Chat with a local model | [getting-started.md § Step 4](getting-started.md#step-4--chat-with-a-local-model) · `seiso chat` |
 | Fine-tune with QLoRA / LoRA | [training/quickstart.md](training/quickstart.md) |
 | Run each training pipeline step by step | [training/pipelines.md](training/pipelines.md) |
 | Single-GPU / multi-GPU slime post-training | [training/quickstart.md § Slime](training/quickstart.md#slime-post-training) · [multi-gpu.md](training/multi-gpu.md) |
@@ -68,8 +68,8 @@ Where Seiso is going (local agentic OS, harness, model-aware routing, BTC/crypto
 
 | Mode | Linux / macOS / WSL | Windows |
 |------|---------------------|---------|
-| **Install + start** | `curl -fsSL …/start \| bash` — starts the TUI when done | Manual install → `seiso tui` ([install.md](install.md)) |
-| **Later sessions** | `start` or `seiso tui` from repo | `cd "$env:USERPROFILE\Seiso"` → activate venv → `seiso tui` |
+| **Install + start** | `curl -fsSL …/start \| bash` — starts the desktop app when done | Manual install → `seiso forge` ([install.md](install.md)) |
+| **Later sessions** | `start` from repo | `cd "$env:USERPROFILE\Seiso"` → activate venv → `seiso forge` |
 | **From a clone** | `start` (starts by default) or `SEISO_START=0 start` | Build UI + `seiso forge` ([platforms/windows.md](platforms/windows.md)) |
 | **Forge (UI dev)** | Terminal 1: `seiso forge` · Terminal 2: `cd forge-ui && npm run dev` | Same |
 | **CLI training** | `seiso train --config configs/example_lora.yaml` | `seiso train --config configs\example_lora.yaml` |

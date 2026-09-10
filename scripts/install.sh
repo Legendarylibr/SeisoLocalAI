@@ -15,8 +15,8 @@
 #   SEISO_USE_NPM=1     Force npm for forge-ui (Linux prefers npm when Node 18+ is present)
 #   SEISO_USE_BUN=1     On Linux, prefer Bun even when npm is available
 #   SEISO_USE_UV=0      Use pip instead of uv for Python deps (uv is default when available)
-#   SEISO_NO_BANNER=1   Skip glitch install TUI
-#   SEISO_VERBOSE=1     Show full pip/UI package manager output (no TUI overlay)
+#   SEISO_NO_BANNER=1   Skip install banner / progress output
+#   SEISO_VERBOSE=1     Show full pip/UI package manager output
 #   SEISO_NO_OPEN=1     Do not open the browser after Forge starts
 #   SEISO_SKIP_FLASH_ATTN=1 Skip Flash Attention during install (default: skip; set 0 to try)
 #   SEISO_FAST_INSTALL=1    Skip PyTorch/training extras (Forge + GGUF chat only)
@@ -103,44 +103,7 @@ log_unless_quiet() {
   quiet_install_output || log "$@"
 }
 
-install_tui_enabled() {
-  local root="$1"
-  [[ "${SEISO_NO_BANNER:-0}" == "1" ]] && return 1
-  [[ "${SEISO_VERBOSE:-0}" == "1" ]] && return 1
-  [[ -t 1 ]] || return 1
-  [[ -f "$root/scripts/install_tui.py" ]] || return 1
-  return 0
-}
-
-install_tui_outro() {
-  local root="$1"
-  install_tui_enabled "$root" || return 0
-  python3 "$root/scripts/install_tui.py" outro
-}
-
-run_with_install_tui() {
-  local root="$1" logfile="$2"
-  shift 2
-  if install_tui_enabled "$root"; then
-    : >"$logfile"
-    "$@" >>"$logfile" 2>&1 &
-    local job_pid=$! tui_pid=0 job_status=0
-    python3 "$root/scripts/install_tui.py" during &
-    tui_pid=$!
-    wait "$job_pid" || job_status=$?
-    kill "$tui_pid" 2>/dev/null || true
-    wait "$tui_pid" 2>/dev/null || true
-    if [[ "$job_status" -ne 0 ]]; then
-      warn "Install failed — see $logfile"
-      tail -30 "$logfile" >&2 || true
-      return 1
-    fi
-    return 0
-  fi
-  "$@"
-}
-
-pre_clone_hint() {
+run_install_prep_and_worker() {
   quiet_install_output || return 0
   printf '\n\033[1mSeisoLocalAI\033[0m · fetching repository...\n\n' >&2
 }
@@ -272,7 +235,7 @@ main() {
   export SEISO_SKIP_UI="${SEISO_SKIP_UI:-0}"
   export SEISO_SKIP_FLASH_ATTN
 
-  if ! run_with_install_tui "$root" "$install_log" run_install_prep_and_worker "$root" "$extras"; then
+  if ! run_install_prep_and_worker "$root" "$extras" >"$install_log" 2>&1; then
     install_failed "$root"
   fi
 
@@ -295,15 +258,13 @@ main() {
     seiso_run_sidecar_install_phase "$root"
   fi
 
-  install_tui_outro "$root"
-
   if [[ "$SEISO_START" == "1" ]]; then
     export SEISO_INSTALL_JUST_RAN=1
     exec "$root/scripts/start.sh"
   fi
 
   if [[ "$SEISO_START" != "1" ]]; then
-    printf '\nInstall complete.\nStart the TUI: start\nDoctor: %s/scripts/doctor.sh\n\n' "$root"
+    printf '\nInstall complete.\nStart Seiso: start\nDoctor: %s/scripts/doctor.sh\n\n' "$root"
   fi
 }
 
