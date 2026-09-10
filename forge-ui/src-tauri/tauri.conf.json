@@ -4,10 +4,10 @@
   "version": "0.1.0",
   "identifier": "com.seiso.forge",
   "build": {
-    "beforeBuildCommand": "cd .. && npm run build",
+    "beforeBuildCommand": "npm run build",
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5173",
-    "beforeDevCommand": "cd .. && npm run dev"
+    "beforeDevCommand": "npm run dev"
   },
   "app": {
     "windows": [
@@ -41,7 +41,7 @@
   },
   "plugins": {
     "shell": {
-      "sidecar": true
+      "open": true
     }
   }
 }

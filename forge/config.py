@@ -27,8 +27,11 @@ StorageMode = Literal["persistent", "ephemeral"]
 logger = logging.getLogger(__name__)
 
 # Local Forge + Vite dev — 127.0.0.1 and localhost are different browser origins.
+# Tauri desktop webview: tauri://localhost on macOS, http://tauri.localhost on
+# Linux/Windows. Both must be allowed for the embedded Forge UI to reach the API.
 DEFAULT_CORS_ORIGINS = (
-    "http://127.0.0.1:8765,http://localhost:8765,http://127.0.0.1:5173,http://localhost:5173"
+    "http://127.0.0.1:8765,http://localhost:8765,http://127.0.0.1:5173,http://localhost:5173,"
+    "tauri://localhost,http://tauri.localhost"
 )
 
 

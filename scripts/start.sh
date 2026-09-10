@@ -1,10 +1,14 @@
 #!/usr/bin/env bash
 # Start Seiso. Installs missing deps, runs doctor on failure, then launches
-# the Forge web UI (default). Set SEISO_UI=tui to start the optional terminal UI.
+# the Seiso Forge desktop app (Tauri wrapper). This is the only startup path.
 #
 # Usage (prefer start on PATH after install):
 #   start
 #   SEISO_INSTALL_DIR=~/Seiso ./scripts/start.sh
+#
+# The web UI and terminal UI remain available as CLI commands:
+#   seiso forge   # web UI in a browser
+#   seiso tui     # terminal UI
 #
 # One-liner (installs if needed, then starts):
 #   curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start | bash
@@ -205,6 +209,51 @@ resolve_root() {
   return 1
 }
 
+seiso_tauri_binary() {
+  local root="$1"
+  printf '%s\n' "$root/forge-ui/src-tauri/target/release/seiso-forge"
+}
+
+seiso_tauri_built() {
+  local root="$1"
+  [[ -x "$(seiso_tauri_binary "$root")" ]]
+}
+
+seiso_ensure_rust() {
+  # Rust toolchain (cargo/rustc) for the Tauri desktop wrapper.
+  command -v cargo >/dev/null 2>&1 && command -v rustc >/dev/null 2>&1 && return 0
+  log "Installing Rust toolchain (rustup) for the Tauri desktop app..."
+  if ! curl -fsSL https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal; then
+    return 1
+  fi
+  export PATH="$HOME/.cargo/bin:$PATH"
+  command -v cargo >/dev/null 2>&1
+}
+
+seiso_build_tauri() {
+  local root="$1"
+  seiso_ensure_rust || return 1
+  # The Forge UI dist is embedded into the app binary at build time.
+  seiso_build_forge_ui "$root" || return 1
+  if seiso_tauri_built "$root" && [[ "${SEISO_FORCE_TAURI:-0}" != "1" ]]; then
+    log "Seiso Forge desktop app already built — launching"
+    return 0
+  fi
+  log "Building Seiso Forge desktop app (first build compiles Rust — can take several minutes)..."
+  (cd "$root/forge-ui/src-tauri" && cargo build --release --features custom-protocol)
+}
+
+seiso_launch_tauri() {
+  local root="$1" bin
+  bin="$(seiso_tauri_binary "$root")"
+  # Forwarded by the Tauri host to the sidecar, which starts the Forge backend.
+  export SEISO_INSTALL_DIR="${SEISO_INSTALL_DIR:-$root}"
+  export SEISO_DATA_DIR="${SEISO_DATA_DIR:-$HOME/.seiso}"
+  export SEISO_PORT="${SEISO_PORT:-8765}"
+  log "Starting Seiso Forge desktop app..."
+  exec "$bin"
+}
+
 bootstrap_install() {
   log "Seiso not found — running full installer"
   if [[ -f "${SCRIPT_DIR}/install.sh" ]]; then
@@ -216,7 +265,7 @@ bootstrap_install() {
 }
 
 main() {
-  local root forge_url open_flag seiso_bin
+  local root seiso_bin
 
   if ! root="$(resolve_root)"; then
     bootstrap_install
@@ -269,48 +318,8 @@ main() {
     fi
   fi
 
-  if [[ "${SEISO_UI:-forge}" == "forge" ]]; then
-    forge_url="$(seiso_forge_url)"
-
-    # Already running (healthy or still in lifespan / holding the data-dir lock):
-    # open browser and exit instead of failing on the instance lock.
-    if seiso_forge_instance_active "$forge_url"; then
-      log "Forge is already running at $forge_url"
-      if [[ "${SEISO_NO_OPEN:-0}" != "1" ]]; then
-        seiso_open_browser "$forge_url" || true
-      fi
-      return 0
-    fi
-
-    open_flag=""
-    if [[ "${SEISO_NO_OPEN:-0}" != "1" ]]; then
-      open_flag="--open"
-    fi
-
-    if [[ "${SEISO_INSTALL_JUST_RAN:-0}" == "1" ]]; then
-      log "Starting Forge — opening $forge_url when ready"
-    else
-      log "Starting Forge at $forge_url"
-    fi
-
-    if [[ -n "$open_flag" ]]; then
-      "$seiso_bin" forge $open_flag
-    else
-      exec "$seiso_bin" forge
-    fi
-    return 0
-  fi
-
-  log "TUI starting"
-  # curl | bash leaves stdin as a closed pipe. Attach the interactive TUI
-  # to the real terminal so it does not EOF/abort right after install.
-  if [[ -t 0 ]]; then
-    exec "$seiso_bin" tui
-  fi
-  if [[ -r /dev/tty && -w /dev/tty ]]; then
-    exec "$seiso_bin" tui </dev/tty >/dev/tty 2>&1
-  fi
-  log "Install complete. Start the TUI from a terminal: seiso tui"
+  seiso_build_tauri "$root" || die "Tauri desktop build failed — see output above."
+  seiso_launch_tauri "$root"
   return 0
 }
 
