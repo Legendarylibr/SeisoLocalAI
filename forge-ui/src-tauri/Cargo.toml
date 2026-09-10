@@ -8,6 +8,12 @@ description = "Seiso Local AI — Desktop app with swarm agent orchestration"
 name = "seiso_forge_lib"
 crate-type = ["lib", "cdylib", "staticlib"]
 
+[features]
+# Release builds embed the Forge UI (frontendDist) instead of loading the dev
+# server. `tauri build` enables this automatically; plain `cargo build` needs
+# `--features custom-protocol`.
+custom-protocol = ["tauri/custom-protocol"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 

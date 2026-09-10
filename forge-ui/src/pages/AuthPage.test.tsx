@@ -5,6 +5,11 @@ import { AuthPage } from "./AuthPage";
 const confirmKeyBackup = vi.fn();
 const register = vi.fn();
 const login = vi.fn();
+const resetSession = vi.fn().mockResolvedValue({
+  needs_onboarding: true,
+  storage_mode: "persistent",
+  storage_mode_configured: false,
+});
 const downloadNip49KeyBackup = vi.fn().mockResolvedValue(undefined);
 
 let authMock: {
@@ -21,7 +26,7 @@ vi.mock("@/hooks/useAuth", () => ({
     login,
     register,
     confirmKeyBackup,
-    resetSession: vi.fn(),
+    resetSession,
   }),
 }));
 
@@ -95,6 +100,55 @@ describe("AuthPage key backup", () => {
         { passphrase: "correct-horse" },
       );
     });
+  });
+});
+
+describe("AuthPage forgotten-key reset", () => {
+  afterEach(() => {
+    cleanup();
+    vi.clearAllMocks();
+  });
+
+  it("confirms via an in-app dialog (not window.confirm) and resets the session", async () => {
+    authMock = {
+      needsOnboarding: false,
+      storageModeConfigured: true,
+      keyBackup: null,
+    };
+    const confirmSpy = vi.spyOn(window, "confirm").mockReturnValue(true);
+    render(<AuthPage />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /lost your recovery key\? start a new session/i }),
+    );
+
+    // The Tauri webview (WKWebView) does not support window.confirm — the flow
+    // must show an in-app dialog instead of relying on it.
+    expect(confirmSpy).not.toHaveBeenCalled();
+    expect(screen.getByRole("alertdialog", { name: /start a new local seiso session/i })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("button", { name: /start new session/i }));
+    await waitFor(() => {
+      expect(resetSession).toHaveBeenCalledTimes(1);
+    });
+    confirmSpy.mockRestore();
+  });
+
+  it("cancelling the dialog leaves the session untouched", () => {
+    authMock = {
+      needsOnboarding: false,
+      storageModeConfigured: true,
+      keyBackup: null,
+    };
+    render(<AuthPage />);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: /lost your recovery key\? start a new session/i }),
+    );
+    fireEvent.click(screen.getByRole("button", { name: /cancel/i }));
+
+    expect(resetSession).not.toHaveBeenCalled();
+    expect(screen.queryByRole("alertdialog")).toBeNull();
   });
 });
 

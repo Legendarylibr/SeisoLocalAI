@@ -39,6 +39,7 @@ export function AuthPage() {
   const [storageMode, setStorageMode] = useState<"persistent" | "ephemeral">("persistent");
   const [error, setError] = useState("");
   const [resetting, setResetting] = useState(false);
+  const [confirmingReset, setConfirmingReset] = useState(false);
   const [busy, setBusy] = useState(false);
   const [downloading, setDownloading] = useState(false);
   const mode = needsOnboarding ? "register" : "login";
@@ -106,12 +107,17 @@ export function AuthPage() {
     }
   };
 
-  const resetForgottenKey = async () => {
+  const requestReset = () => {
     setError("");
-    const confirmed = window.confirm(
-      "Start a new local Seiso session? This clears the current local account, chats, jobs, providers, and model registry entries. Downloaded model files remain on disk.",
-    );
-    if (!confirmed) return;
+    setConfirmingReset(true);
+  };
+
+  const cancelReset = () => {
+    setConfirmingReset(false);
+  };
+
+  const confirmReset = async () => {
+    setConfirmingReset(false);
     setResetting(true);
     try {
       await resetSession();
@@ -406,7 +412,7 @@ export function AuthPage() {
                     <button
                       type="button"
                       className="auth-reset-link"
-                      onClick={resetForgottenKey}
+                      onClick={requestReset}
                       disabled={resetting}
                     >
                       {resetting
@@ -420,6 +426,38 @@ export function AuthPage() {
           )}
         </div>
       </div>
+
+      {confirmingReset && (
+        <div className="auth-confirm-backdrop" role="presentation" onClick={cancelReset}>
+          <div
+            className="auth-confirm-dialog"
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="auth-confirm-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 id="auth-confirm-title" className="auth-confirm-title">
+              Start a new local Seiso session?
+            </h3>
+            <p className="auth-confirm-copy">
+              This clears the current local account, chats, jobs, providers, and model registry
+              entries. Downloaded model files remain on disk.
+            </p>
+            <div className="auth-confirm-actions">
+              <button type="button" className="btn" onClick={cancelReset}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="btn btn-primary"
+                onClick={() => void confirmReset()}
+              >
+                Start new session
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

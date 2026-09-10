@@ -96,7 +96,7 @@ In config files and Python, `~/.seiso` expands correctly on every OS. In shell c
 
 ### Linux, macOS, and WSL2 (recommended)
 
-One command installs missing system tools (Python, Node, git, build deps when possible), clones the repo, builds the UI, and **starts Forge automatically** (browser opens when ready):
+One command installs missing system tools (Python, Node, git, build deps when possible), clones the repo, builds the UI, and **starts the Seiso Forge desktop app automatically** (Tauri wrapper; first run compiles the Rust host — can take several minutes):
 
 #### Quick install
 
@@ -150,7 +150,7 @@ See [docs/install.md](docs/install.md) for custom paths, install-only mode, Wind
 **Already cloned?** From the repository root:
 
 ```bash
-start                    # install / upgrade deps + build UI; starts Forge by default
+start                    # install / upgrade deps + build UI; opens the desktop app
 SEISO_START=0 start      # install only
 ```
 
@@ -222,17 +222,18 @@ On first launch, **create a local account** (save the one-time recovery key → 
 
 More detail: [docs/platforms/linux-nvidia.md](docs/platforms/linux-nvidia.md) (CUDA kernels, multi-GPU), [docs/install.md](docs/install.md) (full install reference).
 
-### Starting Forge after install
+### Starting Seiso after install
 
 | Situation | Linux / macOS / WSL | Notes |
 |-----------|---------------------|-------|
-| **First install** | Handled by `start` — no extra step | Browser opens at `http://127.0.0.1:8765` |
-| **Later sessions** | `start` | Re-checks deps, builds UI if missing, opens browser |
+| **First install** | Handled by `start` — no extra step | Opens the Seiso Forge desktop app (Tauri) |
+| **Later sessions** | `start` | Re-checks deps, builds UI if missing, opens the desktop app |
+| **Web UI in a browser** | `seiso forge` | Manual — the backend serves the React app at `http://127.0.0.1:8765` |
+| **Terminal UI** | `seiso tui` | Manual — keyboard-driven TUI |
 | **One-liner restart** | `curl -fsSL https://raw.githubusercontent.com/Legendarylibr/SeisoLocalAI/main/start \| bash` | Bootstraps install if repo is missing |
-| **Manual** | `cd "$HOME/Seiso" && source .venv/bin/activate && seiso forge` | Add `--open` to launch the browser |
 | **Custom port** | `SEISO_PORT=8766 seiso forge` | Or set in `.env` |
 
-Stop Forge with `Ctrl+C` in the terminal where it is running.
+Stop the desktop app from its tray menu (Quit Seiso), or `Ctrl+C` in the terminal where Forge runs.
 
 ### Windows (native PowerShell)
 

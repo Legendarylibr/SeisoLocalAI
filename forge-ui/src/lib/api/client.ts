@@ -1,4 +1,12 @@
-export const API = "/api";
+const TAURI_API_BASE = "http://127.0.0.1:8765/api";
+
+// In the Tauri desktop webview (tauri://localhost) the relative /api path
+// resolves to the custom protocol, not the Forge backend. Use the absolute
+// backend URL there; the web build stays same-origin.
+export const API =
+  typeof window !== "undefined" && "__TAURI_INTERNALS__" in window
+    ? TAURI_API_BASE
+    : "/api";
 
 const MUTATING = new Set(["POST", "PUT", "DELETE", "PATCH"]);
 

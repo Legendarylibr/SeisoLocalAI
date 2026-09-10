@@ -132,7 +132,7 @@ bash start
 | `SEISO_SKIP_UI=1` | off | Skip Forge UI build |
 | `SEISO_FORCE_UI=1` | off | Rebuild `forge-ui` even when `dist/` already exists |
 | `SEISO_BUN_INSTALL_TIMEOUT_SEC` | `90` | Wall-clock timeout for `bun install` (timeout skips unfrozen retry and falls back to `npm ci`) |
-| `SEISO_START=0` | on (starts Forge) | Set to `0` to install without launching Forge |
+| `SEISO_START=0` | on (starts the desktop app) | Set to `0` to install without launching Seiso |
 | `SEISO_NO_OPEN=1` | off | Do not open the browser after Forge starts |
 | `SEISO_NO_BANNER=1` | off | Skip install animation |
 | `SEISO_VERBOSE=1` | off | Show full pip/Bun output |

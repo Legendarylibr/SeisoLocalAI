@@ -126,7 +126,7 @@ Default path (`start` / `seiso tui`) is the terminal UI:
 4. Type a message in Chat — weights load on the first send
 5. `/unload` (or Settings → Enter) frees RAM/VRAM without deleting downloads
 
-`seiso forge` is the default HTTP API / React app. Run `seiso tui` or `SEISO_UI=tui start` for the terminal UI.
+`start` launches the Seiso Forge desktop app (Tauri wrapper). The web UI (`seiso forge`) and terminal UI (`seiso tui`) remain available as CLI commands.
 
 **Backend auto-selection:**
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Install (first run) or start Seiso Forge. Primary entry point after cloning.
+# Install (first run) or start Seiso. Primary entry point after cloning.
+# Opens the Seiso Forge desktop app (Tauri wrapper).
 #
 # Usage:
 #   start                            # after install (on PATH via ~/.local/bin)
