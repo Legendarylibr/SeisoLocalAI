@@ -1,6 +1,6 @@
 # Seiso Local AI 
 
-Going to work on a self hosted mirror then merge large changes (maybe waiting till it's done) to reduce ci/github actions
+Startup path has to compile rust now and does not have the animation. Just wait for the rust build to show and finish. The Tauri wrapper UI will open after rust builds.
 
 [![CI](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml/badge.svg)](https://github.com/Legendarylibr/SeisoLocalAI/actions/workflows/ci.yml)
 
