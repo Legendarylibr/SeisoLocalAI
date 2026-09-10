@@ -223,7 +223,7 @@ Copy `.env.example` to `.env` in the repo root. Key settings:
 | `SEISO_CORS_ORIGINS` | *(local defaults)* | Only set for HTTPS reverse proxy |
 | `SEISO_HF_TOKEN` | — | Hugging Face token for gated models |
 | `SEISO_DB_EPHEMERAL` | `true` | In-memory SQLite (wiped on restart); also skips durable `nostr_keys/` writes |
-| `SEISO_ALLOW_TOOLS` | `false` | Web search, artifacts |
+| `SEISO_ALLOW_TOOLS` | `true` | Web search, artifacts (safe on the localhost binding; set `false` to disable) |
 | `SEISO_ALLOW_CODE_EXEC` | `false` | AST-limited `execute_code` tool (not OS isolation); **refused** when `SEISO_ALLOW_REMOTE=true` |
 | `SEISO_ALLOW_COMPAT_TOOLS` | `false` | Tool calling on `/v1/chat/completions` for session JWT only (inference API key stays chat-only; alias: `SEISO_ALLOW_OPENAI_TOOLS`) |
 | `SEISO_RATE_LIMIT` | `120` | Requests/minute per IP (≥240 on localhost) |

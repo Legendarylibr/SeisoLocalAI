@@ -304,9 +304,14 @@ async def test_compat_tools_disabled_by_default(app, auth_client):
 
 
 @pytest.mark.asyncio
-async def test_inference_tools_disabled_by_default(app, auth_client):
+async def test_inference_tools_refused_when_server_disables_them(app, auth_client, monkeypatch):
     client, _token, headers, data_dir = auth_client
-    from forge.api.deps import get_db
+    from forge.api.deps import clear_dependency_caches, get_db
+
+    # Tools default on (see ForgeSettings.allow_tools); this covers the
+    # server-side kill switch that must refuse tools=True before backend work.
+    monkeypatch.setenv("SEISO_ALLOW_TOOLS", "false")
+    clear_dependency_caches()
 
     db = get_db()
     user = await db.get_user_by_display_name("Admin")

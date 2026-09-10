@@ -629,11 +629,11 @@ Found a vulnerability? Report it privately via [GitHub private vulnerability rep
 
 Deploy configs: [`deploy/`](deploy/) · Guide: [docs/deployment/reverse-proxy.md](docs/deployment/reverse-proxy.md)
 
-### Opt-in capabilities (all default **off**)
+### Opt-in capabilities (all default **off** except agent tools)
 
 | Variable | Enables |
 |----------|---------|
-| `SEISO_ALLOW_TOOLS=true` | Web search, artifact writes |
+| `SEISO_ALLOW_TOOLS=true` | Web search, artifact writes — **on by default** on the localhost binding; set `false` to disable |
 | `SEISO_ALLOW_CODE_EXEC=true` | Sandboxed `execute_code` tool |
 | `SEISO_ALLOW_COMPAT_TOOLS=true` | Tool calling on Compat API `/v1` (session JWT only; inference API key stays chat-only) |
 | `SEISO_ALLOW_PAY=1` | Opt-in sats marketplace sidecar (remote buyers; self-hosted stays free) |

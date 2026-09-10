@@ -19,6 +19,9 @@ concurrency:
     }}-${{ github.sha }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 env:
   UV_TORCH_BACKEND: cpu
   PIP_DISABLE_PIP_VERSION_CHECK: "1"
@@ -33,7 +36,7 @@ jobs:
     steps:
       # Prefer git path detection over dorny/paths-filter: the latter calls the
       # GitHub API and can fail with unicorn/5xx pages, skipping the whole matrix.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         if: github.event_name == 'pull_request'
         with:
           fetch-depth: 0
@@ -57,25 +60,17 @@ jobs:
           frontend=false
           while IFS= read -r path; do
             [ -z "$path" ] && continue
+            # Conservative by design: only a pure forge-ui diff skips the Python
+            # matrix. Python tests assert on non-Python inputs (data/ fixtures,
+            # lockfiles, forge-ui/src/lib/chatModel.ts), so a narrower allowlist
+            # green-lights those breakages. Editing this workflow re-verifies
+            # both sides.
             case "$path" in
-              seiso/*|forge/*|seiso_cli/*|tests/*|configs/*|scripts/*|docs/*|locks/*|pyproject.toml|Makefile|.secrets.baseline|.github/workflows/ci.yml)
-                python=true
-                ;;
-              requirements*.txt|*.md)
-                python=true
-                ;;
-            esac
-            # bash case '*' matches across '/', so '*.md' above already covers
-            # nested markdown; only nested requirements files need this pattern.
-            case "$path" in
-              */requirements*.txt)
-                python=true
-                ;;
+              forge-ui/*) frontend=true ;;
+              *) python=true ;;
             esac
             case "$path" in
-              forge-ui/*|.github/workflows/ci.yml)
-                frontend=true
-                ;;
+              .github/workflows/ci.yml) frontend=true ;;
             esac
           done <<< "$files"
           # Empty or unreadable diffs still run Python jobs so quality gate cannot soft-skip.
@@ -91,8 +86,8 @@ jobs:
     name: Dependency locks
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.10"
           enable-cache: true
@@ -120,8 +115,8 @@ jobs:
         # 3.10 is the primary target; 3.12 covers the recommended 3.11+ docs.
         python-version: ["3.10", "3.12"]
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: ${{ matrix.python-version }}
           enable-cache: true
@@ -143,8 +138,8 @@ jobs:
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.10"
           enable-cache: true
@@ -153,7 +148,7 @@ jobs:
             pyproject.toml
             requirements-dev.txt
             locks/python.lock
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: .mypy_cache
           key: mypy-${{ runner.os }}-py310-${{ hashFiles('pyproject.toml', 'scripts/mypy-baseline.txt') }}
@@ -170,8 +165,8 @@ jobs:
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.10"
           enable-cache: true
@@ -196,8 +191,8 @@ jobs:
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.10"
           enable-cache: true
@@ -219,8 +214,8 @@ jobs:
     if: needs.changes.outputs.python == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.10"
           enable-cache: true
@@ -240,8 +235,8 @@ jobs:
     if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v6
         with:
           node-version: "22"
           cache: npm
@@ -305,8 +300,8 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.10"
           enable-cache: true
@@ -325,8 +320,8 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'schedule'
     steps:
-      - uses: actions/checkout@v4
-      - uses: astral-sh/setup-uv@v5
+      - uses: actions/checkout@v5
+      - uses: astral-sh/setup-uv@v10
         with:
           python-version: "3.10"
           enable-cache: true
