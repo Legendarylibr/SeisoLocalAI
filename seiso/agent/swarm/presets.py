@@ -24,10 +24,21 @@ def enabled_roles(settings: AgentSettings) -> tuple[str, ...]:
     return tuple(out)
 
 
-def build_plan(goal: str, settings: AgentSettings, *, plan_id: str = "swarm") -> Plan:
+def build_plan(
+    goal: str,
+    settings: AgentSettings,
+    *,
+    plan_id: str = "swarm",
+    active_roles: tuple[str, ...] | None = None,
+) -> Plan:
+    """Turn AgentSettings + a goal into a run_harness Plan.
+
+    ``active_roles`` overrides the preset-derived role set — the escalating
+    swarm uses it to add subagents one rung at a time.
+    """
     text = (goal or "").strip() or "swarm"
     steps: list[Step] = []
-    roles = enabled_roles(settings)
+    roles = active_roles if active_roles is not None else enabled_roles(settings)
     if "planner" in roles:
         spec = settings.subagents["planner"]
         steps.append(

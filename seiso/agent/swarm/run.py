@@ -1,4 +1,10 @@
-"""Run a swarm Plan through the existing run_harness kernel."""
+"""Run a swarm Plan through the existing run_harness kernel.
+
+The swarm escalates sensibly: start with just the worker (no subagents),
+verify completion, and only add subagent roles one at a time when the
+verification demands more scrutiny. Each escalation re-runs the worker
+with continuation feedback from the failed verdicts.
+"""
 
 from __future__ import annotations
 
@@ -10,15 +16,19 @@ from uuid import uuid4
 from seiso.agent.adapters.types import LaunchResult, LaunchSpec
 from seiso.agent.harness import HarnessContext, HarnessResult, run_harness
 from seiso.agent.kernel import ComputeDecision
-from seiso.agent.swarm.presets import build_plan
+from seiso.agent.swarm.presets import build_plan, enabled_roles
 from seiso.agent.swarm.types import AgentSettings, SwarmResult
 from seiso.agent.swarm.verify import check_completion, check_correctness, maybe_judge
-from seiso.agent.tasks import Step
+from seiso.agent.tasks import Plan, Step
 from seiso.routing.types import RouteDecision
 
 WorkerFn = Callable[[LaunchSpec], LaunchResult]
 JudgeFn = Callable[[str, str, Mapping[str, Any]], str]
 PreflightFn = Callable[[str], bool]
+
+# Verifier roles added one at a time as verification demands more scrutiny.
+# Rung 0 = worker only (deterministic completion check, no LLM).
+_ESCALATION_ORDER: tuple[str, ...] = ("completion", "correctness")
 
 
 def _payload(step: Step) -> dict[str, Any]:
@@ -71,6 +81,57 @@ def _launch_spec(
     )
 
 
+def _escalation_ladder(settings: AgentSettings) -> tuple[str, ...]:
+    """Verifier roles enabled for this swarm, in escalation order."""
+    enabled = set(enabled_roles(settings))
+    return tuple(role for role in _ESCALATION_ORDER if role in enabled)
+
+
+def _with_continuation(plan: Plan, continuation: str) -> Plan:
+    """Append verifier feedback to the worker's goal for its next run."""
+    if not continuation:
+        return plan
+    steps: list[Step] = []
+    for step in plan.steps:
+        if step.id == "worker":
+            payload = dict(step.payload)
+            goal = str(payload.get("goal") or "")
+            payload["goal"] = f"{goal}\n\nVerifier feedback — continue and address:\n{continuation}"
+            step = Step(
+                id=step.id,
+                kind=step.kind,
+                action=step.action,
+                payload=payload,
+                required_context=step.required_context,
+                estimated_vram_mb=step.estimated_vram_mb,
+            )
+        steps.append(step)
+    return Plan(id=plan.id, goal=plan.goal, steps=tuple(steps), route_class=plan.route_class)
+
+
+def _build_feedback(verdicts: list[dict[str, Any]]) -> str:
+    """Concise continuation prompt from the failed verdicts of one rung."""
+    parts: list[str] = []
+    for verdict in verdicts:
+        if verdict.get("ok"):
+            continue
+        reason = str(verdict.get("reason") or "incomplete")
+        evidence: Mapping[str, Any] = {}
+        raw_evidence = verdict.get("evidence")
+        if isinstance(raw_evidence, Mapping):
+            evidence = raw_evidence
+        detail = ""
+        missing = evidence.get("missing")
+        if missing:
+            detail = f" missing: {', '.join(str(item) for item in missing)}"
+        elif evidence.get("tests_failed"):
+            detail = " tests failed"
+        elif evidence.get("compile_errors"):
+            detail = f" compile errors: {'; '.join(str(e) for e in evidence['compile_errors'][:2])}"
+        parts.append(f"- {reason}{detail}")
+    return "\n".join(parts)
+
+
 def run_swarm(
     goal: str,
     settings: AgentSettings,
@@ -87,13 +148,26 @@ def run_swarm(
     plan_id: str | None = None,
 ) -> SwarmResult:
     pid = plan_id or f"swarm-{uuid4().hex[:8]}"
-    plan = build_plan(goal, settings, plan_id=pid)
     root = workdir or Path.cwd()
     isolated = isolated_dir or (root / ".seiso-agent" / settings.harness)
     check = preflight or default_preflight
+
+    # Escalation ladder: verifier roles added one at a time as verification
+    # demands more scrutiny. Rung 0 = worker only (deterministic completion
+    # check, no LLM). Each escalation re-runs the worker with continuation
+    # feedback from the failed verdicts.
+    ladder = _escalation_ladder(settings)
+    max_rungs = len(ladder)
+    planner_enabled = "planner" in enabled_roles(settings)
+
     last_worker: dict[str, Any] = {}
     planner_draft = ""
+    continuation = ""
     verdicts: list[dict[str, Any]] = []
+    results: list[Any] = []
+    receipts: list[dict[str, Any]] = []
+    final_status = "done"
+    blocked_reason: str | None = None
 
     def exec_worker(
         step: Step, _decision: ComputeDecision, route: RouteDecision | None
@@ -140,6 +214,15 @@ def run_swarm(
         payload = _payload(step)
         if ctx.dry_run:
             return {"dry_run": True, "role": "planner"}
+        if planner_draft:
+            # Planner runs once; later escalation rungs reuse the cached draft.
+            return {
+                "ok": True,
+                "role": "planner",
+                "plan": plan.as_dict(),
+                "used_llm": False,
+                "cached": True,
+            }
         if not payload.get("allow_llm") or judge is None:
             return {"ok": True, "role": "planner", "plan": plan.as_dict(), "used_llm": False}
         if not check(str(payload.get("model_id") or "auto")):
@@ -241,13 +324,64 @@ def run_swarm(
         executors=executors,
         verify=verify,
     )
-    result: HarnessResult = run_harness(plan, harness_ctx)
+
+    for rung in range(max_rungs + 1):
+        rung_start = len(verdicts)
+        active_roles = (("planner",) if planner_enabled else ()) + ladder[:rung]
+        plan = build_plan(goal, settings, plan_id=pid, active_roles=active_roles)
+        if continuation:
+            plan = _with_continuation(plan, continuation)
+
+        result: HarnessResult = run_harness(plan, harness_ctx)
+        results.extend(result.results)
+        receipts.extend(result.receipts)
+
+        if result.status == "blocked":
+            final_status = "blocked"
+            blocked_reason = result.blocked_reason
+            break
+
+        exit_code = last_worker.get("exit_code")
+        if exit_code not in (None, 0):
+            # Hard worker failure — no escalation, report failed.
+            verdict = check_completion(last_worker, workdir=root)
+            verdicts.append(verdict.as_dict())
+            final_status = "failed"
+            blocked_reason = f"worker_exit:{exit_code}"
+            break
+
+        if rung == 0:
+            # Rung 0 has no verifier steps in the plan: run the deterministic
+            # completion check explicitly (no LLM).
+            verdict = check_completion(last_worker, workdir=root)
+            verdicts.append(verdict.as_dict())
+            if verdict.ok:
+                final_status = "done"
+                break
+        elif result.status == "done":
+            final_status = "done"
+            break
+
+        # Incomplete: escalate with continuation feedback, or report partial.
+        if rung < max_rungs:
+            continuation = _build_feedback(verdicts[rung_start:])
+        else:
+            final_status = "partial"
+            break
+
+    # Synthesizer (if enabled) wraps the final result — not an escalation gate.
+    if "synthesizer" in enabled_roles(settings) and final_status in {"done", "partial"}:
+        synth_plan = build_plan(goal, settings, plan_id=pid, active_roles=("synthesizer",))
+        synth_result = run_harness(synth_plan, harness_ctx)
+        results.extend(synth_result.results)
+        receipts.extend(synth_result.receipts)
+
     return SwarmResult(
-        status=result.status,
-        plan_id=result.plan_id,
+        status=final_status,
+        plan_id=pid,
         harness=settings.harness,
-        blocked_reason=result.blocked_reason,
-        results=result.results,
-        receipts=result.receipts,
+        blocked_reason=blocked_reason,
+        results=tuple(results),
+        receipts=tuple(receipts),
         verdicts=tuple(verdicts),
     )
