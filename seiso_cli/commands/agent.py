@@ -178,7 +178,7 @@ def agent_swarm(
         route_class=route_class,
     )
     # activate_subagents() already ran in AgentSettings.__post_init__ when on:
-    # one verifier (completion), no extra LLM.
+    # pair + completion/correctness, no extra LLM.
     plan = build_plan(goal, settings, plan_id="cli-swarm")
     inventory = (
         Candidate(

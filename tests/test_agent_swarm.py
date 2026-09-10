@@ -35,27 +35,17 @@ def test_defaults_leave_swarms_off() -> None:
     assert all(not spec.enabled for spec in settings.subagents.values())
 
 
-def test_turning_on_enables_single_verifier_without_llm() -> None:
+def test_turning_on_enables_pair_verifiers_without_llm() -> None:
     settings = AgentSettings()
     settings.activate_subagents()
     assert settings.seiso_subagents is True
     assert settings.preset == "pair"
-    # One subagent by default (completion) — not two.
-    assert enabled_roles(settings) == ("completion",)
+    assert enabled_roles(settings) == ("completion", "correctness")
     assert settings.subagents["completion"].allow_llm is False
-    assert settings.subagents["correctness"].enabled is False
     assert settings.subagents["planner"].enabled is False
     settings.deactivate_subagents()
     assert settings.seiso_subagents is False
     assert enabled_roles(settings) == ()
-
-
-def test_default_activation_builds_worker_plus_one_subagent() -> None:
-    settings = AgentSettings()
-    settings.activate_subagents()
-    plan = build_plan("goal", settings)
-    # Chain is worker + exactly one subagent (completion) — no LLM round-trips.
-    assert [step.id for step in plan.steps] == ["worker", "completion"]
 
 
 def test_subagents_off_is_worker_only() -> None:

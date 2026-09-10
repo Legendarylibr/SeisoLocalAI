@@ -9,7 +9,7 @@ use std::sync::Arc;
 use sysinfo::System;
 use uuid::Uuid;
 
-const DEFAULT_MAX_CONCURRENT_AGENTS: usize = 1;
+const DEFAULT_MAX_CONCURRENT_AGENTS: usize = 4;
 const STALL_TIMEOUT_SECS: u64 = 120;
 const MAX_AGENT_RUNTIME_SECS: u64 = 600;
 const MAX_STRING_LEN: usize = 64 * 1024;
@@ -22,9 +22,7 @@ const MIN_FREE_MEM_MB: u64 = 1024;
 const MAX_CPU_USAGE_PCT: f32 = 90.0;
 
 /// Max concurrent subagents across all runs. Configurable out of the box via
-/// `SEISO_MAX_CONCURRENT_AGENTS` (1..=32); defaults to 1 so a single local
-/// inference GPU is never contended — one subagent at a time keeps TTFT low
-/// and avoids decode stalls.
+/// `SEISO_MAX_CONCURRENT_AGENTS` (1..=32); defaults to 4.
 fn max_concurrent_agents() -> usize {
     std::env::var("SEISO_MAX_CONCURRENT_AGENTS")
         .ok()
@@ -738,30 +736,34 @@ mod tests {
     fn test_aggregate_results() {
         let (orchestrator, wt) = test_orchestrator();
         let run_id = orchestrator.create_swarm_run("test".to_string(), "pair".to_string());
-        // Register up to the configured cap so the test stays valid when the
-        // default cap changes (default is one subagent).
-        for i in 0..max_concurrent_agents() {
-            let agent_dir = wt.join(format!("wt{}", i));
-            fs::create_dir_all(&agent_dir).unwrap();
-            orchestrator
-                .register_subagent(
-                    &run_id,
-                    &format!("a{}", i),
-                    &format!("b{}", i),
-                    agent_dir.to_str().unwrap(),
-                    if i == 0 { "worker" } else { "completion" },
-                )
-                .unwrap();
-            orchestrator.update_subagent(
-                &run_id,
-                &format!("a{}", i),
-                "done",
-                "complete",
-                Some(if i == 0 { "worked" } else { "verified" }),
-                Some(0),
-                None,
-            );
-        }
+        let wt1 = wt.join("wt1");
+        let wt2 = wt.join("wt2");
+        fs::create_dir_all(&wt1).unwrap();
+        fs::create_dir_all(&wt2).unwrap();
+        orchestrator
+            .register_subagent(&run_id, "a1", "b1", wt1.to_str().unwrap(), "worker")
+            .unwrap();
+        orchestrator
+            .register_subagent(&run_id, "a2", "b2", wt2.to_str().unwrap(), "completion")
+            .unwrap();
+        orchestrator.update_subagent(
+            &run_id,
+            "a1",
+            "done",
+            "complete",
+            Some("worked"),
+            Some(0),
+            None,
+        );
+        orchestrator.update_subagent(
+            &run_id,
+            "a2",
+            "done",
+            "complete",
+            Some("verified"),
+            Some(0),
+            None,
+        );
         let summary = orchestrator.aggregate_results(&run_id);
         assert!(summary.is_some());
         assert!(summary.unwrap().contains("[OK] worker"));
