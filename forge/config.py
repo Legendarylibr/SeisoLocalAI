@@ -57,7 +57,10 @@ class ForgeSettings(BaseSettings):
     session_hours: int = Field(default=24, ge=1, le=168)
     debug: bool = False
     allow_compat_tools: bool = False
-    allow_tools: bool = False
+    # Local-first agent tools (web_search + write_artifact) are safe on a
+    # localhost binding and enabled out of the box. execute_code stays off —
+    # the AST policy is not a full OS sandbox.
+    allow_tools: bool = True
     allow_code_exec: bool = False
     inference_api_key: str = ""
     db_ephemeral: bool | None = None

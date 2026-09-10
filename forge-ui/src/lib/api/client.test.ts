@@ -38,4 +38,27 @@ describe("API client", () => {
       "Field required; Too short",
     );
   });
+
+  it("aborts a hung request after the per-call timeout", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      (_url: unknown, init?: RequestInit) =>
+        new Promise<Response>((_resolve, reject) => {
+          init?.signal?.addEventListener("abort", () =>
+            reject(new DOMException("Aborted", "AbortError")),
+          );
+        }),
+    );
+    const pending = request<{ ok: boolean }>("/inference/models", {
+      method: "GET",
+      timeoutMs: 50,
+    });
+    const err = await pending.then(
+      () => {
+        throw new Error("expected request to reject on timeout");
+      },
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(DOMException);
+    expect((err as DOMException).name).toBe("AbortError");
+  });
 });

@@ -28,7 +28,7 @@ pub struct SwarmSummary {
 
 #[derive(Serialize, Deserialize)]
 pub struct ResourceInfo {
-    pub free_memory_mb: u64,
+    pub available_memory_mb: u64,
     pub total_memory_mb: u64,
     pub spawn_capacity: usize,
     pub running_agents: usize,
@@ -172,16 +172,11 @@ pub fn can_spawn_agent(state: State<'_, Arc<Mutex<SwarmOrchestrator>>>) -> bool 
 #[tauri::command]
 pub fn get_resource_info(state: State<'_, Arc<Mutex<SwarmOrchestrator>>>) -> ResourceInfo {
     let orchestrator = state.lock();
-    let spawn_capacity = orchestrator.spawn_capacity();
-    let running_agents = orchestrator
-        .list_runs()
-        .iter()
-        .flat_map(|r| &r.subagents)
-        .filter(|a| a.status == "running")
-        .count();
+    let (available_memory_mb, total_memory_mb, spawn_capacity, running_agents) =
+        orchestrator.resource_info();
     ResourceInfo {
-        free_memory_mb: 0,
-        total_memory_mb: 0,
+        available_memory_mb,
+        total_memory_mb,
         spawn_capacity,
         running_agents,
     }

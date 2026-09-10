@@ -2,6 +2,41 @@ import { API, formatApiError, getCsrfToken, request } from "./client";
 
 const MAX_SSE_LOG_LINES = 2000;
 
+/**
+ * Time a fetch may take to return response headers before it is aborted.
+ * Guards the chat UI against a wedged backend leaving the stream "loading"
+ * forever. Once headers arrive the body stream is long-lived and unbounded.
+ */
+const SSE_CONNECT_TIMEOUT_MS = 30_000;
+
+/**
+ * fetch that aborts the caller's controller if response headers do not arrive
+ * within `timeoutMs`. Once headers arrive the body stream is long-lived and
+ * unbounded, so the timer is cleared before the stream is consumed.
+ */
+async function fetchWithConnectTimeout(
+  url: string,
+  init: RequestInit,
+  controller: AbortController,
+  timeoutMs: number,
+): Promise<Response> {
+  let timedOut = false;
+  const timer = window.setTimeout(() => {
+    timedOut = true;
+    controller.abort();
+  }, timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } catch (err) {
+    if (timedOut) {
+      throw new DOMException("Request timed out", "TimeoutError");
+    }
+    throw err;
+  } finally {
+    window.clearTimeout(timer);
+  }
+}
+
 function parseSSEBlock(block: string): { event: string; data: string } | null {
   let event = "message";
   const dataLines: string[] = [];
@@ -64,14 +99,19 @@ export function streamPostSSE(
 
     let res: Response;
     try {
-      res = await fetch(`${API}${path}`, {
-        method: "POST",
-        headers,
-        credentials: "include",
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
+      res = await fetchWithConnectTimeout(
+        `${API}${path}`,
+        {
+          method: "POST",
+          headers,
+          credentials: "include",
+          body: JSON.stringify(body),
+        },
+        controller,
+        SSE_CONNECT_TIMEOUT_MS,
+      );
     } catch (err) {
+      if (err instanceof DOMException && err.name === "TimeoutError") throw err;
       if (controller.signal.aborted) return;
       throw err;
     }
@@ -112,8 +152,17 @@ export function subscribeSSE(
   void (async () => {
     let res: Response;
     try {
-      res = await fetch(`${API}${path}`, { credentials: "include", signal: controller.signal });
+      res = await fetchWithConnectTimeout(
+        `${API}${path}`,
+        { credentials: "include" },
+        controller,
+        SSE_CONNECT_TIMEOUT_MS,
+      );
     } catch (err) {
+      if (err instanceof DOMException && err.name === "TimeoutError") {
+        onError?.(new Error("SSE connection timed out"));
+        return;
+      }
       if (!controller.signal.aborted) {
         onError?.(err instanceof Error ? err : new Error("SSE connection failed"));
       }
@@ -178,14 +227,19 @@ export function streamChat(
 
     let res: Response;
     try {
-      res = await fetch(`${API}/inference/chat`, {
-        method: "POST",
-        headers,
-        credentials: "include",
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
+      res = await fetchWithConnectTimeout(
+        `${API}/inference/chat`,
+        {
+          method: "POST",
+          headers,
+          credentials: "include",
+          body: JSON.stringify(body),
+        },
+        controller,
+        SSE_CONNECT_TIMEOUT_MS,
+      );
     } catch (err) {
+      if (err instanceof DOMException && err.name === "TimeoutError") throw err;
       if (controller.signal.aborted) return;
       throw err;
     }

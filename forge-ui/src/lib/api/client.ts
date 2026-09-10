@@ -10,6 +10,14 @@ export const API =
 
 const MUTATING = new Set(["POST", "PUT", "DELETE", "PATCH"]);
 
+/**
+ * Hard cap on a single non-streaming API call. Guards the chat UI against a
+ * wedged backend (slow HF sync, hung model unload) leaving it stuck in a
+ * loading state forever. Streaming endpoints use their own connection timeout
+ * and are not bounded here.
+ */
+const DEFAULT_REQUEST_TIMEOUT_MS = 60_000;
+
 /** Read CSRF double-submit cookie set by the server on login/register. */
 export function getCsrfToken(): string | null {
   const match = document.cookie.match(/(?:^|;\s*)seiso_csrf=([^;]*)/);
@@ -50,7 +58,10 @@ function formatApiError(detail: unknown, fallback = "Request failed"): string {
   return fallback;
 }
 
-export async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+/** RequestInit extended with an optional per-call timeout override. */
+export type ApiRequestInit = RequestInit & { timeoutMs?: number };
+
+export async function request<T>(path: string, init: ApiRequestInit = {}): Promise<T> {
   const method = (init.method || "GET").toUpperCase();
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -61,16 +72,29 @@ export async function request<T>(path: string, init: RequestInit = {}): Promise<
     if (csrf) headers["X-CSRF-Token"] = csrf;
   }
 
-  const res = await fetch(`${API}${path}`, { ...init, headers, credentials: "include" });
-  if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: res.statusText }));
-    const detail = formatApiError(err.detail, res.statusText || "Request failed");
-    if (res.status === 403 && /csrf/i.test(detail)) {
-      throw new Error("Session security token expired — sign out and sign in again, then retry.");
+  const controller = new AbortController();
+  const timeoutMs =
+    typeof init.timeoutMs === "number" ? init.timeoutMs : DEFAULT_REQUEST_TIMEOUT_MS;
+  const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const res = await fetch(`${API}${path}`, {
+      ...init,
+      headers,
+      credentials: "include",
+      signal: controller.signal,
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: res.statusText }));
+      const detail = formatApiError(err.detail, res.statusText || "Request failed");
+      if (res.status === 403 && /csrf/i.test(detail)) {
+        throw new Error("Session security token expired — sign out and sign in again, then retry.");
+      }
+      throw new Error(detail);
     }
-    throw new Error(detail);
+    return res.json() as Promise<T>;
+  } finally {
+    window.clearTimeout(timer);
   }
-  return res.json() as Promise<T>;
 }
 
 export { formatApiError };

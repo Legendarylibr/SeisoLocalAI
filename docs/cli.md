@@ -346,6 +346,8 @@ Prefer these over ad-hoc scripts; they call `decide_compute` and `run_harness`.
 
 `seiso agent swarm` stays **dry-run by default**. `--run` starts the selected harness as a headless worker. Seiso subagents (planner / completion / correctness / synthesizer) default **off**. Configure them via `seiso agent harnesses`.
 
+The Tauri desktop wrapper's swarm orchestrator caps concurrent subagents at 4 by default and refuses to spawn when system resources are low (available RAM < 1 GiB or CPU load ≥ 90%). Override the cap with `SEISO_MAX_CONCURRENT_AGENTS` (1–32).
+
 ## `seiso agent status` (Buzz-facing signed status)
 
 Generic agent milestones use the same **relay only with signing** policy as mesh:
