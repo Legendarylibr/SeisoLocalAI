@@ -12,7 +12,9 @@ use uuid::Uuid;
 const MAX_CONCURRENT_AGENTS: usize = 4;
 const STALL_TIMEOUT_SECS: u64 = 120;
 const MAX_AGENT_RUNTIME_SECS: u64 = 600;
-const MIN_VRAM_MB: u64 = 2048;
+const MAX_STRING_LEN: usize = 64 * 1024;
+const MAX_GOAL_LEN: usize = 4096;
+const MAX_PERSISTED_FILE_BYTES: u64 = 10 * 1024 * 1024;
 const WATCHDOG_INTERVAL_SECS: u64 = 15;
 
 // ── Shared state ────────────────────────────────────────────────────────────
@@ -76,6 +78,24 @@ impl SwarmOrchestrator {
         orchestrator
     }
 
+    /// Resolve a worktree path and require it to be a real directory contained
+    /// under the Seiso data directory (parent of the orchestrator's state dir).
+    /// Rejects missing paths, `..` escapes, and symlink escapes via
+    /// canonicalization. Returns `None` for anything outside the data root.
+    fn contained_worktree_path(&self, worktree_path: &str) -> Option<PathBuf> {
+        let root = self.state_dir.parent()?.canonicalize().ok()?;
+        let path = PathBuf::from(worktree_path);
+        if !path.is_absolute() {
+            return None;
+        }
+        let canonical = path.canonicalize().ok()?;
+        if canonical.starts_with(&root) {
+            Some(canonical)
+        } else {
+            None
+        }
+    }
+
     // ── Subagent awareness ───────────────────────────────────────────────
 
     pub fn agent_manifest(&self, swarm_run_id: &str, agent_id: &str) -> Option<AgentManifest> {
@@ -111,11 +131,16 @@ impl SwarmOrchestrator {
             if agent.status != "running" {
                 continue;
             }
+            // Re-validate the stored path before every write — never trust
+            // persisted or frontend-supplied paths for file writes.
+            let Some(safe) = self.contained_worktree_path(&agent.worktree_path) else {
+                continue;
+            };
             let manifest = self
                 .agent_manifest(run_id, &agent.id)
                 .unwrap_or_else(|| panic!("missing agent {} in run {}", agent.id, run_id));
             let json = serde_json::to_string_pretty(&manifest).unwrap_or_default();
-            let path = PathBuf::from(&agent.worktree_path).join(".seiso-peer-manifest.json");
+            let path = safe.join(".seiso-peer-manifest.json");
             if let Some(parent) = path.parent() {
                 fs::create_dir_all(parent).ok();
             }
@@ -156,6 +181,8 @@ impl SwarmOrchestrator {
     pub fn create_swarm_run(&self, goal: String, preset: String) -> String {
         let id = format!("swarm-{}", &Uuid::new_v4().to_string()[..8]);
         let now = Utc::now().to_rfc3339();
+        let goal: String = goal.chars().take(MAX_GOAL_LEN).collect();
+        let preset: String = preset.chars().take(MAX_GOAL_LEN).collect();
         let run = SwarmRun {
             id: id.clone(),
             goal,
@@ -183,17 +210,32 @@ impl SwarmOrchestrator {
         worktree_path: &str,
         role: &str,
     ) -> Result<(), String> {
+        // Validate the worktree path before storing it — it is later used for
+        // file writes. Must be a real directory under the Seiso data dir.
+        let safe = self
+            .contained_worktree_path(worktree_path)
+            .ok_or_else(|| {
+                "worktree_path must be an existing directory under the Seiso data directory".to_string()
+            })?;
         {
             let mut runs = self.runs.lock();
             let run = runs
                 .get_mut(run_id)
                 .ok_or_else(|| format!("run {} not found", run_id))?;
+            if run.subagents.len() >= MAX_CONCURRENT_AGENTS {
+                return Err(format!(
+                    "run {} already has {} subagents (max {})",
+                    run_id,
+                    run.subagents.len(),
+                    MAX_CONCURRENT_AGENTS
+                ));
+            }
             let now = Utc::now().to_rfc3339();
             run.subagents.push(SubagentState {
                 id: agent_id.to_string(),
-                branch: branch.to_string(),
-                worktree_path: worktree_path.to_string(),
-                role: role.to_string(),
+                branch: branch.chars().take(MAX_STRING_LEN).collect(),
+                worktree_path: safe.to_string_lossy().into_owned(),
+                role: role.chars().take(MAX_STRING_LEN).collect(),
                 status: "running".to_string(),
                 progress: "initializing".to_string(),
                 started_at: Some(now.clone()),
@@ -224,15 +266,15 @@ impl SwarmOrchestrator {
             if let Some(run) = runs.get_mut(run_id) {
                 let now = Utc::now().to_rfc3339();
                 if let Some(agent) = run.subagents.iter_mut().find(|a| a.id == agent_id) {
-                    agent.status = status.to_string();
-                    agent.progress = progress.to_string();
+                    agent.status = status.chars().take(MAX_STRING_LEN).collect();
+                    agent.progress = progress.chars().take(MAX_STRING_LEN).collect();
                     agent.last_activity = Some(now.clone());
                     agent.exit_code = exit_code;
                     if let Some(o) = output {
-                        agent.output_summary = Some(o.to_string());
+                        agent.output_summary = Some(o.chars().take(MAX_STRING_LEN).collect());
                     }
                     if let Some(e) = error {
-                        agent.error = Some(e.to_string());
+                        agent.error = Some(e.chars().take(MAX_STRING_LEN).collect());
                     }
                 }
                 run.updated_at = now;
@@ -307,30 +349,51 @@ impl SwarmOrchestrator {
                     if agent.status != "running" {
                         continue;
                     }
+                    let mut stall_reason: Option<String> = None;
                     if let Some(last) = &agent.last_activity {
                         if let Ok(dt) = DateTime::parse_from_rfc3339(last) {
                             let elapsed = (now - dt.with_timezone(&Utc)).num_seconds() as u64;
-                            if elapsed < STALL_TIMEOUT_SECS {
-                                continue;
+                            if elapsed >= STALL_TIMEOUT_SECS {
+                                stall_reason = Some("stalled: no activity".to_string());
                             }
-                            agent.status = "stalled".to_string();
-                            agent.progress = "stalled: no activity".to_string();
-                            let agent_id = agent.id.clone();
-                            let wt_path = agent.worktree_path.clone();
-                            let resume = format!(
-                                "You appear to be stalled. Last progress: {}. \
-                                 Please resume the task and finish it. \
-                                 If you need to re-read context, do so now. \
-                                 Do not repeat work already done.",
-                                agent.progress
-                            );
-                            let resume_path =
-                                PathBuf::from(&wt_path).join(".seiso-resume-prompt.txt");
+                        }
+                    }
+                    // Hard upper bound on runtime — an agent that keeps reporting
+                    // (heartbeat) but never finishes must not run forever.
+                    if stall_reason.is_none() {
+                        if let Some(started) = &agent.started_at {
+                            if let Ok(dt) = DateTime::parse_from_rfc3339(started) {
+                                let elapsed = (now - dt.with_timezone(&Utc)).num_seconds() as u64;
+                                if elapsed >= MAX_AGENT_RUNTIME_SECS {
+                                    stall_reason = Some(format!(
+                                        "stalled: exceeded max runtime of {}s",
+                                        MAX_AGENT_RUNTIME_SECS
+                                    ));
+                                }
+                            }
+                        }
+                    }
+                    if let Some(reason) = stall_reason {
+                        agent.status = "stalled".to_string();
+                        agent.progress = reason.clone();
+                        let agent_id = agent.id.clone();
+                        let resume = format!(
+                            "You appear to be stalled. Last progress: {}. \
+                             Please resume the task and finish it. \
+                             If you need to re-read context, do so now. \
+                             Do not repeat work already done.",
+                            agent.progress
+                        );
+                        // Re-validate the path before writing the resume prompt.
+                        if let Some(safe) = self.contained_worktree_path(&agent.worktree_path) {
+                            let resume_path = safe.join(".seiso-resume-prompt.txt");
                             fs::write(&resume_path, &resume).ok();
                             stalled.push((
                                 agent_id,
                                 format!("resume prompt written to {}", resume_path.display()),
                             ));
+                        } else {
+                            stalled.push((agent_id, format!("stalled: {}", reason)));
                         }
                     }
                 }
@@ -421,19 +484,42 @@ impl SwarmOrchestrator {
         let path = self.state_dir.join("swarm_runs.json");
         let runs = self.runs.lock();
         let json = serde_json::to_string_pretty(&*runs).unwrap_or_default();
-        fs::write(&path, &json).ok();
+        // Write to a temp file then rename so a crash mid-write cannot corrupt
+        // the persisted state (atomic on POSIX).
+        let tmp = self.state_dir.join("swarm_runs.json.tmp");
+        if fs::write(&tmp, &json).is_ok() {
+            let _ = fs::rename(&tmp, &path);
+        }
     }
 
     fn restore_persisted(&self) {
         let path = self.state_dir.join("swarm_runs.json");
-        if let Ok(data) = fs::read_to_string(&path) {
-            if let Ok(runs) = serde_json::from_str::<HashMap<String, SwarmRun>>(&data) {
-                let mut current = self.runs.lock();
-                for (id, run) in runs {
-                    if run.status == "running" {
-                        current.insert(id, run);
-                    }
-                }
+        let Ok(meta) = fs::metadata(&path) else {
+            return;
+        };
+        // Refuse to parse an oversized/crafted file.
+        if meta.len() > MAX_PERSISTED_FILE_BYTES {
+            return;
+        }
+        let Ok(data) = fs::read_to_string(&path) else {
+            return;
+        };
+        let Ok(runs) = serde_json::from_str::<HashMap<String, SwarmRun>>(&data) else {
+            return;
+        };
+        let mut current = self.runs.lock();
+        for (id, run) in runs {
+            if run.status != "running" {
+                continue;
+            }
+            // Do not re-activate runs whose worktree paths are not contained
+            // under the data dir — they would feed watchdog file writes.
+            let paths_ok = run
+                .subagents
+                .iter()
+                .all(|a| self.contained_worktree_path(&a.worktree_path).is_some());
+            if paths_ok && run.subagents.len() <= MAX_CONCURRENT_AGENTS {
+                current.insert(id, run);
             }
         }
     }
@@ -511,18 +597,26 @@ can decide whether to resume the agent or proceed with partial results.
 mod tests {
     use super::*;
 
+    fn test_orchestrator() -> (SwarmOrchestrator, PathBuf) {
+        let dir = std::env::temp_dir().join(format!("seiso-swarm-test-{}", Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+        let wt = dir.join("worktrees");
+        fs::create_dir_all(&wt).unwrap();
+        (SwarmOrchestrator::new(dir.join("desktop")), wt)
+    }
+
     #[test]
     fn test_can_spawn_under_limit() {
-        let orchestrator = SwarmOrchestrator::new(PathBuf::from("/tmp/.seiso-test"));
+        let (orchestrator, _) = test_orchestrator();
         assert!(orchestrator.can_spawn());
     }
 
     #[test]
     fn test_create_run_and_register_subagent() {
-        let orchestrator = SwarmOrchestrator::new(PathBuf::from("/tmp/.seiso-test"));
+        let (orchestrator, wt) = test_orchestrator();
         let run_id = orchestrator.create_swarm_run("test goal".to_string(), "pair".to_string());
         orchestrator
-            .register_subagent(&run_id, "agent-1", "feat/test", "/tmp/wt", "worker")
+            .register_subagent(&run_id, "agent-1", "feat/test", wt.to_str().unwrap(), "worker")
             .unwrap();
         let run = orchestrator.get_run(&run_id).unwrap();
         assert_eq!(run.subagents.len(), 1);
@@ -530,14 +624,66 @@ mod tests {
     }
 
     #[test]
-    fn test_aggregate_results() {
-        let orchestrator = SwarmOrchestrator::new(PathBuf::from("/tmp/.seiso-test"));
+    fn test_register_rejects_path_outside_data_dir() {
+        let (orchestrator, _) = test_orchestrator();
         let run_id = orchestrator.create_swarm_run("test".to_string(), "pair".to_string());
+        // /etc exists and is absolute but is not under the data dir.
+        let err = orchestrator
+            .register_subagent(&run_id, "a1", "b1", "/etc", "worker")
+            .unwrap_err();
+        assert!(err.contains("worktree_path"));
+    }
+
+    #[test]
+    fn test_register_rejects_missing_path() {
+        let (orchestrator, _) = test_orchestrator();
+        let run_id = orchestrator.create_swarm_run("test".to_string(), "pair".to_string());
+        let missing = std::env::temp_dir()
+            .join(format!("seiso-missing-{}", Uuid::new_v4()))
+            .to_string_lossy()
+            .into_owned();
+        assert!(orchestrator
+            .register_subagent(&run_id, "a1", "b1", &missing, "worker")
+            .is_err());
+    }
+
+    #[test]
+    fn test_register_enforces_agent_cap() {
+        let (orchestrator, wt) = test_orchestrator();
+        let run_id = orchestrator.create_swarm_run("test".to_string(), "pair".to_string());
+        for i in 0..MAX_CONCURRENT_AGENTS {
+            let agent_dir = wt.join(format!("agent-{}", i));
+            fs::create_dir_all(&agent_dir).unwrap();
+            orchestrator
+                .register_subagent(
+                    &run_id,
+                    &format!("a{}", i),
+                    "b",
+                    agent_dir.to_str().unwrap(),
+                    "worker",
+                )
+                .unwrap();
+        }
+        let extra_dir = wt.join("extra");
+        fs::create_dir_all(&extra_dir).unwrap();
+        assert!(orchestrator
+            .register_subagent(&run_id, "overflow", "b", extra_dir.to_str().unwrap(), "worker")
+            .is_err());
+    }
+
+    #[test]
+    fn test_aggregate_results() {
+        let (orchestrator, wt) = test_orchestrator();
+        let run_id = orchestrator.create_swarm_run("test".to_string(), "pair".to_string());
+        let wt1 = wt.join("wt1");
+        let wt2 = wt.join("wt2");
+        fs::create_dir_all(&wt1).unwrap();
+        fs::create_dir_all(&wt2).unwrap();
         orchestrator
-            .register_subagent(&run_id, "a1", "b1", "/tmp/wt1", "worker")
+            .register_subagent(&run_id, "a1", "b1", wt1.to_str().unwrap(), "worker")
             .unwrap();
         orchestrator
-            .register_subagent(&run_id, "a2", "b2", "/tmp/wt2", "completion")
+            .register_subagent(&run_id, "a2", "b2", wt2.to_str().unwrap(), "completion")
             .unwrap();
         orchestrator.update_subagent(
             &run_id,

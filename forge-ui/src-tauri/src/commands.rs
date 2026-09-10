@@ -1,4 +1,5 @@
 use crate::swarm::{AgentManifest, SwarmOrchestrator, SwarmRun};
+use crate::SidecarHandle;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -53,12 +54,17 @@ impl From<SwarmRun> for SwarmSummary {
 // ── Backend status ──────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn get_backend_status() -> BackendStatus {
+pub fn get_backend_status(state: State<'_, SidecarHandle>) -> BackendStatus {
+    let (running, pid) = state.backend_status();
+    let port = std::env::var("SEISO_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(8765);
     BackendStatus {
-        running: true,
-        port: 8765,
-        pid: None,
-        ready: true,
+        running,
+        port,
+        pid,
+        ready: running,
     }
 }
 
