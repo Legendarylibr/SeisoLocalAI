@@ -142,7 +142,7 @@ SEISO_INSTALL_DIR="$HOME/code/Seiso" curl -fsSL https://raw.githubusercontent.co
 
 **Symptom:** `Seiso CLI missing at …/Seiso/.venv/bin/seiso` or `seiso: command not found` right after install on native Linux.
 
-**Cause:** Usually the pip install did not finish (install TUI reported success too early, or heavy extras like PyTorch / llama.cpp failed). On failure the installer falls back to core `[forge]` first so the CLI exists, then retries optional training/inference extras.
+**Cause:** Usually the pip install did not finish (the installer reported success too early, or heavy extras like PyTorch / llama.cpp failed). On failure the installer falls back to core `[forge]` first so the CLI exists, then retries optional training/inference extras.
 
 **Related — `start` reinstalls every time on native Linux NVIDIA even though Forge already works:**
 older installers probed `import llama_cpp` without setting the venv CUDA library path (`libcudart.so.12`), which falsely failed and re-ran the full install (often hanging on `bun install`). Current `start` uses a CUDA-aware import probe, skips UI rebuild when `forge-ui/dist` exists, prefers `npm ci` on Linux when Node 18+ is present, times out hung Bun installs (and skips the useless unfrozen retry on timeout), and if Forge is already healthy on the target port it opens the browser instead of starting a second instance.
