@@ -30,8 +30,8 @@ function postureItems(s: SecurityPosture): Item[] {
       label: "Agent tools",
       ok: !s.allow_tools,
       detail: s.allow_tools
-        ? "Web search and artifacts are enabled"
-        : "Disabled by default (SEISO_ALLOW_TOOLS=false)",
+        ? "Web search and artifacts enabled (safe on localhost binding)"
+        : "Disabled (SEISO_ALLOW_TOOLS=false)",
       warn: s.allow_tools,
     },
     {

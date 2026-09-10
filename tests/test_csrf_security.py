@@ -232,6 +232,8 @@ async def test_cookie_session_auth(app):
 async def test_login_rate_limit(monkeypatch):
     monkeypatch.setenv("SEISO_ALLOW_REMOTE", "true")
     monkeypatch.setenv("SEISO_REMOTE_ACK", "1")
+    # Tools are on by default; remote+tools requires the dangerous ack.
+    monkeypatch.setenv("SEISO_REMOTE_DANGEROUS_ACK", "1")
     monkeypatch.setenv("SEISO_RATE_LIMIT", "1000")
     clear_dependency_caches()
     app = create_app()
@@ -264,6 +266,8 @@ async def test_login_rate_limit(monkeypatch):
 async def test_global_rate_limit(monkeypatch):
     monkeypatch.setenv("SEISO_ALLOW_REMOTE", "true")
     monkeypatch.setenv("SEISO_REMOTE_ACK", "1")
+    # Tools are on by default; remote+tools requires the dangerous ack.
+    monkeypatch.setenv("SEISO_REMOTE_DANGEROUS_ACK", "1")
     monkeypatch.setenv("SEISO_RATE_LIMIT", "3")
     clear_dependency_caches()
     app = create_app()
@@ -304,7 +308,7 @@ async def test_settings_includes_security_posture(app):
         sec = res.json()["security"]
         assert sec["bind_localhost"] is True
         assert sec["db_encrypted"] is True
-        assert sec["allow_tools"] is False
+        assert sec["allow_tools"] is True
         assert sec["rate_limit_enabled"] is True
 
 

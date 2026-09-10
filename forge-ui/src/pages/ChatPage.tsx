@@ -119,7 +119,7 @@ export function ChatPage() {
   const [error, setError] = useState<string | null>(null);
   const [threadSearch, setThreadSearch] = useState("");
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [useTools, setUseTools] = useState(false);
+  const [useTools, setUseTools] = useState(true);
   const [allowCodeExec, setAllowCodeExec] = useState(false);
   const [knowledgeBases, setKnowledgeBases] = useState<Array<{ id: string; chunk_count: number; has_index: boolean }>>([]);
   const [knowledgeBaseId, setKnowledgeBaseId] = useState("");
@@ -438,6 +438,12 @@ export function ChatPage() {
 
   const toolsAvailable = security?.allow_tools ?? false;
   const codeExecAvailable = security?.allow_code_exec ?? false;
+
+  // Tools default on for agentic chat; fall back to off when the server
+  // disables them (e.g. SEISO_ALLOW_TOOLS=false).
+  useEffect(() => {
+    if (!toolsAvailable && useTools) setUseTools(false);
+  }, [toolsAvailable, useTools]);
 
   const loadMessages = useCallback(async (threadId: string) => {
     const msgs = await api.getMessages(threadId);
@@ -905,7 +911,11 @@ export function ChatPage() {
       streamDisplayRef.current?.reset();
       streamDisplayRef.current = null;
       if (streamingElRef.current) {
-        streamingElRef.current.textContent = "";
+        const el = streamingElRef.current;
+        // Drop the live-caret / continue-cue classes so the blinking cursor
+        // cannot linger on an emptied bubble before it unmounts.
+        el.classList.remove("chat-streaming-live", "chat-streaming-continue");
+        el.textContent = "";
       }
       if (!streamFailed && assistantText.trim()) {
         commitAssistantMessage(assistantText, replyTruncated);

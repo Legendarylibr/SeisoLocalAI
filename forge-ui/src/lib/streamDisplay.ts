@@ -22,7 +22,7 @@ export type StreamDisplaySink = {
 };
 
 /** Soft cap of characters revealed per animation frame. */
-const BASE_CHARS_PER_FRAME = 40;
+const BASE_CHARS_PER_FRAME = 96;
 /** When lag exceeds this, catch up faster so we never trail a whole paragraph. */
 const MAX_SOFT_LAG = 480;
 
@@ -66,9 +66,9 @@ export function createStreamDisplaySink(
     if (lag > MAX_SOFT_LAG) {
       step = lag - Math.floor(MAX_SOFT_LAG / 2);
     } else if (lag > 240) {
-      step = 96;
+      step = 192;
     } else if (lag > 100) {
-      step = 64;
+      step = 128;
     }
 
     let nextLen = Math.min(serverText.length, displayed.length + step);

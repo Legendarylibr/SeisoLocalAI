@@ -9,13 +9,27 @@ use std::sync::Arc;
 use sysinfo::System;
 use uuid::Uuid;
 
-const MAX_CONCURRENT_AGENTS: usize = 4;
+const DEFAULT_MAX_CONCURRENT_AGENTS: usize = 4;
 const STALL_TIMEOUT_SECS: u64 = 120;
 const MAX_AGENT_RUNTIME_SECS: u64 = 600;
 const MAX_STRING_LEN: usize = 64 * 1024;
 const MAX_GOAL_LEN: usize = 4096;
 const MAX_PERSISTED_FILE_BYTES: u64 = 10 * 1024 * 1024;
 const WATCHDOG_INTERVAL_SECS: u64 = 15;
+/// Minimum free RAM (MiB) required before a new subagent may spawn.
+const MIN_FREE_MEM_MB: u64 = 1024;
+/// CPU usage above this percent blocks new subagent spawns (system is busy).
+const MAX_CPU_USAGE_PCT: f32 = 90.0;
+
+/// Max concurrent subagents across all runs. Configurable out of the box via
+/// `SEISO_MAX_CONCURRENT_AGENTS` (1..=32); defaults to 4.
+fn max_concurrent_agents() -> usize {
+    std::env::var("SEISO_MAX_CONCURRENT_AGENTS")
+        .ok()
+        .and_then(|v| v.trim().parse::<usize>().ok())
+        .filter(|n| (1..=32).contains(n))
+        .unwrap_or(DEFAULT_MAX_CONCURRENT_AGENTS)
+}
 
 // ── Shared state ────────────────────────────────────────────────────────────
 
@@ -151,29 +165,57 @@ impl SwarmOrchestrator {
     // ── Resource limits ──────────────────────────────────────────────────
 
     pub fn can_spawn(&self) -> bool {
-        let runs = self.runs.lock();
-        let running_count = runs
-            .values()
-            .flat_map(|r| &r.subagents)
-            .filter(|a| a.status == "running")
-            .count();
-        if running_count >= MAX_CONCURRENT_AGENTS {
+        let running_count = {
+            let runs = self.runs.lock();
+            runs.values()
+                .flat_map(|r| &r.subagents)
+                .filter(|a| a.status == "running")
+                .count()
+        };
+        if running_count >= max_concurrent_agents() {
             return false;
         }
         let mut sys = self.system.lock();
         sys.refresh_memory();
-        let free_mb = sys.free_memory() / (1024 * 1024);
-        free_mb >= 1024
+        // available_memory includes reclaimable cache — the right metric for
+        // "can we spawn another process" (macOS "free" alone is misleading).
+        let available_mb = sys.available_memory() / (1024 * 1024);
+        if available_mb < MIN_FREE_MEM_MB {
+            return false;
+        }
+        // Do not pile subagents onto an already busy machine. CPU data is
+        // accumulated by the periodic watchdog, so the first call returns 0
+        // (no baseline yet) and is treated as available.
+        sys.refresh_cpu_usage();
+        let cpu_usage = sys.global_cpu_usage();
+        cpu_usage < MAX_CPU_USAGE_PCT
     }
 
     pub fn spawn_capacity(&self) -> usize {
-        let runs = self.runs.lock();
-        let running_count = runs
-            .values()
-            .flat_map(|r| &r.subagents)
-            .filter(|a| a.status == "running")
-            .count();
-        MAX_CONCURRENT_AGENTS.saturating_sub(running_count)
+        let running_count = {
+            let runs = self.runs.lock();
+            runs.values()
+                .flat_map(|r| &r.subagents)
+                .filter(|a| a.status == "running")
+                .count()
+        };
+        max_concurrent_agents().saturating_sub(running_count)
+    }
+
+    /// Live system memory + agent load for the UI (subagent resource awareness).
+    pub fn resource_info(&self) -> (u64, u64, usize, usize) {
+        let mut sys = self.system.lock();
+        sys.refresh_memory();
+        let available_mb = sys.available_memory() / (1024 * 1024);
+        let total_mb = sys.total_memory() / (1024 * 1024);
+        let running_agents = {
+            let runs = self.runs.lock();
+            runs.values()
+                .flat_map(|r| &r.subagents)
+                .filter(|a| a.status == "running")
+                .count()
+        };
+        (available_mb, total_mb, self.spawn_capacity(), running_agents)
     }
 
     // ── Lifecycle ────────────────────────────────────────────────────────
@@ -217,17 +259,26 @@ impl SwarmOrchestrator {
             .ok_or_else(|| {
                 "worktree_path must be an existing directory under the Seiso data directory".to_string()
             })?;
+        // Never spawn a subagent when the system is already saturated (agent
+        // cap, low free RAM, or high CPU load). Prevents runaway spawning.
+        if !self.can_spawn() {
+            return Err(
+                "cannot spawn subagent: agent cap reached or system resources low \
+                 (free RAM or CPU load). Wait for a running subagent to finish."
+                    .to_string(),
+            );
+        }
         {
             let mut runs = self.runs.lock();
             let run = runs
                 .get_mut(run_id)
                 .ok_or_else(|| format!("run {} not found", run_id))?;
-            if run.subagents.len() >= MAX_CONCURRENT_AGENTS {
+            if run.subagents.len() >= max_concurrent_agents() {
                 return Err(format!(
                     "run {} already has {} subagents (max {})",
                     run_id,
                     run.subagents.len(),
-                    MAX_CONCURRENT_AGENTS
+                    max_concurrent_agents()
                 ));
             }
             let now = Utc::now().to_rfc3339();
@@ -518,7 +569,7 @@ impl SwarmOrchestrator {
                 .subagents
                 .iter()
                 .all(|a| self.contained_worktree_path(&a.worktree_path).is_some());
-            if paths_ok && run.subagents.len() <= MAX_CONCURRENT_AGENTS {
+            if paths_ok && run.subagents.len() <= max_concurrent_agents() {
                 current.insert(id, run);
             }
         }
@@ -612,6 +663,16 @@ mod tests {
     }
 
     #[test]
+    fn test_resource_info_reports_live_memory() {
+        let (orchestrator, _) = test_orchestrator();
+        let (available_mb, total_mb, capacity, running) = orchestrator.resource_info();
+        assert!(total_mb > 0);
+        assert!(available_mb <= total_mb);
+        assert_eq!(capacity, max_concurrent_agents());
+        assert_eq!(running, 0);
+    }
+
+    #[test]
     fn test_create_run_and_register_subagent() {
         let (orchestrator, wt) = test_orchestrator();
         let run_id = orchestrator.create_swarm_run("test goal".to_string(), "pair".to_string());
@@ -651,7 +712,7 @@ mod tests {
     fn test_register_enforces_agent_cap() {
         let (orchestrator, wt) = test_orchestrator();
         let run_id = orchestrator.create_swarm_run("test".to_string(), "pair".to_string());
-        for i in 0..MAX_CONCURRENT_AGENTS {
+        for i in 0..max_concurrent_agents() {
             let agent_dir = wt.join(format!("agent-{}", i));
             fs::create_dir_all(&agent_dir).unwrap();
             orchestrator
